@@ -1,5 +1,6 @@
 mod assets;
 mod defs;
+mod rimworld_paths;
 mod renderer;
 
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ use winit::window::{Window, WindowId};
 
 use crate::assets::resolve_sprite;
 use crate::defs::{load_thing_defs, ThingDef};
+use crate::rimworld_paths::resolve_data_dir;
 use crate::renderer::{Renderer, SpriteParams};
 
 #[derive(Parser, Debug)]
@@ -56,8 +58,12 @@ fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
-    let defs = load_thing_defs(&cli.rimworld_data)
-        .with_context(|| format!("loading defs from {}", cli.rimworld_data.display()))?;
+    let data_dir = resolve_data_dir(&cli.rimworld_data)
+        .with_context(|| format!("resolving rimworld data dir from {}", cli.rimworld_data.display()))?;
+    info!("using RimWorld data dir: {}", data_dir.display());
+
+    let defs = load_thing_defs(&data_dir)
+        .with_context(|| format!("loading defs from {}", data_dir.display()))?;
     info!("loaded {} thing defs with graphicData", defs.len());
 
     let thing = defs
@@ -66,7 +72,7 @@ fn main() -> Result<()> {
         .with_context(|| format!("thingdef '{}' not found", cli.thingdef))?;
     info!("selected def: {}", thing.def_name);
 
-    let sprite_asset = resolve_sprite(&cli.rimworld_data, &thing).with_context(|| {
+    let sprite_asset = resolve_sprite(&data_dir, &thing).with_context(|| {
         format!(
             "resolving texture for def '{}' path '{}'",
             thing.def_name, thing.graphic_data.tex_path

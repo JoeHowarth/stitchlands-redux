@@ -15,7 +15,11 @@ pub struct SpriteAsset {
 pub fn resolve_sprite(core_data_dir: &Path, thing_def: &ThingDef) -> Result<SpriteAsset> {
     let textures_dir = core_data_dir.join("Core").join("Textures");
     if !textures_dir.exists() {
-        anyhow::bail!("Core textures dir not found: {}", textures_dir.display());
+        return Ok(SpriteAsset {
+            image: checkerboard_image(64, 64),
+            source_path: None,
+            used_fallback: true,
+        });
     }
 
     let tex_path = thing_def.graphic_data.tex_path.as_str();

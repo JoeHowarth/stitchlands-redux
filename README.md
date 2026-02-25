@@ -8,6 +8,12 @@ v0 prototype for loading a RimWorld core `ThingDef` and rendering a sprite with 
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld/Data" --thingdef Steel
 ```
 
+On macOS Steam installs, you can also pass install root and it auto-resolves:
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel
+```
+
 Example with overrides:
 
 ```bash
