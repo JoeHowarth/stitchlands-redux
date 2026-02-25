@@ -20,6 +20,12 @@ Example with overrides:
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld/Data" --thingdef ChunkSlagSteel --cell-x 2 --cell-z 1 --scale 1.25 --tint 1,0.8,0.8,1
 ```
 
+Show multiple defs side-by-side:
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --extra-thingdef ChunkSlagSteel --extra-thingdef Plasteel
+```
+
 ## Controls
 
 - Pan: `WASD` or arrow keys

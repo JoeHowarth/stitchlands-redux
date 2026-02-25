@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use glam::{Vec2, Vec3};
+use glam::Vec3;
 use log::{info, warn};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -18,7 +18,7 @@ use winit::window::{Window, WindowId};
 use crate::assets::resolve_sprite;
 use crate::defs::{load_thing_defs, ThingDef};
 use crate::rimworld_paths::resolve_data_dir;
-use crate::renderer::{Renderer, SpriteParams};
+use crate::renderer::{Renderer, SpriteInput, SpriteParams};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -28,6 +28,9 @@ struct Cli {
 
     #[arg(long)]
     thingdef: Option<String>,
+
+    #[arg(long)]
+    extra_thingdef: Vec<String>,
 
     #[arg(long, default_value_t = false)]
     list_defs: bool,
@@ -99,58 +102,103 @@ fn main() -> Result<()> {
         .with_context(|| make_missing_def_message(thingdef, &defs))?;
     info!("selected def: {}", thing.def_name);
 
-    let sprite_asset = resolve_sprite(&data_dir, &thing, cli.texture_root.as_deref()).with_context(|| {
-        format!(
-            "resolving texture for def '{}' path '{}'",
-            thing.def_name, thing.graphic_data.tex_path
-        )
-    })?;
+    let mut selected_defs = vec![thing];
+    for extra_name in &cli.extra_thingdef {
+        let extra = defs
+            .get(extra_name)
+            .cloned()
+            .with_context(|| make_missing_def_message(extra_name, &defs))?;
+        info!("selected extra def: {}", extra.def_name);
+        selected_defs.push(extra);
+    }
 
-    if sprite_asset.used_fallback {
-        warn!(
-            "texture missing for '{}' ({}) - using checker fallback",
-            thing.def_name, thing.graphic_data.tex_path
-        );
-        for attempted in sprite_asset.attempted_paths.iter().take(6) {
-            info!("attempted: {}", attempted.display());
+    let mut render_sprites = Vec::with_capacity(selected_defs.len());
+    for (index, selected) in selected_defs.iter().enumerate() {
+        let sprite_asset =
+            resolve_sprite(&data_dir, selected, cli.texture_root.as_deref()).with_context(|| {
+                format!(
+                    "resolving texture for def '{}' path '{}'",
+                    selected.def_name, selected.graphic_data.tex_path
+                )
+            })?;
+
+        if sprite_asset.used_fallback {
+            warn!(
+                "texture missing for '{}' ({}) - using checker fallback",
+                selected.def_name, selected.graphic_data.tex_path
+            );
+            for attempted in sprite_asset.attempted_paths.iter().take(6) {
+                info!("attempted: {}", attempted.display());
+            }
         }
-    }
-    if let Some(path) = &sprite_asset.source_path {
-        info!("resolved texture: {}", path.display());
-    }
+        if let Some(path) = &sprite_asset.source_path {
+            info!("resolved texture: {}", path.display());
+        }
 
-    if let Some(export_path) = &cli.export_resolved {
-        sprite_asset
-            .image
-            .save(export_path)
-            .with_context(|| format!("saving resolved sprite to {}", export_path.display()))?;
-        info!("wrote resolved sprite image: {}", export_path.display());
+        if let Some(export_path) = &cli.export_resolved {
+            let with_suffix = if selected_defs.len() == 1 {
+                export_path.clone()
+            } else {
+                let stem = export_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("resolved");
+                let ext = export_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("png");
+                let filename = format!("{stem}_{}_{}.{}", index, selected.def_name, ext);
+                export_path.with_file_name(filename)
+            };
+            sprite_asset
+                .image
+                .save(&with_suffix)
+                .with_context(|| format!("saving resolved sprite to {}", with_suffix.display()))?;
+            info!("wrote resolved sprite image: {}", with_suffix.display());
+        }
+
+        let size = selected.graphic_data.draw_size * cli.scale;
+        let draw_offset = selected.graphic_data.draw_offset;
+        let world_pos = Vec3::new(
+            cli.cell_x + index as f32 * 1.75 + 0.5 + draw_offset.x,
+            cli.cell_z + 0.5 + draw_offset.z,
+            draw_offset.y,
+        );
+        let tint = [
+            cli.tint[0] * selected.graphic_data.color.r,
+            cli.tint[1] * selected.graphic_data.color.g,
+            cli.tint[2] * selected.graphic_data.color.b,
+            cli.tint[3] * selected.graphic_data.color.a,
+        ];
+
+        info!(
+            "sprite params [{}] {} -> size=({:.2}, {:.2}) offset=({:.2}, {:.2}, {:.2})",
+            index,
+            selected.def_name,
+            size.x,
+            size.y,
+            draw_offset.x,
+            draw_offset.y,
+            draw_offset.z
+        );
+
+        render_sprites.push(RenderSprite {
+            def_name: selected.def_name.clone(),
+            image: sprite_asset.image,
+            params: SpriteParams {
+                world_pos,
+                size,
+                tint,
+            },
+            used_fallback: sprite_asset.used_fallback,
+        });
     }
 
     if cli.no_window {
         return Ok(());
     }
 
-    let size = thing.graphic_data.draw_size * cli.scale;
-    let draw_offset = thing.graphic_data.draw_offset;
-    let world_pos = Vec3::new(
-        cli.cell_x + 0.5 + draw_offset.x,
-        cli.cell_z + 0.5 + draw_offset.z,
-        draw_offset.y,
-    );
-    let tint = [
-        cli.tint[0] * thing.graphic_data.color.r,
-        cli.tint[1] * thing.graphic_data.color.g,
-        cli.tint[2] * thing.graphic_data.color.b,
-        cli.tint[3] * thing.graphic_data.color.a,
-    ];
-
-    info!(
-        "sprite params -> size=({:.2}, {:.2}) offset=({:.2}, {:.2}, {:.2})",
-        size.x, size.y, draw_offset.x, draw_offset.y, draw_offset.z
-    );
-
-    let mut app = App::new(thing, sprite_asset.image, world_pos, size, tint, sprite_asset.used_fallback);
+    let mut app = App::new(render_sprites);
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -223,32 +271,22 @@ fn make_missing_def_message(
 }
 
 struct App {
-    thing: ThingDef,
-    image: image::RgbaImage,
-    sprite_world_pos: Vec3,
-    sprite_size: Vec2,
-    tint: [f32; 4],
-    used_fallback: bool,
+    sprites: Vec<RenderSprite>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
 }
 
+struct RenderSprite {
+    def_name: String,
+    image: image::RgbaImage,
+    params: SpriteParams,
+    used_fallback: bool,
+}
+
 impl App {
-    fn new(
-        thing: ThingDef,
-        image: image::RgbaImage,
-        sprite_world_pos: Vec3,
-        sprite_size: Vec2,
-        tint: [f32; 4],
-        used_fallback: bool,
-    ) -> Self {
+    fn new(sprites: Vec<RenderSprite>) -> Self {
         Self {
-            thing,
-            image,
-            sprite_world_pos,
-            sprite_size,
-            tint,
-            used_fallback,
+            sprites,
             window: None,
             renderer: None,
         }
@@ -257,20 +295,30 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let first = self
+            .sprites
+            .first()
+            .expect("at least one sprite exists in app state");
+        let fallback_count = self.sprites.iter().filter(|s| s.used_fallback).count();
         let attrs = Window::default_attributes().with_title(format!(
-            "stitchlands-redux v0 | {} | fallback={} | pan: WASD/Arrows zoom: wheel/QE",
-            self.thing.def_name, self.used_fallback
+            "stitchlands-redux v0 | sprites={} first={} fallback={} | pan: WASD/Arrows zoom: wheel/QE",
+            self.sprites.len(),
+            first.def_name,
+            fallback_count
         ));
 
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+        let sprite_inputs = self
+            .sprites
+            .drain(..)
+            .map(|sprite| SpriteInput {
+                image: sprite.image,
+                params: sprite.params,
+            })
+            .collect();
         let renderer = pollster::block_on(Renderer::new(
             window.clone(),
-            &self.image,
-            SpriteParams {
-                world_pos: self.sprite_world_pos,
-                size: self.sprite_size,
-                tint: self.tint,
-            },
+            sprite_inputs,
         ))
         .expect("create renderer");
 

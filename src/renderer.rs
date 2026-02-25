@@ -25,9 +25,13 @@ pub struct Renderer {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    sprites: Vec<SpriteDraw>,
+    camera_speed: f32,
+}
+
+struct SpriteDraw {
     sprite_bind_group: wgpu::BindGroup,
     texture_bind_group: wgpu::BindGroup,
-    camera_speed: f32,
 }
 
 #[repr(C)]
@@ -93,7 +97,11 @@ impl Camera {
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>, image: &RgbaImage, sprite: SpriteParams) -> Result<Self> {
+    pub async fn new(window: Arc<Window>, sprites: Vec<SpriteInput>) -> Result<Self> {
+        if sprites.is_empty() {
+            anyhow::bail!("renderer requires at least one sprite");
+        }
+
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window).context("create surface")?;
@@ -188,50 +196,6 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let sprite_uniform = SpriteUniform {
-            world_pos: [sprite.world_pos.x, sprite.world_pos.y, sprite.world_pos.z],
-            _pad0: 0.0,
-            size: [sprite.size.x, sprite.size.y],
-            _pad1: [0.0, 0.0],
-            tint: [sprite.tint[0], sprite.tint[1], sprite.tint[2], sprite.tint[3]],
-        };
-        let sprite_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("sprite-buffer"),
-            contents: bytemuck::bytes_of(&sprite_uniform),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let tex_size = wgpu::Extent3d {
-            width: image.width(),
-            height: image.height(),
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("sprite-texture"),
-            size: tex_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            image.as_raw(),
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * image.width()),
-                rows_per_image: Some(image.height()),
-            },
-            tex_size,
-        );
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sprite-sampler"),
             mag_filter: wgpu::FilterMode::Nearest,
@@ -296,28 +260,85 @@ impl Renderer {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
-        let sprite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("sprite-bind-group"),
-            layout: &sprite_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: sprite_buffer.as_entire_binding(),
-            }],
-        });
-        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("texture-bind-group"),
-            layout: &texture_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
+        let mut sprite_draws = Vec::with_capacity(sprites.len());
+        for sprite in &sprites {
+            let sprite_uniform = SpriteUniform {
+                world_pos: [
+                    sprite.params.world_pos.x,
+                    sprite.params.world_pos.y,
+                    sprite.params.world_pos.z,
+                ],
+                _pad0: 0.0,
+                size: [sprite.params.size.x, sprite.params.size.y],
+                _pad1: [0.0, 0.0],
+                tint: sprite.params.tint,
+            };
+            let sprite_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("sprite-buffer"),
+                contents: bytemuck::bytes_of(&sprite_uniform),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+            let tex_size = wgpu::Extent3d {
+                width: sprite.image.width(),
+                height: sprite.image.height(),
+                depth_or_array_layers: 1,
+            };
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("sprite-texture"),
+                size: tex_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                sprite.image.as_raw(),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * sprite.image.width()),
+                    rows_per_image: Some(sprite.image.height()),
+                },
+                tex_size,
+            );
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+            let sprite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("sprite-bind-group"),
+                layout: &sprite_layout,
+                entries: &[wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
+                    resource: sprite_buffer.as_entire_binding(),
+                }],
+            });
+            let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("texture-bind-group"),
+                layout: &texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
+
+            sprite_draws.push(SpriteDraw {
+                sprite_bind_group,
+                texture_bind_group,
+            });
+        }
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sprite-shader"),
@@ -369,8 +390,7 @@ impl Renderer {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            sprite_bind_group,
-            texture_bind_group,
+            sprites: sprite_draws,
             camera_speed: 0.2,
         })
     }
@@ -486,11 +506,13 @@ impl Renderer {
 
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            pass.set_bind_group(1, &self.sprite_bind_group, &[]);
-            pass.set_bind_group(2, &self.texture_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            for sprite in &self.sprites {
+                pass.set_bind_group(1, &sprite.sprite_bind_group, &[]);
+                pass.set_bind_group(2, &sprite.texture_bind_group, &[]);
+                pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            }
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -509,6 +531,12 @@ impl Renderer {
         }
     }
 
+}
+
+#[derive(Debug, Clone)]
+pub struct SpriteInput {
+    pub image: RgbaImage,
+    pub params: SpriteParams,
 }
 
 #[derive(Debug, Clone)]
