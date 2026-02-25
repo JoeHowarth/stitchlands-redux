@@ -43,7 +43,7 @@ struct Cli {
     list_limit: usize,
 
     #[arg(long)]
-    texture_root: Option<PathBuf>,
+    texture_root: Vec<PathBuf>,
 
     #[arg(long, default_value_t = false)]
     diagnose_textures: bool,
@@ -92,7 +92,7 @@ fn main() -> Result<()> {
     info!("loaded {} thing defs with graphicData", defs.len());
 
     if cli.diagnose_textures {
-        diagnose_textures(&data_dir, cli.texture_root.as_deref());
+        diagnose_textures(&data_dir, &cli.texture_root);
         return Ok(());
     }
 
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
     let mut render_sprites = Vec::with_capacity(selected_defs.len());
     for (index, selected) in selected_defs.iter().enumerate() {
         let sprite_asset =
-            resolve_sprite(&data_dir, selected, cli.texture_root.as_deref()).with_context(|| {
+            resolve_sprite(&data_dir, selected, &cli.texture_root).with_context(|| {
                 format!(
                     "resolving texture for def '{}' path '{}'",
                     selected.def_name, selected.graphic_data.tex_path
@@ -141,7 +141,11 @@ fn main() -> Result<()> {
             }
         }
         if let Some(path) = &sprite_asset.source_path {
-            info!("resolved texture: {}", path.display());
+            if sprite_asset.resolved_with_fuzzy_match {
+                info!("resolved texture (fuzzy): {}", path.display());
+            } else {
+                info!("resolved texture: {}", path.display());
+            }
         }
 
         if let Some(export_path) = &cli.export_resolved {
@@ -279,7 +283,7 @@ fn make_missing_def_message(
     }
 }
 
-fn diagnose_textures(data_dir: &std::path::Path, texture_root: Option<&std::path::Path>) {
+fn diagnose_textures(data_dir: &std::path::Path, texture_roots: &[PathBuf]) {
     let roots = [
         data_dir.join("Core").join("Textures"),
         data_dir.join("Textures"),
@@ -305,7 +309,7 @@ fn diagnose_textures(data_dir: &std::path::Path, texture_root: Option<&std::path
         println!("root: {} | png files: {}", root.display(), png_count);
     }
 
-    if let Some(extra) = texture_root {
+    for extra in texture_roots {
         let png_count = WalkDir::new(extra)
             .into_iter()
             .filter_map(|e| e.ok())

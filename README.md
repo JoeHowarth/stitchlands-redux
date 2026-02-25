@@ -55,4 +55,5 @@ cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/
 
 - v0 supports `Graphic_Single`-style path resolution first.
 - If a texture is missing, it renders a checkerboard fallback and logs a warning.
-- Use `--texture-root <path>` to try an extra directory for loose texture PNGs.
+- Use `--texture-root <path>` (repeatable) to try extra directories for loose texture PNGs.
+- Extra roots also support fuzzy filename lookup by basename (`Steel`, `Steel_south`, etc.) when exact `texPath` folders are not present.
