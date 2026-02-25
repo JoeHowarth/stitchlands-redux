@@ -45,6 +45,12 @@ Resolve one def to an image file without opening a window:
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --no-window --export-resolved target/steel_resolved.png
 ```
 
+Check whether this install has loose texture PNGs:
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --diagnose-textures
+```
+
 ## Notes
 
 - v0 supports `Graphic_Single`-style path resolution first.

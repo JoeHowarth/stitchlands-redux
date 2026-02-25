@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use glam::Vec3;
 use log::{info, warn};
+use walkdir::WalkDir;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -43,6 +44,9 @@ struct Cli {
 
     #[arg(long)]
     texture_root: Option<PathBuf>,
+
+    #[arg(long, default_value_t = false)]
+    diagnose_textures: bool,
 
     #[arg(long)]
     export_resolved: Option<PathBuf>,
@@ -86,6 +90,11 @@ fn main() -> Result<()> {
     let defs = load_thing_defs(&data_dir)
         .with_context(|| format!("loading defs from {}", data_dir.display()))?;
     info!("loaded {} thing defs with graphicData", defs.len());
+
+    if cli.diagnose_textures {
+        diagnose_textures(&data_dir, cli.texture_root.as_deref());
+        return Ok(());
+    }
 
     if cli.list_defs {
         list_defs(&defs, cli.def_filter.as_deref(), cli.list_limit);
@@ -268,6 +277,53 @@ fn make_missing_def_message(
             suggestions.join(", ")
         )
     }
+}
+
+fn diagnose_textures(data_dir: &std::path::Path, texture_root: Option<&std::path::Path>) {
+    let roots = [
+        data_dir.join("Core").join("Textures"),
+        data_dir.join("Textures"),
+    ];
+
+    for root in roots {
+        if !root.exists() {
+            println!("missing: {}", root.display());
+            continue;
+        }
+        let png_count = WalkDir::new(&root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("png"))
+                    .unwrap_or(false)
+            })
+            .count();
+        println!("root: {} | png files: {}", root.display(), png_count);
+    }
+
+    if let Some(extra) = texture_root {
+        let png_count = WalkDir::new(extra)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("png"))
+                    .unwrap_or(false)
+            })
+            .count();
+        println!("extra root: {} | png files: {}", extra.display(), png_count);
+    }
+
+    println!(
+        "tip: if counts are near zero, this install likely stores textures in Unity assets; keep using fallback or point --texture-root to an extracted texture dump"
+    );
 }
 
 struct App {
