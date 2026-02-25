@@ -25,7 +25,22 @@ cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/
 - Pan: `WASD` or arrow keys
 - Zoom: mouse wheel or `Q` / `E`
 
+## Debug Commands
+
+List thing defs with a filter:
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --list-defs --def-filter steel --list-limit 20
+```
+
+Resolve one def to an image file without opening a window:
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --no-window --export-resolved target/steel_resolved.png
+```
+
 ## Notes
 
 - v0 supports `Graphic_Single`-style path resolution first.
 - If a texture is missing, it renders a checkerboard fallback and logs a warning.
+- Use `--texture-root <path>` to try an extra directory for loose texture PNGs.

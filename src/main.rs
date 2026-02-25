@@ -27,7 +27,25 @@ struct Cli {
     rimworld_data: PathBuf,
 
     #[arg(long)]
-    thingdef: String,
+    thingdef: Option<String>,
+
+    #[arg(long, default_value_t = false)]
+    list_defs: bool,
+
+    #[arg(long)]
+    def_filter: Option<String>,
+
+    #[arg(long, default_value_t = 25)]
+    list_limit: usize,
+
+    #[arg(long)]
+    texture_root: Option<PathBuf>,
+
+    #[arg(long)]
+    export_resolved: Option<PathBuf>,
+
+    #[arg(long, default_value_t = false)]
+    no_window: bool,
 
     #[arg(long, default_value_t = 0.0)]
     cell_x: f32,
@@ -66,13 +84,22 @@ fn main() -> Result<()> {
         .with_context(|| format!("loading defs from {}", data_dir.display()))?;
     info!("loaded {} thing defs with graphicData", defs.len());
 
+    if cli.list_defs {
+        list_defs(&defs, cli.def_filter.as_deref(), cli.list_limit);
+        return Ok(());
+    }
+
+    let thingdef = cli
+        .thingdef
+        .as_deref()
+        .context("--thingdef is required unless --list-defs is used")?;
     let thing = defs
-        .get(&cli.thingdef)
+        .get(thingdef)
         .cloned()
-        .with_context(|| format!("thingdef '{}' not found", cli.thingdef))?;
+        .with_context(|| make_missing_def_message(thingdef, &defs))?;
     info!("selected def: {}", thing.def_name);
 
-    let sprite_asset = resolve_sprite(&data_dir, &thing).with_context(|| {
+    let sprite_asset = resolve_sprite(&data_dir, &thing, cli.texture_root.as_deref()).with_context(|| {
         format!(
             "resolving texture for def '{}' path '{}'",
             thing.def_name, thing.graphic_data.tex_path
@@ -84,9 +111,24 @@ fn main() -> Result<()> {
             "texture missing for '{}' ({}) - using checker fallback",
             thing.def_name, thing.graphic_data.tex_path
         );
+        for attempted in sprite_asset.attempted_paths.iter().take(6) {
+            info!("attempted: {}", attempted.display());
+        }
     }
     if let Some(path) = &sprite_asset.source_path {
         info!("resolved texture: {}", path.display());
+    }
+
+    if let Some(export_path) = &cli.export_resolved {
+        sprite_asset
+            .image
+            .save(export_path)
+            .with_context(|| format!("saving resolved sprite to {}", export_path.display()))?;
+        info!("wrote resolved sprite image: {}", export_path.display());
+    }
+
+    if cli.no_window {
+        return Ok(());
     }
 
     let size = thing.graphic_data.draw_size * cli.scale;
@@ -112,6 +154,72 @@ fn main() -> Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+fn list_defs(defs: &std::collections::HashMap<String, ThingDef>, filter: Option<&str>, limit: usize) {
+    let filter_lower = filter.map(|f| f.to_lowercase());
+    let mut rows: Vec<_> = defs.values().collect();
+    rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
+
+    let mut shown = 0usize;
+    for thing in rows {
+        if shown >= limit {
+            break;
+        }
+        if let Some(f) = &filter_lower {
+            let name = thing.def_name.to_lowercase();
+            let tex = thing.graphic_data.tex_path.to_lowercase();
+            if !name.contains(f) && !tex.contains(f) {
+                continue;
+            }
+        }
+        println!(
+            "{} | texPath={} | class={}",
+            thing.def_name,
+            thing.graphic_data.tex_path,
+            thing
+                .graphic_data
+                .graphic_class
+                .as_deref()
+                .unwrap_or("Graphic_Single")
+        );
+        shown += 1;
+    }
+
+    println!("shown {shown} defs (limit {limit})");
+}
+
+fn make_missing_def_message(
+    thingdef: &str,
+    defs: &std::collections::HashMap<String, ThingDef>,
+) -> String {
+    let mut suggestions: Vec<&str> = defs
+        .keys()
+        .filter_map(|name| {
+            if name.eq_ignore_ascii_case(thingdef) {
+                Some(name.as_str())
+            } else {
+                let name_lower = name.to_lowercase();
+                let query_lower = thingdef.to_lowercase();
+                if name_lower.contains(&query_lower) || query_lower.contains(&name_lower) {
+                    Some(name.as_str())
+                } else {
+                    None
+                }
+            }
+        })
+        .take(5)
+        .collect();
+    suggestions.sort_unstable();
+
+    if suggestions.is_empty() {
+        format!("thingdef '{thingdef}' not found")
+    } else {
+        format!(
+            "thingdef '{thingdef}' not found. Close matches: {}",
+            suggestions.join(", ")
+        )
+    }
 }
 
 struct App {

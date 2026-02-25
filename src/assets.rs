@@ -10,44 +10,61 @@ pub struct SpriteAsset {
     pub image: RgbaImage,
     pub source_path: Option<PathBuf>,
     pub used_fallback: bool,
+    pub attempted_paths: Vec<PathBuf>,
 }
 
-pub fn resolve_sprite(core_data_dir: &Path, thing_def: &ThingDef) -> Result<SpriteAsset> {
-    let textures_dir = core_data_dir.join("Core").join("Textures");
-    if !textures_dir.exists() {
-        return Ok(SpriteAsset {
-            image: checkerboard_image(64, 64),
-            source_path: None,
-            used_fallback: true,
-        });
-    }
+pub fn resolve_sprite(
+    core_data_dir: &Path,
+    thing_def: &ThingDef,
+    extra_texture_root: Option<&Path>,
+) -> Result<SpriteAsset> {
+    let texture_roots = texture_roots(core_data_dir, extra_texture_root);
 
     let tex_path = thing_def.graphic_data.tex_path.as_str();
-    let candidates = [
-        textures_dir.join(format!("{}.png", tex_path)),
-        textures_dir.join(format!("{}_south.png", tex_path)),
-        textures_dir.join(format!("{}_north.png", tex_path)),
-    ];
+    let mut attempted_paths = Vec::new();
 
-    for candidate in candidates {
-        if !candidate.exists() {
-            continue;
+    for root in texture_roots {
+        let candidates = [
+            root.join(format!("{}.png", tex_path)),
+            root.join(format!("{}_south.png", tex_path)),
+            root.join(format!("{}_north.png", tex_path)),
+        ];
+
+        for candidate in candidates {
+            attempted_paths.push(candidate.clone());
+            if !candidate.exists() {
+                continue;
+            }
+
+            let image = image::open(&candidate)
+                .with_context(|| format!("failed to decode image {}", candidate.display()))?
+                .to_rgba8();
+            return Ok(SpriteAsset {
+                image,
+                source_path: Some(candidate),
+                used_fallback: false,
+                attempted_paths,
+            });
         }
-        let image = image::open(&candidate)
-            .with_context(|| format!("failed to decode image {}", candidate.display()))?
-            .to_rgba8();
-        return Ok(SpriteAsset {
-            image,
-            source_path: Some(candidate),
-            used_fallback: false,
-        });
     }
 
     Ok(SpriteAsset {
         image: checkerboard_image(64, 64),
         source_path: None,
         used_fallback: true,
+        attempted_paths,
     })
+}
+
+fn texture_roots(core_data_dir: &Path, extra_texture_root: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = vec![
+        core_data_dir.join("Core").join("Textures"),
+        core_data_dir.join("Textures"),
+    ];
+    if let Some(extra) = extra_texture_root {
+        roots.push(extra.to_path_buf());
+    }
+    roots
 }
 
 fn checkerboard_image(width: u32, height: u32) -> RgbaImage {
