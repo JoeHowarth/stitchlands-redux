@@ -1,5 +1,6 @@
 mod assets;
 mod defs;
+mod packed_textures;
 mod rimworld_paths;
 mod renderer;
 
@@ -18,6 +19,9 @@ use winit::window::{Window, WindowId};
 
 use crate::assets::resolve_sprite;
 use crate::defs::{load_thing_defs, ThingDef};
+use crate::packed_textures::{
+    PackedTextureResolver, extract_all_packed_textures, infer_packed_data_roots,
+};
 use crate::rimworld_paths::resolve_data_dir;
 use crate::renderer::{Renderer, SpriteInput, SpriteParams};
 
@@ -44,6 +48,21 @@ struct Cli {
 
     #[arg(long)]
     texture_root: Vec<PathBuf>,
+
+    #[arg(long)]
+    packed_data_root: Vec<PathBuf>,
+
+    #[arg(long)]
+    typetree_registry: Vec<PathBuf>,
+
+    #[arg(long)]
+    extract_packed_textures: Option<PathBuf>,
+
+    #[arg(long)]
+    search_packed_textures: Option<String>,
+
+    #[arg(long, default_value_t = 20)]
+    search_limit: usize,
 
     #[arg(long, default_value_t = false)]
     diagnose_textures: bool,
@@ -94,8 +113,54 @@ fn main() -> Result<()> {
         .with_context(|| format!("loading defs from {}", data_dir.display()))?;
     info!("loaded {} thing defs with graphicData", defs.len());
 
+    let mut packed_roots = infer_packed_data_roots(&cli.rimworld_data, &data_dir);
+    for extra in &cli.packed_data_root {
+        packed_roots.push(extra.clone());
+    }
+    packed_roots.sort();
+    packed_roots.dedup();
+
+    let packed_resolver = PackedTextureResolver::build(&packed_roots, &cli.typetree_registry)?;
+    if let Some(resolver) = packed_resolver.as_ref() {
+        for root in resolver.loaded_roots() {
+            info!("packed resolver root: {}", root.display());
+        }
+    }
+
+    if let Some(output_dir) = &cli.extract_packed_textures {
+        let summary =
+            extract_all_packed_textures(&packed_roots, &cli.typetree_registry, output_dir)
+                .with_context(|| format!("extracting packed textures into {}", output_dir.display()))?;
+        info!(
+            "packed texture extraction finished: scanned={} exported={} failed={}",
+            summary.scanned_textures, summary.exported_textures, summary.failed_textures
+        );
+        return Ok(());
+    }
+
+    if let Some(query) = &cli.search_packed_textures {
+        if let Some(resolver) = packed_resolver.as_ref() {
+            let matches = resolver.search_names(query, cli.search_limit);
+            for name in &matches {
+                println!("{name}");
+            }
+            println!("matched {} packed texture names", matches.len());
+        } else {
+            println!("no packed roots loaded");
+        }
+        return Ok(());
+    }
+
     if cli.diagnose_textures {
         diagnose_textures(&data_dir, &cli.texture_root);
+        let packed_roots = infer_packed_data_roots(&cli.rimworld_data, &data_dir);
+        for root in packed_roots {
+            println!(
+                "packed candidate: {} | exists={}",
+                root.display(),
+                root.exists()
+            );
+        }
         return Ok(());
     }
 
@@ -126,13 +191,38 @@ fn main() -> Result<()> {
 
     let mut render_sprites = Vec::with_capacity(selected_defs.len());
     for (index, selected) in selected_defs.iter().enumerate() {
-        let sprite_asset =
+        let mut sprite_asset =
             resolve_sprite(&data_dir, selected, &cli.texture_root).with_context(|| {
                 format!(
                     "resolving texture for def '{}' path '{}'",
                     selected.def_name, selected.graphic_data.tex_path
                 )
             })?;
+
+        let mut resolved_from_packed = false;
+        if sprite_asset.used_fallback {
+            if let Some(resolver) = packed_resolver.as_ref() {
+                match resolver.resolve(&selected.graphic_data.tex_path) {
+                    Ok(Some(hit)) => {
+                        sprite_asset.image = hit.image;
+                        sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
+                        sprite_asset.used_fallback = false;
+                        resolved_from_packed = true;
+                        info!(
+                            "resolved packed texture for '{}' via name '{}'",
+                            selected.def_name, hit.matched_name
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!(
+                            "packed texture resolve failed for '{}' ({}): {err}",
+                            selected.def_name, selected.graphic_data.tex_path
+                        );
+                    }
+                }
+            }
+        }
 
         if sprite_asset.used_fallback {
             warn!(
@@ -144,7 +234,9 @@ fn main() -> Result<()> {
             }
         }
         if let Some(path) = &sprite_asset.source_path {
-            if sprite_asset.resolved_with_fuzzy_match {
+            if resolved_from_packed {
+                info!("resolved texture (packed): {}", path.display());
+            } else if sprite_asset.resolved_with_fuzzy_match {
                 info!("resolved texture (fuzzy): {}", path.display());
             } else {
                 info!("resolved texture: {}", path.display());

@@ -57,9 +57,34 @@ Check whether this install has loose texture PNGs:
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --diagnose-textures
 ```
 
+Try packed Unity data roots explicitly (if auto-detect misses your layout):
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --packed-data-root "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld/RimWorldMac.app/Contents/Resources/Data"
+```
+
+Extract decodable Texture2D images from packed Unity data:
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --extract-packed-textures target/packed_textures
+```
+
+If you have a Unity TypeTree registry (`.json` or `.tpk`), pass it for better packed decode coverage:
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --typetree-registry /path/to/typetree.tpk
+```
+
+Search packed Texture2D names:
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --search-packed-textures steel --search-limit 30
+```
+
 ## Notes
 
 - v0 supports `Graphic_Single`-style path resolution first.
 - If a texture is missing, it renders a checkerboard fallback and logs a warning.
 - Use `--texture-root <path>` (repeatable) to try extra directories for loose texture PNGs.
 - Extra roots also support fuzzy filename lookup by basename (`Steel`, `Steel_south`, etc.) when exact `texPath` folders are not present.
+- Packed Unity Texture2D lookup is attempted automatically after loose file lookup misses.

@@ -13,6 +13,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 pollster = "0.4"
 roxmltree = "0.20"
+unity-asset = "0.2"
+unity-asset-core = "0.2"
+unity-asset-decode = { version = "0.2", features = ["texture-advanced"] }
 walkdir = "2.5"
 wgpu = "0.20"
 winit = "0.30"
