@@ -86,7 +86,12 @@ fn checkerboard_image(width: u32, height: u32) -> RgbaImage {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use glam::{Vec2, Vec3};
+
     use super::*;
+    use crate::defs::{GraphicData, RgbaColor, ThingDef};
 
     #[test]
     fn creates_checkerboard() {
@@ -94,5 +99,67 @@ mod tests {
         assert_eq!(img.width(), 16);
         assert_eq!(img.height(), 16);
         assert_ne!(img.get_pixel(0, 0), img.get_pixel(8, 0));
+    }
+
+    #[test]
+    fn resolves_exact_texture_path() {
+        let root = std::env::temp_dir().join(format!("stitchlands-assets-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let tex_file = root
+            .join("Core")
+            .join("Textures")
+            .join("Things")
+            .join("Item")
+            .join("Resource")
+            .join("Steel.png");
+        fs::create_dir_all(tex_file.parent().unwrap()).unwrap();
+        checkerboard_image(4, 4).save(&tex_file).unwrap();
+
+        let def = fake_thing("Things/Item/Resource/Steel");
+        let sprite = resolve_sprite(&root, &def, None).unwrap();
+
+        assert!(!sprite.used_fallback);
+        assert_eq!(sprite.source_path.as_deref(), Some(tex_file.as_path()));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolves_south_fallback() {
+        let root =
+            std::env::temp_dir().join(format!("stitchlands-assets-south-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let tex_file = root
+            .join("Core")
+            .join("Textures")
+            .join("Things")
+            .join("Item")
+            .join("Resource")
+            .join("Steel_south.png");
+        fs::create_dir_all(tex_file.parent().unwrap()).unwrap();
+        checkerboard_image(4, 4).save(&tex_file).unwrap();
+
+        let def = fake_thing("Things/Item/Resource/Steel");
+        let sprite = resolve_sprite(&root, &def, None).unwrap();
+
+        assert!(!sprite.used_fallback);
+        assert_eq!(sprite.source_path.as_deref(), Some(tex_file.as_path()));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn fake_thing(tex_path: &str) -> ThingDef {
+        ThingDef {
+            def_name: "TestThing".to_string(),
+            graphic_data: GraphicData {
+                tex_path: tex_path.to_string(),
+                graphic_class: None,
+                shader_type: None,
+                color: RgbaColor::WHITE,
+                color_two: None,
+                draw_size: Vec2::new(1.0, 1.0),
+                draw_offset: Vec3::ZERO,
+            },
+        }
     }
 }
