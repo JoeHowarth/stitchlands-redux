@@ -51,6 +51,9 @@ struct Cli {
     #[arg(long)]
     export_resolved: Option<PathBuf>,
 
+    #[arg(long)]
+    screenshot: Option<PathBuf>,
+
     #[arg(long, default_value_t = false)]
     no_window: bool,
 
@@ -211,7 +214,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut app = App::new(render_sprites);
+    let mut app = App::new(render_sprites, cli.screenshot);
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -332,6 +335,8 @@ fn diagnose_textures(data_dir: &std::path::Path, texture_roots: &[PathBuf]) {
 
 struct App {
     sprites: Vec<RenderSprite>,
+    screenshot_path: Option<PathBuf>,
+    screenshot_taken: bool,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
 }
@@ -344,9 +349,11 @@ struct RenderSprite {
 }
 
 impl App {
-    fn new(sprites: Vec<RenderSprite>) -> Self {
+    fn new(sprites: Vec<RenderSprite>, screenshot_path: Option<PathBuf>) -> Self {
         Self {
             sprites,
+            screenshot_path,
+            screenshot_taken: false,
             window: None,
             renderer: None,
         }
@@ -406,7 +413,19 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => renderer.resize(size),
             WindowEvent::RedrawRequested => {
-                if let Err(err) = renderer.render() {
+                let capture = if self.screenshot_taken {
+                    None
+                } else {
+                    self.screenshot_path.as_deref()
+                };
+                match renderer.render(capture) {
+                    Ok(captured) => {
+                        if captured {
+                            self.screenshot_taken = true;
+                            event_loop.exit();
+                        }
+                    }
+                    Err(err) => {
                     if let Some(surface_err) = err.downcast_ref::<wgpu::SurfaceError>() {
                         if let Err(handle_err) = renderer.handle_surface_error(surface_err) {
                             eprintln!("render error: {handle_err:#}");
@@ -415,6 +434,7 @@ impl ApplicationHandler for App {
                     } else {
                         eprintln!("render error: {err:#}");
                         event_loop.exit();
+                    }
                     }
                 }
             }

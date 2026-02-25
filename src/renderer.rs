@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -142,7 +143,7 @@ impl Renderer {
         let alpha_mode = caps.alpha_modes[0];
 
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             format,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -471,7 +472,7 @@ impl Renderer {
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&self.camera_uniform));
     }
 
-    pub fn render(&mut self) -> Result<()> {
+    pub fn render(&mut self, screenshot_path: Option<&Path>) -> Result<bool> {
         let surface_tex = self.surface.get_current_texture()?;
         let view = surface_tex
             .texture
@@ -515,8 +516,105 @@ impl Renderer {
             }
         }
 
+        let readback = if screenshot_path.is_some() {
+            Some(self.prepare_screenshot_readback(&mut encoder, &surface_tex.texture))
+        } else {
+            None
+        };
+
         self.queue.submit(Some(encoder.finish()));
+        if let (Some(path), Some(readback)) = (screenshot_path, readback) {
+            self.finalize_screenshot(path, readback)?;
+        }
         surface_tex.present();
+        Ok(screenshot_path.is_some())
+    }
+
+    fn prepare_screenshot_readback(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        texture: &wgpu::Texture,
+    ) -> ScreenshotReadback {
+        let width = self.config.width;
+        let height = self.config.height;
+        let bytes_per_pixel = 4u32;
+        let unpadded_bytes_per_row = width * bytes_per_pixel;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
+        let buffer_size = padded_bytes_per_row as u64 * height as u64;
+
+        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("screenshot-readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &readback,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        ScreenshotReadback {
+            buffer: readback,
+            width,
+            height,
+            unpadded_bytes_per_row,
+            padded_bytes_per_row,
+        }
+    }
+
+    fn finalize_screenshot(&self, output_path: &Path, readback: ScreenshotReadback) -> Result<()> {
+        let slice = readback.buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+        rx.recv().context("waiting for screenshot map")??;
+
+        let data = slice.get_mapped_range();
+        let mut pixels = vec![0u8; (readback.width * readback.height * 4) as usize];
+        for y in 0..readback.height as usize {
+            let src_start = y * readback.padded_bytes_per_row as usize;
+            let src_end = src_start + readback.unpadded_bytes_per_row as usize;
+            let dst_start = y * readback.unpadded_bytes_per_row as usize;
+            let dst_end = dst_start + readback.unpadded_bytes_per_row as usize;
+            pixels[dst_start..dst_end].copy_from_slice(&data[src_start..src_end]);
+        }
+        drop(data);
+        readback.buffer.unmap();
+
+        if self.config.format == wgpu::TextureFormat::Bgra8UnormSrgb
+            || self.config.format == wgpu::TextureFormat::Bgra8Unorm
+        {
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk.swap(0, 2);
+            }
+        }
+
+        let image = image::RgbaImage::from_raw(readback.width, readback.height, pixels)
+            .context("failed to build screenshot image buffer")?;
+        image
+            .save(output_path)
+            .with_context(|| format!("saving screenshot to {}", output_path.display()))?;
         Ok(())
     }
 
@@ -531,6 +629,14 @@ impl Renderer {
         }
     }
 
+}
+
+struct ScreenshotReadback {
+    buffer: wgpu::Buffer,
+    width: u32,
+    height: u32,
+    unpadded_bytes_per_row: u32,
+    padded_bytes_per_row: u32,
 }
 
 #[derive(Debug, Clone)]
