@@ -37,8 +37,8 @@ fn vs_main(in: VsIn) -> VsOut {
   var out: VsOut;
   let world = vec3<f32>(
     sprite.world_pos.x + in.pos.x * sprite.size.x,
-    sprite.world_pos.y,
-    sprite.world_pos.z + in.pos.y * sprite.size.y
+    sprite.world_pos.y + in.pos.y * sprite.size.y,
+    sprite.world_pos.z
   );
   out.clip_pos = camera.view_proj * vec4<f32>(world, 1.0);
   out.uv = in.uv;

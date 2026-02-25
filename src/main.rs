@@ -93,8 +93,8 @@ fn main() -> Result<()> {
     let draw_offset = thing.graphic_data.draw_offset;
     let world_pos = Vec3::new(
         cli.cell_x + 0.5 + draw_offset.x,
-        draw_offset.y,
         cli.cell_z + 0.5 + draw_offset.z,
+        draw_offset.y,
     );
     let tint = [
         cli.tint[0] * thing.graphic_data.color.r,
