@@ -22,7 +22,6 @@ pub struct PackedTextureResolver {
 pub struct PackedTextureHit {
     pub image: RgbaImage,
     pub source_label: String,
-    pub matched_name: String,
 }
 
 pub struct PackedProbeSummary {
@@ -190,11 +189,10 @@ impl PackedTextureResolver {
             return Ok(Some(PackedTextureHit {
                 image,
                 source_label,
-                matched_name: wanted,
             }));
         }
 
-        for (matched_name, key) in self.find_fuzzy_name_matches(tex_path) {
+        for (_matched_name, key) in self.find_fuzzy_name_matches(tex_path) {
             let image = match self.decode_texture_for_key(&key) {
                 Ok(image) => image,
                 Err(_) => continue,
@@ -203,11 +201,10 @@ impl PackedTextureResolver {
             return Ok(Some(PackedTextureHit {
                 image,
                 source_label,
-                matched_name,
             }));
         }
 
-        for (asset_path, key) in self.find_by_container_paths(tex_path) {
+        for (_asset_path, key) in self.find_by_container_paths(tex_path) {
             let image = match self.decode_texture_for_key(&key) {
                 Ok(image) => image,
                 Err(_) => continue,
@@ -217,7 +214,6 @@ impl PackedTextureResolver {
             return Ok(Some(PackedTextureHit {
                 image,
                 source_label,
-                matched_name: asset_path,
             }));
         }
 

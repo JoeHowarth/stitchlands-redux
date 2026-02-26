@@ -147,7 +147,11 @@ struct TextureKey {
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>, sprites: Vec<SpriteInput>) -> Result<Self> {
+    pub async fn new(
+        window: Arc<Window>,
+        sprites: Vec<SpriteInput>,
+        initial_camera_center: Option<Vec2>,
+    ) -> Result<Self> {
         if sprites.is_empty() {
             anyhow::bail!("renderer requires at least one sprite");
         }
@@ -234,7 +238,7 @@ impl Renderer {
         });
 
         let camera = Camera {
-            center: Vec2::new(0.5, 0.5),
+            center: initial_camera_center.unwrap_or(Vec2::new(0.5, 0.5)),
             zoom: 6.0,
         };
         let camera_uniform = CameraUniform {

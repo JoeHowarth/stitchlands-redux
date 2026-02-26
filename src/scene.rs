@@ -56,12 +56,20 @@ pub fn generate_fixture_map(
 
     let mut things = Vec::new();
     for (index, def_name) in thing_defs.iter().enumerate() {
-        let x = 2 + ((index * 7) % width.saturating_sub(4).max(1));
-        let z = 2 + ((index * 11) % height.saturating_sub(4).max(1));
+        let center_x = (width / 2) as i32;
+        let center_z = (height / 2) as i32;
+        let (x, z) = if index == 0 {
+            (center_x, center_z)
+        } else {
+            (
+                (2 + ((index * 7) % width.saturating_sub(4).max(1))) as i32,
+                (2 + ((index * 11) % height.saturating_sub(4).max(1))) as i32,
+            )
+        };
         things.push(ThingInstance {
             def_name: def_name.clone(),
-            cell_x: x as i32,
-            cell_z: z as i32,
+            cell_x: x,
+            cell_z: z,
         });
     }
 
@@ -73,13 +81,26 @@ pub fn generate_fixture_map(
     ];
     let mut pawns = Vec::new();
     for (index, tex_path) in pawn_tex_paths.iter().enumerate() {
-        let x = 5 + ((index * 9) % width.saturating_sub(10).max(1));
-        let z = 4 + ((index * 5) % height.saturating_sub(8).max(1));
+        let center_x = (width / 2) as i32;
+        let center_z = (height / 2) as i32;
+        let (x, z) = if index == 0 {
+            let anchor_x = if width > 2 {
+                (center_x + 1).min(width as i32 - 1)
+            } else {
+                center_x
+            };
+            (anchor_x, center_z)
+        } else {
+            (
+                (5 + ((index * 9) % width.saturating_sub(10).max(1))) as i32,
+                (4 + ((index * 5) % height.saturating_sub(8).max(1))) as i32,
+            )
+        };
         pawns.push(PawnInstance {
             label: format!("Pawn{}", index + 1),
             tex_path: tex_path.clone(),
-            cell_x: x as i32,
-            cell_z: z as i32,
+            cell_x: x,
+            cell_z: z,
             facing: facings[index % facings.len()],
         });
     }
