@@ -1,4 +1,6 @@
+mod app_context;
 mod assets;
+mod cli;
 mod commands;
 mod defs;
 mod pawn;
@@ -9,16 +11,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 use glam::{Vec2, Vec3};
 use log::{info, warn};
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
-use crate::assets::{AssetResolver, AssetSetupOptions, prepare_asset_setup};
+use crate::app_context::AppContext;
+use crate::assets::AssetResolver;
+use crate::cli::{Cli, Command, DebugCmd, FixtureCmd, render_runtime};
 use crate::commands::{
     diagnose_textures, list_defs, print_packed_texture_search, run_extract_packed_textures,
     run_terrain_probe,
@@ -26,8 +29,6 @@ use crate::commands::{
 use crate::defs::{
     ApparelDef, ApparelLayerDef, ApparelSkipFlagDef, BeardDefRender, BodyTypeDefRender,
     HairDefRender, HeadTypeDefRender, HumanlikeRenderTreeLayers, TerrainDef, ThingDef,
-    load_apparel_defs, load_beard_defs, load_body_type_defs, load_hair_defs, load_head_type_defs,
-    load_humanlike_render_tree_layers, load_terrain_defs, load_thing_defs,
 };
 use crate::pawn::{
     ApparelLayer as ComposeApparelLayer, ApparelRenderInput, BeardTypeRenderData,
@@ -39,273 +40,22 @@ use crate::scene::{
     count_terrain_families, generate_fixture_map, sorted_pawns, sorted_things_by_altitude,
 };
 
-#[derive(Parser, Debug)]
-#[command(author, version, about)]
-struct Cli {
-    #[command(flatten)]
-    data: DataArgs,
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Args, Debug, Clone)]
-struct DataArgs {
-    #[arg(long)]
-    rimworld_data: Option<PathBuf>,
-    #[arg(long)]
-    texture_root: Vec<PathBuf>,
-    #[arg(long)]
-    packed_data_root: Vec<PathBuf>,
-    #[arg(long)]
-    packed_index_path: Option<PathBuf>,
-    #[arg(long, default_value_t = false)]
-    rebuild_packed_index: bool,
-    #[arg(long, default_value_t = false)]
-    no_packed_index: bool,
-    #[arg(long)]
-    typetree_registry: Vec<PathBuf>,
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-    auto_typetree: bool,
-    #[arg(long, default_value_t = false)]
-    allow_fallback: bool,
-}
-
-#[derive(Args, Debug, Clone)]
-struct ViewArgs {
-    #[arg(long)]
-    screenshot: Option<PathBuf>,
-    #[arg(long, default_value_t = false)]
-    no_window: bool,
-    #[arg(long, default_value_t = false)]
-    hidden_window: bool,
-    #[arg(long, default_value_t = 1024)]
-    viewport_width: u32,
-    #[arg(long, default_value_t = 1024)]
-    viewport_height: u32,
-    #[arg(long, default_value_t = 6.0)]
-    camera_zoom: f32,
-    #[arg(long, value_parser = parse_clear_color, default_value = "0.05,0.08,0.10,1")]
-    clear_color: [f64; 4],
-}
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    Render(RenderCmd),
-    Fixture {
-        #[command(subcommand)]
-        mode: FixtureCmd,
-    },
-    Audit(AuditCmd),
-    Debug(DebugCmdArgs),
-}
-
-#[derive(Args, Debug)]
-struct DebugCmdArgs {
-    #[command(subcommand)]
-    command: DebugCmd,
-}
-
-#[derive(Args, Debug)]
-struct RenderCmd {
-    #[arg(long)]
-    thingdef: Option<String>,
-    #[arg(long)]
-    image_path: Option<PathBuf>,
-    #[arg(long)]
-    extra_thingdef: Vec<String>,
-    #[arg(long)]
-    export_resolved: Option<PathBuf>,
-    #[arg(long, default_value_t = 0)]
-    sheet_columns: usize,
-    #[arg(long, default_value_t = 1.75)]
-    sheet_spacing: f32,
-    #[arg(long, default_value_t = 0.0)]
-    cell_x: f32,
-    #[arg(long, default_value_t = 0.0)]
-    cell_z: f32,
-    #[arg(long, default_value_t = 1.0)]
-    scale: f32,
-    #[arg(long, value_parser = parse_tint, default_value = "1,1,1,1")]
-    tint: [f32; 4],
-    #[command(flatten)]
-    view: ViewArgs,
-}
-
-#[derive(Subcommand, Debug)]
-enum FixtureCmd {
-    V1(FixtureSceneCmd),
-    Pawn(FixtureSceneCmd),
-}
-
-#[derive(Args, Debug, Clone)]
-struct FixtureSceneCmd {
-    #[arg(long, default_value_t = 0)]
-    pawn_fixture_variant: usize,
-    #[arg(long)]
-    dump_pawn_trace: Option<PathBuf>,
-    #[arg(long, default_value_t = 40)]
-    map_width: usize,
-    #[arg(long, default_value_t = 40)]
-    map_height: usize,
-    #[command(flatten)]
-    view: ViewArgs,
-}
-
-#[derive(Args, Debug)]
-struct AuditCmd {
-    #[arg(long, default_value_t = 10)]
-    pawn_count: usize,
-    #[arg(long, default_value_t = 0)]
-    pawn_fixture_variant: usize,
-    #[arg(long)]
-    dump_pawn_trace: Option<PathBuf>,
-    #[arg(long, default_value_t = 28)]
-    map_width: usize,
-    #[arg(long, default_value_t = 28)]
-    map_height: usize,
-    #[command(flatten)]
-    view: ViewArgs,
-}
-
-#[derive(Subcommand, Debug)]
-enum DebugCmd {
-    ListDefs {
-        #[arg(long)]
-        def_filter: Option<String>,
-        #[arg(long, default_value_t = 25)]
-        list_limit: usize,
-    },
-    SearchPackedTextures {
-        query: String,
-        #[arg(long, default_value_t = 20)]
-        search_limit: usize,
-    },
-    DiagnoseTextures,
-    ProbeTerrain {
-        #[arg(long, default_value_t = 64)]
-        terrain_probe_limit: usize,
-    },
-    ExtractPackedTextures {
-        output_dir: PathBuf,
-    },
-    PackedDecodeProbe {
-        #[arg(long, default_value_t = 24)]
-        sample_limit: usize,
-        #[arg(long, default_value_t = 8)]
-        min_attempts: usize,
-    },
-}
-
-fn parse_tint(input: &str) -> Result<[f32; 4], String> {
-    let cleaned = input.replace(',', " ");
-    let mut nums = cleaned
-        .split_whitespace()
-        .map(|v| v.parse::<f32>().map_err(|e| e.to_string()));
-    let r = nums.next().ok_or_else(|| "missing r".to_string())??;
-    let g = nums.next().ok_or_else(|| "missing g".to_string())??;
-    let b = nums.next().ok_or_else(|| "missing b".to_string())??;
-    let a = nums.next().transpose()?.unwrap_or(1.0);
-    Ok([r, g, b, a])
-}
-
-fn parse_clear_color(input: &str) -> Result<[f64; 4], String> {
-    let cleaned = input.replace(',', " ");
-    let mut nums = cleaned
-        .split_whitespace()
-        .map(|v| v.parse::<f64>().map_err(|e| e.to_string()));
-    let r = nums.next().ok_or_else(|| "missing r".to_string())??;
-    let g = nums.next().ok_or_else(|| "missing g".to_string())??;
-    let b = nums.next().ok_or_else(|| "missing b".to_string())??;
-    let a = nums.next().transpose()?.unwrap_or(1.0);
-    Ok([r, g, b, a])
-}
-
-fn render_runtime(view: &ViewArgs) -> (bool, RendererOptions, bool) {
-    let should_run_renderer = !view.no_window || view.screenshot.is_some();
-    let render_options = RendererOptions {
-        clear_color: view.clear_color,
-        surface_size: Some(PhysicalSize::new(
-            view.viewport_width.max(1),
-            view.viewport_height.max(1),
-        )),
-        initial_zoom: Some(view.camera_zoom.max(0.2)),
-    };
-    let hide_window = view.hidden_window || (view.no_window && view.screenshot.is_some());
-    (should_run_renderer, render_options, hide_window)
-}
-
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
 
-    let setup = prepare_asset_setup(AssetSetupOptions {
-        rimworld_data: cli.data.rimworld_data.clone(),
-        texture_roots: cli.data.texture_root.clone(),
-        packed_roots: cli.data.packed_data_root.clone(),
-        typetree_registry: cli.data.typetree_registry.clone(),
-        auto_typetree: cli.data.auto_typetree,
-        packed_index_path: cli.data.packed_index_path.clone(),
-        rebuild_packed_index: cli.data.rebuild_packed_index,
-        disable_packed_index: cli.data.no_packed_index,
-    })?;
-
-    let data_dir = setup.data_dir;
-    info!("using RimWorld data dir: {}", data_dir.display());
-
-    let defs = load_thing_defs(&data_dir)
-        .with_context(|| format!("loading defs from {}", data_dir.display()))?;
-    info!("loaded {} thing defs with graphicData", defs.len());
-    let terrain_defs = load_terrain_defs(&data_dir)
-        .with_context(|| format!("loading terrain defs from {}", data_dir.display()))?;
-    info!(
-        "loaded {} terrain defs with texturePath",
-        terrain_defs.len()
-    );
-    let apparel_defs = load_apparel_defs(&data_dir)
-        .with_context(|| format!("loading apparel defs from {}", data_dir.display()))?;
-    info!(
-        "loaded {} apparel defs with graphicData",
-        apparel_defs.len()
-    );
-    let body_type_defs = load_body_type_defs(&data_dir)
-        .with_context(|| format!("loading body type defs from {}", data_dir.display()))?;
-    info!("loaded {} body type defs", body_type_defs.len());
-    let head_type_defs = load_head_type_defs(&data_dir)
-        .with_context(|| format!("loading head type defs from {}", data_dir.display()))?;
-    info!("loaded {} head type defs", head_type_defs.len());
-    let beard_defs = load_beard_defs(&data_dir)
-        .with_context(|| format!("loading beard defs from {}", data_dir.display()))?;
-    info!("loaded {} beard defs", beard_defs.len());
-    let hair_defs = load_hair_defs(&data_dir)
-        .with_context(|| format!("loading hair defs from {}", data_dir.display()))?;
-    info!("loaded {} hair defs", hair_defs.len());
-    let humanlike_layers = load_humanlike_render_tree_layers(&data_dir)
-        .with_context(|| format!("loading humanlike render tree from {}", data_dir.display()))?;
-    info!(
-        "loaded humanlike render tree layers: body={} head={} beard={} hair={} apparel_body={} apparel_head={}",
-        humanlike_layers.body_base_layer,
-        humanlike_layers.head_base_layer,
-        humanlike_layers.beard_base_layer,
-        humanlike_layers.hair_base_layer,
-        humanlike_layers.apparel_body_base_layer,
-        humanlike_layers.apparel_head_base_layer
-    );
-    let compose_config = compose_config_from_humanlike_layers(humanlike_layers);
-
-    let typetree_registries = setup.typetree_registries.clone();
-    // RimWorld 2022 macOS assets in this project are typetree-stripped; without an external
-    // registry packed Texture2D parsing often falls back to invalid dimensions/format metadata.
-    if typetree_registries.is_empty() {
-        warn!(
-            "no typetree registry selected; packed texture decode may fail on stripped Unity assets (set --typetree-registry or STITCHLANDS_TYPETREE_REGISTRY)"
-        );
-    } else {
-        for registry in &typetree_registries {
-            info!("using typetree registry: {}", registry.display());
-        }
-    }
-
-    let mut asset_resolver = setup.resolver;
+    let ctx = AppContext::load(&cli.data, compose_config_from_humanlike_layers)?;
+    let data_dir = ctx.data_dir.clone();
+    let defs = &ctx.thing_defs;
+    let terrain_defs = &ctx.terrain_defs;
+    let apparel_defs = &ctx.apparel_defs;
+    let body_type_defs = &ctx.body_type_defs;
+    let head_type_defs = &ctx.head_type_defs;
+    let beard_defs = &ctx.beard_defs;
+    let hair_defs = &ctx.hair_defs;
+    let compose_config = ctx.compose_config.clone();
+    let allow_fallback = ctx.allow_fallback;
+    let mut asset_resolver = ctx.asset_resolver;
 
     match cli.command {
         Command::Debug(debug) => match debug.command {
@@ -403,7 +153,7 @@ fn main() -> Result<()> {
                     pawn_fixture_variant: fixture.pawn_fixture_variant,
                     dump_pawn_trace: fixture.dump_pawn_trace.clone(),
                     compose_config: compose_config.clone(),
-                    strict_missing: !cli.data.allow_fallback,
+                    strict_missing: !allow_fallback,
                 })?
             } else {
                 build_v1_fixture_scene(FixtureSceneConfig {
@@ -424,7 +174,7 @@ fn main() -> Result<()> {
                     pawn_fixture_variant: fixture.pawn_fixture_variant,
                     dump_pawn_trace: fixture.dump_pawn_trace.clone(),
                     compose_config: compose_config.clone(),
-                    strict_missing: !cli.data.allow_fallback,
+                    strict_missing: !allow_fallback,
                 })?
             };
             if !should_run_renderer {
@@ -461,7 +211,7 @@ fn main() -> Result<()> {
                 pawn_fixture_variant: audit.pawn_fixture_variant,
                 dump_pawn_trace: audit.dump_pawn_trace.clone(),
                 compose_config: compose_config.clone(),
-                strict_missing: !cli.data.allow_fallback,
+                strict_missing: !allow_fallback,
             })?;
             if !should_run_renderer {
                 return Ok(());
@@ -570,7 +320,7 @@ fn main() -> Result<()> {
                 let resolved_from_packed = resolved.resolved_from_packed;
 
                 if sprite_asset.used_fallback {
-                    if !cli.data.allow_fallback {
+                    if !allow_fallback {
                         anyhow::bail!(
                             "missing texture for '{}' ({}) - refusing checker fallback by default. rerun with --allow-fallback to continue",
                             selected.def_name,
