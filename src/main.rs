@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use glam::{Vec2, Vec3};
 use log::{info, warn};
 use winit::application::ApplicationHandler;
@@ -53,140 +53,158 @@ use crate::typetree_registry::resolve_typetree_registry_paths;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Cli {
+    #[command(flatten)]
+    data: DataArgs,
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Args, Debug, Clone)]
+struct DataArgs {
     #[arg(long)]
     rimworld_data: Option<PathBuf>,
-
-    #[arg(long)]
-    thingdef: Option<String>,
-
-    #[arg(long)]
-    image_path: Option<PathBuf>,
-
-    #[arg(long)]
-    extra_thingdef: Vec<String>,
-
-    #[arg(long, default_value_t = false)]
-    list_defs: bool,
-
-    #[arg(long)]
-    def_filter: Option<String>,
-
-    #[arg(long, default_value_t = 25)]
-    list_limit: usize,
-
     #[arg(long)]
     texture_root: Vec<PathBuf>,
-
     #[arg(long)]
     packed_data_root: Vec<PathBuf>,
-
     #[arg(long)]
     packed_index_path: Option<PathBuf>,
-
     #[arg(long, default_value_t = false)]
     rebuild_packed_index: bool,
-
     #[arg(long, default_value_t = false)]
     no_packed_index: bool,
-
     #[arg(long)]
     typetree_registry: Vec<PathBuf>,
-
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     auto_typetree: bool,
-
-    #[arg(long, default_value_t = 0)]
-    packed_decode_probe: usize,
-
-    #[arg(long, default_value_t = 8)]
-    packed_decode_probe_min_attempts: usize,
-
-    #[arg(long)]
-    extract_packed_textures: Option<PathBuf>,
-
-    #[arg(long)]
-    search_packed_textures: Option<String>,
-
-    #[arg(long, default_value_t = 20)]
-    search_limit: usize,
-
-    #[arg(long, default_value_t = false)]
-    diagnose_textures: bool,
-
-    #[arg(long, default_value_t = false)]
-    probe_terrain: bool,
-
-    #[arg(long, default_value_t = 64)]
-    terrain_probe_limit: usize,
-
-    #[arg(long, default_value_t = false)]
-    scene_v1_fixture: bool,
-
-    #[arg(long, default_value_t = false)]
-    pawn_fixture: bool,
-
-    #[arg(long, default_value_t = false)]
-    pawn_audit: bool,
-
-    #[arg(long, default_value_t = 10)]
-    pawn_audit_count: usize,
-
-    #[arg(long, default_value_t = 0)]
-    pawn_fixture_variant: usize,
-
-    #[arg(long)]
-    dump_pawn_trace: Option<PathBuf>,
-
-    #[arg(long, default_value_t = 40)]
-    map_width: usize,
-
-    #[arg(long, default_value_t = 40)]
-    map_height: usize,
-
-    #[arg(long)]
-    export_resolved: Option<PathBuf>,
-
-    #[arg(long)]
-    screenshot: Option<PathBuf>,
-
-    #[arg(long, default_value_t = false)]
-    no_window: bool,
-
-    #[arg(long, default_value_t = false)]
-    hidden_window: bool,
-
-    #[arg(long, default_value_t = 1024)]
-    viewport_width: u32,
-
-    #[arg(long, default_value_t = 1024)]
-    viewport_height: u32,
-
-    #[arg(long, default_value_t = 6.0)]
-    camera_zoom: f32,
-
-    #[arg(long, value_parser = parse_clear_color, default_value = "0.05,0.08,0.10,1")]
-    clear_color: [f64; 4],
-
-    #[arg(long, default_value_t = 0)]
-    sheet_columns: usize,
-
-    #[arg(long, default_value_t = 1.75)]
-    sheet_spacing: f32,
-
     #[arg(long, default_value_t = false)]
     allow_fallback: bool,
+}
 
+#[derive(Args, Debug, Clone)]
+struct ViewArgs {
+    #[arg(long)]
+    screenshot: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    no_window: bool,
+    #[arg(long, default_value_t = false)]
+    hidden_window: bool,
+    #[arg(long, default_value_t = 1024)]
+    viewport_width: u32,
+    #[arg(long, default_value_t = 1024)]
+    viewport_height: u32,
+    #[arg(long, default_value_t = 6.0)]
+    camera_zoom: f32,
+    #[arg(long, value_parser = parse_clear_color, default_value = "0.05,0.08,0.10,1")]
+    clear_color: [f64; 4],
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    Render(RenderCmd),
+    Fixture {
+        #[command(subcommand)]
+        mode: FixtureCmd,
+    },
+    Audit(AuditCmd),
+    Debug(DebugCmdArgs),
+}
+
+#[derive(Args, Debug)]
+struct DebugCmdArgs {
+    #[command(subcommand)]
+    command: DebugCmd,
+}
+
+#[derive(Args, Debug)]
+struct RenderCmd {
+    #[arg(long)]
+    thingdef: Option<String>,
+    #[arg(long)]
+    image_path: Option<PathBuf>,
+    #[arg(long)]
+    extra_thingdef: Vec<String>,
+    #[arg(long)]
+    export_resolved: Option<PathBuf>,
+    #[arg(long, default_value_t = 0)]
+    sheet_columns: usize,
+    #[arg(long, default_value_t = 1.75)]
+    sheet_spacing: f32,
     #[arg(long, default_value_t = 0.0)]
     cell_x: f32,
-
     #[arg(long, default_value_t = 0.0)]
     cell_z: f32,
-
     #[arg(long, default_value_t = 1.0)]
     scale: f32,
-
     #[arg(long, value_parser = parse_tint, default_value = "1,1,1,1")]
     tint: [f32; 4],
+    #[command(flatten)]
+    view: ViewArgs,
+}
+
+#[derive(Subcommand, Debug)]
+enum FixtureCmd {
+    V1(FixtureSceneCmd),
+    Pawn(FixtureSceneCmd),
+}
+
+#[derive(Args, Debug, Clone)]
+struct FixtureSceneCmd {
+    #[arg(long, default_value_t = 0)]
+    pawn_fixture_variant: usize,
+    #[arg(long)]
+    dump_pawn_trace: Option<PathBuf>,
+    #[arg(long, default_value_t = 40)]
+    map_width: usize,
+    #[arg(long, default_value_t = 40)]
+    map_height: usize,
+    #[command(flatten)]
+    view: ViewArgs,
+}
+
+#[derive(Args, Debug)]
+struct AuditCmd {
+    #[arg(long, default_value_t = 10)]
+    pawn_count: usize,
+    #[arg(long, default_value_t = 0)]
+    pawn_fixture_variant: usize,
+    #[arg(long)]
+    dump_pawn_trace: Option<PathBuf>,
+    #[arg(long, default_value_t = 28)]
+    map_width: usize,
+    #[arg(long, default_value_t = 28)]
+    map_height: usize,
+    #[command(flatten)]
+    view: ViewArgs,
+}
+
+#[derive(Subcommand, Debug)]
+enum DebugCmd {
+    ListDefs {
+        #[arg(long)]
+        def_filter: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        list_limit: usize,
+    },
+    SearchPackedTextures {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        search_limit: usize,
+    },
+    DiagnoseTextures,
+    ProbeTerrain {
+        #[arg(long, default_value_t = 64)]
+        terrain_probe_limit: usize,
+    },
+    ExtractPackedTextures {
+        output_dir: PathBuf,
+    },
+    PackedDecodeProbe {
+        #[arg(long, default_value_t = 24)]
+        sample_limit: usize,
+        #[arg(long, default_value_t = 8)]
+        min_attempts: usize,
+    },
 }
 
 fn parse_tint(input: &str) -> Result<[f32; 4], String> {
@@ -213,21 +231,25 @@ fn parse_clear_color(input: &str) -> Result<[f64; 4], String> {
     Ok([r, g, b, a])
 }
 
+fn render_runtime(view: &ViewArgs) -> (bool, RendererOptions, bool) {
+    let should_run_renderer = !view.no_window || view.screenshot.is_some();
+    let render_options = RendererOptions {
+        clear_color: view.clear_color,
+        surface_size: Some(PhysicalSize::new(
+            view.viewport_width.max(1),
+            view.viewport_height.max(1),
+        )),
+        initial_zoom: Some(view.camera_zoom.max(0.2)),
+    };
+    let hide_window = view.hidden_window || (view.no_window && view.screenshot.is_some());
+    (should_run_renderer, render_options, hide_window)
+}
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
-    let should_run_renderer = !cli.no_window || cli.screenshot.is_some();
-    let render_options = RendererOptions {
-        clear_color: cli.clear_color,
-        surface_size: Some(PhysicalSize::new(
-            cli.viewport_width.max(1),
-            cli.viewport_height.max(1),
-        )),
-        initial_zoom: Some(cli.camera_zoom.max(0.2)),
-    };
-    let hide_window = cli.hidden_window || (cli.no_window && cli.screenshot.is_some());
 
-    let rimworld_input = resolve_rimworld_input(cli.rimworld_data.clone()).context(
+    let rimworld_input = resolve_rimworld_input(cli.data.rimworld_data.clone()).context(
         "could not resolve RimWorld path; set --rimworld-data or STITCHLANDS_RIMWORLD_DATA",
     )?;
 
@@ -239,9 +261,9 @@ fn main() -> Result<()> {
     })?;
     info!("using RimWorld data dir: {}", data_dir.display());
 
-    let texture_roots = merge_path_list(&cli.texture_root, "STITCHLANDS_TEXTURE_ROOT");
+    let texture_roots = merge_path_list(&cli.data.texture_root, "STITCHLANDS_TEXTURE_ROOT");
     let packed_root_overrides =
-        merge_path_list(&cli.packed_data_root, "STITCHLANDS_PACKED_DATA_ROOT");
+        merge_path_list(&cli.data.packed_data_root, "STITCHLANDS_PACKED_DATA_ROOT");
 
     let defs = load_thing_defs(&data_dir)
         .with_context(|| format!("loading defs from {}", data_dir.display()))?;
@@ -290,7 +312,7 @@ fn main() -> Result<()> {
     packed_roots.sort();
     packed_roots.dedup();
 
-    for explicit in &cli.typetree_registry {
+    for explicit in &cli.data.typetree_registry {
         if !explicit.exists() {
             warn!(
                 "typetree registry path does not exist and will be skipped: {}",
@@ -299,7 +321,7 @@ fn main() -> Result<()> {
         }
     }
     let typetree_registries =
-        resolve_typetree_registry_paths(&cli.typetree_registry, cli.auto_typetree);
+        resolve_typetree_registry_paths(&cli.data.typetree_registry, cli.data.auto_typetree);
     // RimWorld 2022 macOS assets in this project are typetree-stripped; without an external
     // registry packed Texture2D parsing often falls back to invalid dimensions/format metadata.
     if typetree_registries.is_empty() {
@@ -312,10 +334,11 @@ fn main() -> Result<()> {
         }
     }
 
-    let packed_index = if cli.no_packed_index {
+    let packed_index = if cli.data.no_packed_index {
         None
     } else {
         let index_path = cli
+            .data
             .packed_index_path
             .clone()
             .unwrap_or_else(default_packed_index_path);
@@ -323,7 +346,7 @@ fn main() -> Result<()> {
             &packed_roots,
             &typetree_registries,
             &index_path,
-            cli.rebuild_packed_index,
+            cli.data.rebuild_packed_index,
         )?;
         if index.is_empty() {
             warn!(
@@ -340,394 +363,396 @@ fn main() -> Result<()> {
         packed_index,
     );
 
-    if let Some(output_dir) = &cli.extract_packed_textures {
-        run_extract_packed_textures(
-            asset_resolver.packed_roots(),
-            asset_resolver.typetree_registries(),
-            output_dir,
-        )?;
-        info!(
-            "extract command complete for output dir {}",
-            output_dir.display()
-        );
-        return Ok(());
-    }
-
-    if let Some(query) = &cli.search_packed_textures {
-        print_packed_texture_search(&asset_resolver, query, cli.search_limit);
-        return Ok(());
-    }
-
-    if cli.diagnose_textures {
-        diagnose_textures(
-            &data_dir,
-            asset_resolver.texture_roots(),
-            asset_resolver.packed_roots(),
-        );
-        return Ok(());
-    }
-
-    if cli.list_defs {
-        list_defs(&defs, cli.def_filter.as_deref(), cli.list_limit);
-        return Ok(());
-    }
-
-    if let Some(image_path) = &cli.image_path {
-        let image = image::open(image_path)
-            .with_context(|| format!("loading image {}", image_path.display()))?
-            .to_rgba8();
-        info!("loaded direct image asset: {}", image_path.display());
-
-        let sprite = RenderSprite {
-            def_name: format!("image:{}", image_path.display()),
-            image,
-            params: SpriteParams {
-                world_pos: Vec3::new(cli.cell_x + 0.5, cli.cell_z + 0.5, 0.0),
-                size: Vec3::new(cli.scale, cli.scale, 0.0).truncate(),
-                tint: cli.tint,
-            },
-            used_fallback: false,
-        };
-
-        if let Some(screenshot) = &cli.screenshot {
-            info!("screenshot output: {}", screenshot.display());
-        }
-        if !should_run_renderer {
-            if let Some(export_path) = &cli.export_resolved {
-                sprite
-                    .image
-                    .save(export_path)
-                    .with_context(|| format!("saving image to {}", export_path.display()))?;
-                info!("wrote image export: {}", export_path.display());
-            }
-            return Ok(());
-        }
-
-        let mut app = App::new(
-            vec![sprite],
-            cli.screenshot,
-            None,
-            render_options,
-            hide_window,
-        );
-        let event_loop = EventLoop::new()?;
-        event_loop.run_app(&mut app)?;
-        return Ok(());
-    }
-
-    if cli.packed_decode_probe > 0
-        && let Some(outcome) = asset_resolver.run_packed_decode_probe(
-            cli.packed_decode_probe,
-            cli.packed_decode_probe_min_attempts,
-        )?
-    {
-        info!(
-            "packed decode probe: attempted={} succeeded={}",
-            outcome.attempted, outcome.succeeded
-        );
-        if outcome.disable_packed {
-            warn!(
-                "packed decode probe found 0 successful decodes in {} samples; disabling packed decode for this run",
-                outcome.attempted
-            );
-            for sample in outcome.sample_errors {
-                info!("packed decode probe sample failure: {sample}");
-            }
-            if !asset_resolver.has_typetree_registries() {
-                warn!(
-                    "remediation: provide --typetree-registry /path/to/registry.tpk (or set STITCHLANDS_TYPETREE_REGISTRY)"
+    match cli.command {
+        Command::Debug(debug) => match debug.command {
+            DebugCmd::ExtractPackedTextures { output_dir } => {
+                run_extract_packed_textures(
+                    asset_resolver.packed_roots(),
+                    asset_resolver.typetree_registries(),
+                    &output_dir,
+                )?;
+                info!(
+                    "extract command complete for output dir {}",
+                    output_dir.display()
                 );
+                Ok(())
             }
-        }
-    }
-
-    if cli.probe_terrain {
-        run_terrain_probe(
-            &data_dir,
-            &terrain_defs,
-            &mut asset_resolver,
-            cli.terrain_probe_limit,
-        )?;
-        return Ok(());
-    }
-
-    if cli.scene_v1_fixture {
-        let (render_sprites, camera_focus) = build_v1_fixture_scene(FixtureSceneConfig {
-            data_dir: &data_dir,
-            thing_defs: &defs,
-            terrain_defs: &terrain_defs,
-            apparel_defs: &apparel_defs,
-            body_type_defs: &body_type_defs,
-            head_type_defs: &head_type_defs,
-            beard_defs: &beard_defs,
-            hair_defs: &hair_defs,
-            asset_resolver: &mut asset_resolver,
-            width: cli.map_width,
-            height: cli.map_height,
-            pawn_focus_only: false,
-            pawn_audit_mode: false,
-            pawn_count: 6,
-            pawn_fixture_variant: cli.pawn_fixture_variant,
-            dump_pawn_trace: cli.dump_pawn_trace.clone(),
-            compose_config: compose_config.clone(),
-            strict_missing: !cli.allow_fallback,
-        })?;
-        if !should_run_renderer {
-            return Ok(());
-        }
-        let mut app = App::new(
-            render_sprites,
-            cli.screenshot,
-            Some(camera_focus),
-            render_options,
-            hide_window,
-        );
-        let event_loop = EventLoop::new()?;
-        event_loop.run_app(&mut app)?;
-        return Ok(());
-    }
-
-    if cli.pawn_fixture {
-        let (render_sprites, camera_focus) = build_v1_fixture_scene(FixtureSceneConfig {
-            data_dir: &data_dir,
-            thing_defs: &defs,
-            terrain_defs: &terrain_defs,
-            apparel_defs: &apparel_defs,
-            body_type_defs: &body_type_defs,
-            head_type_defs: &head_type_defs,
-            beard_defs: &beard_defs,
-            hair_defs: &hair_defs,
-            asset_resolver: &mut asset_resolver,
-            width: cli.map_width.clamp(8, 18),
-            height: cli.map_height.clamp(8, 18),
-            pawn_focus_only: true,
-            pawn_audit_mode: false,
-            pawn_count: 1,
-            pawn_fixture_variant: cli.pawn_fixture_variant,
-            dump_pawn_trace: cli.dump_pawn_trace.clone(),
-            compose_config: compose_config.clone(),
-            strict_missing: !cli.allow_fallback,
-        })?;
-        if !should_run_renderer {
-            return Ok(());
-        }
-        let mut app = App::new(
-            render_sprites,
-            cli.screenshot,
-            Some(camera_focus),
-            render_options,
-            hide_window,
-        );
-        let event_loop = EventLoop::new()?;
-        event_loop.run_app(&mut app)?;
-        return Ok(());
-    }
-
-    if cli.pawn_audit {
-        let (render_sprites, camera_focus) = build_v1_fixture_scene(FixtureSceneConfig {
-            data_dir: &data_dir,
-            thing_defs: &defs,
-            terrain_defs: &terrain_defs,
-            apparel_defs: &apparel_defs,
-            body_type_defs: &body_type_defs,
-            head_type_defs: &head_type_defs,
-            beard_defs: &beard_defs,
-            hair_defs: &hair_defs,
-            asset_resolver: &mut asset_resolver,
-            width: cli.map_width.max(24),
-            height: cli.map_height.max(24),
-            pawn_focus_only: false,
-            pawn_audit_mode: true,
-            pawn_count: cli.pawn_audit_count.clamp(6, 20),
-            pawn_fixture_variant: cli.pawn_fixture_variant,
-            dump_pawn_trace: cli.dump_pawn_trace.clone(),
-            compose_config: compose_config.clone(),
-            strict_missing: !cli.allow_fallback,
-        })?;
-        if !should_run_renderer {
-            return Ok(());
-        }
-        let mut app = App::new(
-            render_sprites,
-            cli.screenshot,
-            Some(camera_focus),
-            render_options,
-            hide_window,
-        );
-        let event_loop = EventLoop::new()?;
-        event_loop.run_app(&mut app)?;
-        return Ok(());
-    }
-
-    let thingdef = cli
-        .thingdef
-        .as_deref()
-        .context("--thingdef or --image-path is required unless --list-defs is used")?;
-    let thing = defs
-        .get(thingdef)
-        .cloned()
-        .with_context(|| make_missing_def_message(thingdef, &defs))?;
-    info!("selected def: {}", thing.def_name);
-
-    let mut selected_defs = vec![thing];
-    for extra_name in &cli.extra_thingdef {
-        let extra = defs
-            .get(extra_name)
-            .cloned()
-            .with_context(|| make_missing_def_message(extra_name, &defs))?;
-        info!("selected extra def: {}", extra.def_name);
-        selected_defs.push(extra);
-    }
-
-    let mut render_sprites = Vec::with_capacity(selected_defs.len());
-    let sheet_columns = if cli.sheet_columns == 0 {
-        selected_defs.len().max(1)
-    } else {
-        cli.sheet_columns
-    };
-    let sheet_spacing = cli.sheet_spacing.max(0.1);
-    let sheet_rows = selected_defs.len().div_ceil(sheet_columns);
-    let sheet_camera_center = if selected_defs.len() > 1 {
-        Some(Vec2::new(
-            cli.cell_x + 0.5 + ((sheet_columns - 1) as f32 * sheet_spacing * 0.5),
-            cli.cell_z + 0.5 + ((sheet_rows - 1) as f32 * sheet_spacing * 0.5),
-        ))
-    } else {
-        None
-    };
-    for (index, selected) in selected_defs.iter().enumerate() {
-        let resolved = asset_resolver
-            .resolve_thing(&data_dir, selected)
-            .with_context(|| {
-                format!(
-                    "resolving texture for def '{}' path '{}'",
-                    selected.def_name, selected.graphic_data.tex_path
-                )
-            })?;
-        let sprite_asset = resolved.sprite;
-        let resolved_from_packed = resolved.resolved_from_packed;
-
-        if sprite_asset.used_fallback {
-            if !cli.allow_fallback {
-                anyhow::bail!(
-                    "missing texture for '{}' ({}) - refusing checker fallback by default. rerun with --allow-fallback to continue",
-                    selected.def_name,
-                    selected.graphic_data.tex_path
+            DebugCmd::SearchPackedTextures {
+                query,
+                search_limit,
+            } => {
+                print_packed_texture_search(&asset_resolver, &query, search_limit);
+                Ok(())
+            }
+            DebugCmd::DiagnoseTextures => {
+                diagnose_textures(
+                    &data_dir,
+                    asset_resolver.texture_roots(),
+                    asset_resolver.packed_roots(),
                 );
+                Ok(())
             }
-            if asset_resolver.can_try_packed(&selected.graphic_data.tex_path) {
-                if let Some(probe) = asset_resolver
-                    .maybe_probe_decode_candidates(&selected.graphic_data.tex_path, 8)?
-                    && probe.attempted > 0
+            DebugCmd::ListDefs {
+                def_filter,
+                list_limit,
+            } => {
+                list_defs(&defs, def_filter.as_deref(), list_limit);
+                Ok(())
+            }
+            DebugCmd::ProbeTerrain {
+                terrain_probe_limit,
+            } => {
+                run_terrain_probe(
+                    &data_dir,
+                    &terrain_defs,
+                    &mut asset_resolver,
+                    terrain_probe_limit,
+                )?;
+                Ok(())
+            }
+            DebugCmd::PackedDecodeProbe {
+                sample_limit,
+                min_attempts,
+            } => {
+                if let Some(outcome) =
+                    asset_resolver.run_packed_decode_probe(sample_limit, min_attempts)?
                 {
-                    warn!(
-                        "packed texture probe for '{}' attempted {} candidates, {} decodable",
-                        selected.def_name, probe.attempted, probe.succeeded
+                    info!(
+                        "packed decode probe: attempted={} succeeded={}",
+                        outcome.attempted, outcome.succeeded
                     );
-                    for (name, err) in probe.sample_errors {
-                        info!("packed candidate '{}' failed decode: {}", name, err);
-                    }
-                    if probe.succeeded == 0 {
+                    if outcome.disable_packed {
                         warn!(
-                            "no decodable packed candidates for '{}'; this usually means stripped/missing TypeTree metadata for this Unity build",
-                            selected.def_name
+                            "packed decode probe found 0 successful decodes in {} samples; disabling packed decode for this run",
+                            outcome.attempted
                         );
+                        for sample in outcome.sample_errors {
+                            info!("packed decode probe sample failure: {sample}");
+                        }
                     }
                 }
-            } else {
-                info!(
-                    "packed index has no candidate for '{}'; skipping packed decode",
-                    selected.graphic_data.tex_path
-                );
+                Ok(())
             }
-            warn!(
-                "texture missing for '{}' ({}) - using checker fallback",
-                selected.def_name, selected.graphic_data.tex_path
-            );
-            for attempted in sprite_asset.attempted_paths.iter().take(6) {
-                info!("attempted: {}", attempted.display());
-            }
-        }
-
-        if let Some(path) = &sprite_asset.source_path {
-            if resolved_from_packed {
-                info!("resolved texture (packed): {}", path.display());
-            } else if sprite_asset.resolved_with_fuzzy_match {
-                info!("resolved texture (fuzzy): {}", path.display());
-            } else {
-                info!("resolved texture: {}", path.display());
-            }
-        }
-
-        if let Some(export_path) = &cli.export_resolved {
-            let with_suffix = if selected_defs.len() == 1 {
-                export_path.clone()
-            } else {
-                let stem = export_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("resolved");
-                let ext = export_path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("png");
-                let filename = format!("{stem}_{}_{}.{}", index, selected.def_name, ext);
-                export_path.with_file_name(filename)
+        },
+        Command::Fixture { mode } => {
+            let (fixture, is_pawn) = match mode {
+                FixtureCmd::V1(args) => (args, false),
+                FixtureCmd::Pawn(args) => (args, true),
             };
-            sprite_asset
-                .image
-                .save(&with_suffix)
-                .with_context(|| format!("saving resolved sprite to {}", with_suffix.display()))?;
-            info!("wrote resolved sprite image: {}", with_suffix.display());
+            let (should_run_renderer, render_options, hide_window) = render_runtime(&fixture.view);
+            let (render_sprites, camera_focus) = if !is_pawn {
+                build_v1_fixture_scene(FixtureSceneConfig {
+                    data_dir: &data_dir,
+                    thing_defs: &defs,
+                    terrain_defs: &terrain_defs,
+                    apparel_defs: &apparel_defs,
+                    body_type_defs: &body_type_defs,
+                    head_type_defs: &head_type_defs,
+                    beard_defs: &beard_defs,
+                    hair_defs: &hair_defs,
+                    asset_resolver: &mut asset_resolver,
+                    width: fixture.map_width,
+                    height: fixture.map_height,
+                    pawn_focus_only: false,
+                    pawn_audit_mode: false,
+                    pawn_count: 6,
+                    pawn_fixture_variant: fixture.pawn_fixture_variant,
+                    dump_pawn_trace: fixture.dump_pawn_trace.clone(),
+                    compose_config: compose_config.clone(),
+                    strict_missing: !cli.data.allow_fallback,
+                })?
+            } else {
+                build_v1_fixture_scene(FixtureSceneConfig {
+                    data_dir: &data_dir,
+                    thing_defs: &defs,
+                    terrain_defs: &terrain_defs,
+                    apparel_defs: &apparel_defs,
+                    body_type_defs: &body_type_defs,
+                    head_type_defs: &head_type_defs,
+                    beard_defs: &beard_defs,
+                    hair_defs: &hair_defs,
+                    asset_resolver: &mut asset_resolver,
+                    width: fixture.map_width.clamp(8, 18),
+                    height: fixture.map_height.clamp(8, 18),
+                    pawn_focus_only: true,
+                    pawn_audit_mode: false,
+                    pawn_count: 1,
+                    pawn_fixture_variant: fixture.pawn_fixture_variant,
+                    dump_pawn_trace: fixture.dump_pawn_trace.clone(),
+                    compose_config: compose_config.clone(),
+                    strict_missing: !cli.data.allow_fallback,
+                })?
+            };
+            if !should_run_renderer {
+                return Ok(());
+            }
+            let mut app = App::new(
+                render_sprites,
+                fixture.view.screenshot,
+                Some(camera_focus),
+                render_options,
+                hide_window,
+            );
+            let event_loop = EventLoop::new()?;
+            event_loop.run_app(&mut app)?;
+            Ok(())
         }
+        Command::Audit(audit) => {
+            let (should_run_renderer, render_options, hide_window) = render_runtime(&audit.view);
+            let (render_sprites, camera_focus) = build_v1_fixture_scene(FixtureSceneConfig {
+                data_dir: &data_dir,
+                thing_defs: &defs,
+                terrain_defs: &terrain_defs,
+                apparel_defs: &apparel_defs,
+                body_type_defs: &body_type_defs,
+                head_type_defs: &head_type_defs,
+                beard_defs: &beard_defs,
+                hair_defs: &hair_defs,
+                asset_resolver: &mut asset_resolver,
+                width: audit.map_width.max(24),
+                height: audit.map_height.max(24),
+                pawn_focus_only: false,
+                pawn_audit_mode: true,
+                pawn_count: audit.pawn_count.clamp(6, 20),
+                pawn_fixture_variant: audit.pawn_fixture_variant,
+                dump_pawn_trace: audit.dump_pawn_trace.clone(),
+                compose_config: compose_config.clone(),
+                strict_missing: !cli.data.allow_fallback,
+            })?;
+            if !should_run_renderer {
+                return Ok(());
+            }
+            let mut app = App::new(
+                render_sprites,
+                audit.view.screenshot,
+                Some(camera_focus),
+                render_options,
+                hide_window,
+            );
+            let event_loop = EventLoop::new()?;
+            event_loop.run_app(&mut app)?;
+            Ok(())
+        }
+        Command::Render(render) => {
+            let (should_run_renderer, render_options, hide_window) = render_runtime(&render.view);
+            if let Some(image_path) = &render.image_path {
+                let image = image::open(image_path)
+                    .with_context(|| format!("loading image {}", image_path.display()))?
+                    .to_rgba8();
+                info!("loaded direct image asset: {}", image_path.display());
 
-        let size = selected.graphic_data.draw_size * cli.scale;
-        let draw_offset = selected.graphic_data.draw_offset;
-        let col = index % sheet_columns;
-        let row = index / sheet_columns;
-        let world_pos = Vec3::new(
-            cli.cell_x + col as f32 * sheet_spacing + 0.5 + draw_offset.x,
-            cli.cell_z + row as f32 * sheet_spacing + 0.5 + draw_offset.z,
-            draw_offset.y,
-        );
-        let tint = [
-            cli.tint[0] * selected.graphic_data.color.r,
-            cli.tint[1] * selected.graphic_data.color.g,
-            cli.tint[2] * selected.graphic_data.color.b,
-            cli.tint[3] * selected.graphic_data.color.a,
-        ];
+                let sprite = RenderSprite {
+                    def_name: format!("image:{}", image_path.display()),
+                    image,
+                    params: SpriteParams {
+                        world_pos: Vec3::new(render.cell_x + 0.5, render.cell_z + 0.5, 0.0),
+                        size: Vec3::new(render.scale, render.scale, 0.0).truncate(),
+                        tint: render.tint,
+                    },
+                    used_fallback: false,
+                };
 
-        info!(
-            "sprite params [{}] {} -> size=({:.2}, {:.2}) offset=({:.2}, {:.2}, {:.2})",
-            index, selected.def_name, size.x, size.y, draw_offset.x, draw_offset.y, draw_offset.z
-        );
+                if let Some(screenshot) = &render.view.screenshot {
+                    info!("screenshot output: {}", screenshot.display());
+                }
+                if !should_run_renderer {
+                    if let Some(export_path) = &render.export_resolved {
+                        sprite.image.save(export_path).with_context(|| {
+                            format!("saving image to {}", export_path.display())
+                        })?;
+                        info!("wrote image export: {}", export_path.display());
+                    }
+                    return Ok(());
+                }
 
-        render_sprites.push(RenderSprite {
-            def_name: selected.def_name.clone(),
-            image: sprite_asset.image,
-            params: SpriteParams {
-                world_pos,
-                size,
-                tint,
-            },
-            used_fallback: sprite_asset.used_fallback,
-        });
+                let mut app = App::new(
+                    vec![sprite],
+                    render.view.screenshot,
+                    None,
+                    render_options,
+                    hide_window,
+                );
+                let event_loop = EventLoop::new()?;
+                event_loop.run_app(&mut app)?;
+                return Ok(());
+            }
+
+            let thingdef = render
+                .thingdef
+                .as_deref()
+                .context("--thingdef or --image-path is required for render")?;
+            let thing = defs
+                .get(thingdef)
+                .cloned()
+                .with_context(|| make_missing_def_message(thingdef, &defs))?;
+            info!("selected def: {}", thing.def_name);
+
+            let mut selected_defs = vec![thing];
+            for extra_name in &render.extra_thingdef {
+                let extra = defs
+                    .get(extra_name)
+                    .cloned()
+                    .with_context(|| make_missing_def_message(extra_name, &defs))?;
+                info!("selected extra def: {}", extra.def_name);
+                selected_defs.push(extra);
+            }
+
+            let mut render_sprites = Vec::with_capacity(selected_defs.len());
+            let sheet_columns = if render.sheet_columns == 0 {
+                selected_defs.len().max(1)
+            } else {
+                render.sheet_columns
+            };
+            let sheet_spacing = render.sheet_spacing.max(0.1);
+            let sheet_rows = selected_defs.len().div_ceil(sheet_columns);
+            let sheet_camera_center = if selected_defs.len() > 1 {
+                Some(Vec2::new(
+                    render.cell_x + 0.5 + ((sheet_columns - 1) as f32 * sheet_spacing * 0.5),
+                    render.cell_z + 0.5 + ((sheet_rows - 1) as f32 * sheet_spacing * 0.5),
+                ))
+            } else {
+                None
+            };
+            for (index, selected) in selected_defs.iter().enumerate() {
+                let resolved = asset_resolver
+                    .resolve_thing(&data_dir, selected)
+                    .with_context(|| {
+                        format!(
+                            "resolving texture for def '{}' path '{}'",
+                            selected.def_name, selected.graphic_data.tex_path
+                        )
+                    })?;
+                let sprite_asset = resolved.sprite;
+                let resolved_from_packed = resolved.resolved_from_packed;
+
+                if sprite_asset.used_fallback {
+                    if !cli.data.allow_fallback {
+                        anyhow::bail!(
+                            "missing texture for '{}' ({}) - refusing checker fallback by default. rerun with --allow-fallback to continue",
+                            selected.def_name,
+                            selected.graphic_data.tex_path
+                        );
+                    }
+                    if asset_resolver.can_try_packed(&selected.graphic_data.tex_path) {
+                        if let Some(probe) = asset_resolver
+                            .maybe_probe_decode_candidates(&selected.graphic_data.tex_path, 8)?
+                            && probe.attempted > 0
+                        {
+                            warn!(
+                                "packed texture probe for '{}' attempted {} candidates, {} decodable",
+                                selected.def_name, probe.attempted, probe.succeeded
+                            );
+                            for (name, err) in probe.sample_errors {
+                                info!("packed candidate '{}' failed decode: {}", name, err);
+                            }
+                            if probe.succeeded == 0 {
+                                warn!(
+                                    "no decodable packed candidates for '{}'; this usually means stripped/missing TypeTree metadata for this Unity build",
+                                    selected.def_name
+                                );
+                            }
+                        }
+                    } else {
+                        info!(
+                            "packed index has no candidate for '{}'; skipping packed decode",
+                            selected.graphic_data.tex_path
+                        );
+                    }
+                    warn!(
+                        "texture missing for '{}' ({}) - using checker fallback",
+                        selected.def_name, selected.graphic_data.tex_path
+                    );
+                    for attempted in sprite_asset.attempted_paths.iter().take(6) {
+                        info!("attempted: {}", attempted.display());
+                    }
+                }
+
+                if let Some(path) = &sprite_asset.source_path {
+                    if resolved_from_packed {
+                        info!("resolved texture (packed): {}", path.display());
+                    } else if sprite_asset.resolved_with_fuzzy_match {
+                        info!("resolved texture (fuzzy): {}", path.display());
+                    } else {
+                        info!("resolved texture: {}", path.display());
+                    }
+                }
+
+                if let Some(export_path) = &render.export_resolved {
+                    let with_suffix = if selected_defs.len() == 1 {
+                        export_path.clone()
+                    } else {
+                        let stem = export_path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("resolved");
+                        let ext = export_path
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("png");
+                        let filename = format!("{stem}_{}_{}.{}", index, selected.def_name, ext);
+                        export_path.with_file_name(filename)
+                    };
+                    sprite_asset.image.save(&with_suffix).with_context(|| {
+                        format!("saving resolved sprite to {}", with_suffix.display())
+                    })?;
+                    info!("wrote resolved sprite image: {}", with_suffix.display());
+                }
+
+                let size = selected.graphic_data.draw_size * render.scale;
+                let draw_offset = selected.graphic_data.draw_offset;
+                let col = index % sheet_columns;
+                let row = index / sheet_columns;
+                let world_pos = Vec3::new(
+                    render.cell_x + col as f32 * sheet_spacing + 0.5 + draw_offset.x,
+                    render.cell_z + row as f32 * sheet_spacing + 0.5 + draw_offset.z,
+                    draw_offset.y,
+                );
+                let tint = [
+                    render.tint[0] * selected.graphic_data.color.r,
+                    render.tint[1] * selected.graphic_data.color.g,
+                    render.tint[2] * selected.graphic_data.color.b,
+                    render.tint[3] * selected.graphic_data.color.a,
+                ];
+
+                info!(
+                    "sprite params [{}] {} -> size=({:.2}, {:.2}) offset=({:.2}, {:.2}, {:.2})",
+                    index,
+                    selected.def_name,
+                    size.x,
+                    size.y,
+                    draw_offset.x,
+                    draw_offset.y,
+                    draw_offset.z
+                );
+
+                render_sprites.push(RenderSprite {
+                    def_name: selected.def_name.clone(),
+                    image: sprite_asset.image,
+                    params: SpriteParams {
+                        world_pos,
+                        size,
+                        tint,
+                    },
+                    used_fallback: sprite_asset.used_fallback,
+                });
+            }
+
+            if !should_run_renderer {
+                return Ok(());
+            }
+
+            let mut app = App::new(
+                render_sprites,
+                render.view.screenshot,
+                sheet_camera_center,
+                render_options,
+                hide_window,
+            );
+            let event_loop = EventLoop::new()?;
+            event_loop.run_app(&mut app)?;
+            Ok(())
+        }
     }
-
-    if !should_run_renderer {
-        return Ok(());
-    }
-
-    let mut app = App::new(
-        render_sprites,
-        cli.screenshot,
-        sheet_camera_center,
-        render_options,
-        hide_window,
-    );
-    let event_loop = EventLoop::new()?;
-    event_loop.run_app(&mut app)?;
-    Ok(())
 }
 
 struct FixtureSceneConfig<'a> {

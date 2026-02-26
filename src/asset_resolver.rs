@@ -46,10 +46,6 @@ impl AssetResolver {
         &self.typetree_registries
     }
 
-    pub fn has_typetree_registries(&self) -> bool {
-        !self.typetree_registries.is_empty()
-    }
-
     pub fn search_packed_names(&self, query: &str, limit: usize) -> Option<Vec<String>> {
         self.packed_index
             .as_ref()
