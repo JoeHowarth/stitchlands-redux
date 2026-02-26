@@ -1021,7 +1021,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                     draw_offset: worn_data.offset,
                     draw_scale: worn_data.scale,
                     layer_override: apparel_draw_layer_for_facing(apparel, facing),
-                    draw_size: apparel.draw_size,
+                    draw_size: apparel.draw_size * 1.5,
                     tint: [
                         apparel.color.r,
                         apparel.color.g,
@@ -1069,20 +1069,20 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             stump_tex_path: None,
             hair_tex_path: hair_tex.map(|p| directional_tex_path(&p, facing)),
             beard_tex_path: beard_tex.map(|p| directional_tex_path(&p, facing)),
-            body_size: Vec2::new(1.0, 1.0),
+            body_size: Vec2::new(1.5, 1.5),
             head_size: head_render
                 .as_ref()
-                .map(|_| Vec2::new(1.0, 1.0))
-                .unwrap_or(Vec2::new(1.0, 1.0)),
+                .map(|_| Vec2::new(1.5, 1.5))
+                .unwrap_or(Vec2::new(1.5, 1.5)),
             stump_size: Vec2::new(0.8, 0.8),
             hair_size: head_render
                 .as_ref()
-                .map(|h| h.hair_mesh_size * 0.66)
-                .unwrap_or(Vec2::new(1.0, 1.0)),
+                .map(|h| h.hair_mesh_size)
+                .unwrap_or(Vec2::new(1.5, 1.5)),
             beard_size: head_render
                 .as_ref()
-                .map(|h| h.beard_mesh_size * 0.66)
-                .unwrap_or(Vec2::new(1.0, 1.0)),
+                .map(|h| h.beard_mesh_size)
+                .unwrap_or(Vec2::new(1.5, 1.5)),
             body_type: BodyTypeRenderData {
                 head_offset: body_render
                     .map(|b| b.head_offset)

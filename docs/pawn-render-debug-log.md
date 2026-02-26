@@ -40,3 +40,22 @@
 ### Conclusions
 - Pawn screenshots are materially closer to RimWorld and less artifact-prone.
 - Core remaining gap is deeper parity with node base-layer hierarchy and mesh-size semantics.
+
+## 2026-02-26 - Iteration 3
+
+### Learnings
+- RimWorld humanlike rendering uses mesh-set sizes around `1.5` for body/head and head-type mesh sizes for hair/beard.
+- Keeping our pawn mesh basis at `1.0` produced compressed silhouettes and exaggerated head offset perception.
+
+### Hypotheses
+- Matching humanlike mesh sizing from decompiled `HumanlikeMeshPoolUtility` should improve overall proportions without ad-hoc offset multipliers.
+
+### Actions
+- Switched fixture body/head base size to `1.5`.
+- Switched hair/beard size to parsed head-type mesh sizes directly.
+- Scaled apparel draw size to the same mesh basis (`* 1.5`) before worn-graphic directional scaling.
+- Re-ran deterministic 10-variant screenshot loop and trace dump.
+
+### Conclusions
+- Silhouette and proportion look closer to RimWorld baselines in south/east/west facings.
+- Remaining fidelity work is primarily in exact node base-layer hierarchy and advanced render-tree node parenting.
