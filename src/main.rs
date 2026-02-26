@@ -123,6 +123,9 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     pawn_fixture: bool,
 
+    #[arg(long, default_value_t = 0)]
+    pawn_fixture_variant: usize,
+
     #[arg(long, default_value_t = 40)]
     map_width: usize,
 
@@ -387,6 +390,7 @@ fn main() -> Result<()> {
             width: cli.map_width,
             height: cli.map_height,
             pawn_focus_only: false,
+            pawn_fixture_variant: cli.pawn_fixture_variant,
         })?;
         if cli.no_window {
             return Ok(());
@@ -411,6 +415,7 @@ fn main() -> Result<()> {
             width: cli.map_width.clamp(8, 18),
             height: cli.map_height.clamp(8, 18),
             pawn_focus_only: true,
+            pawn_fixture_variant: cli.pawn_fixture_variant,
         })?;
         if cli.no_window {
             return Ok(());
@@ -575,6 +580,7 @@ struct FixtureSceneConfig<'a> {
     width: usize,
     height: usize,
     pawn_focus_only: bool,
+    pawn_fixture_variant: usize,
 }
 
 fn make_missing_def_message(
@@ -624,6 +630,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         width,
         height,
         pawn_focus_only,
+        pawn_fixture_variant,
     } = config;
 
     let mut terrain_rows: Vec<_> = terrain_defs.values().collect();
@@ -719,10 +726,9 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
 
     let mut apparel_rows: Vec<_> = apparel_defs.values().collect();
     apparel_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
-    let mut chosen_apparel: Vec<(ApparelDef, image::RgbaImage)> = Vec::new();
-    let mut picked_body_layer = false;
-    let mut picked_shell_layer = false;
-    let mut picked_head_layer = false;
+    let mut body_layer_apparel = Vec::new();
+    let mut shell_layer_apparel = Vec::new();
+    let mut head_layer_apparel = Vec::new();
     for apparel in apparel_rows {
         let resolved = asset_resolver.resolve_texture_path(data_dir, apparel.tex_path.as_str())?;
         if resolved.sprite.used_fallback {
@@ -742,20 +748,28 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             ApparelLayerDef::Overhead | ApparelLayerDef::EyeCover
         );
 
-        if is_body && !picked_body_layer {
-            picked_body_layer = true;
-            chosen_apparel.push((apparel.clone(), resolved.sprite.image));
-        } else if is_shellish && !picked_shell_layer {
-            picked_shell_layer = true;
-            chosen_apparel.push((apparel.clone(), resolved.sprite.image));
-        } else if is_head && !picked_head_layer {
-            picked_head_layer = true;
-            chosen_apparel.push((apparel.clone(), resolved.sprite.image));
+        if is_body {
+            body_layer_apparel.push((apparel.clone(), resolved.sprite.image.clone()));
         }
-
-        if picked_body_layer && picked_shell_layer && picked_head_layer {
-            break;
+        if is_shellish {
+            shell_layer_apparel.push((apparel.clone(), resolved.sprite.image.clone()));
         }
+        if is_head {
+            head_layer_apparel.push((apparel.clone(), resolved.sprite.image));
+        }
+    }
+    let mut chosen_apparel: Vec<(ApparelDef, image::RgbaImage)> = Vec::new();
+    if !body_layer_apparel.is_empty() {
+        let idx = pawn_fixture_variant % body_layer_apparel.len();
+        chosen_apparel.push(body_layer_apparel[idx].clone());
+    }
+    if !shell_layer_apparel.is_empty() {
+        let idx = (pawn_fixture_variant / 2) % shell_layer_apparel.len();
+        chosen_apparel.push(shell_layer_apparel[idx].clone());
+    }
+    if !head_layer_apparel.is_empty() {
+        let idx = (pawn_fixture_variant / 3) % head_layer_apparel.len();
+        chosen_apparel.push(head_layer_apparel[idx].clone());
     }
     if chosen_apparel.is_empty() {
         warn!("v1 fixture found no decodable apparel layers; pawns will be unclothed");
@@ -780,11 +794,12 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             .collect()
     };
     let pawn_tex: Vec<String> = if pawn_focus_only {
-        pawn_body_choices
-            .iter()
-            .take(1)
-            .map(|(body, _)| body.body_naked_graphic_path.clone())
-            .collect()
+        vec![
+            pawn_body_choices[pawn_fixture_variant % pawn_body_choices.len()]
+                .0
+                .body_naked_graphic_path
+                .clone(),
+        ]
     } else {
         pawn_body_choices
             .iter()
@@ -922,10 +937,18 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         let head_tex = if head_tex_paths.is_empty() {
             None
         } else {
-            Some(head_tex_paths[pawn.label.len() % head_tex_paths.len()].clone())
+            Some(head_tex_paths[pawn_fixture_variant % head_tex_paths.len()].clone())
         };
-        let hair_tex = hair_tex_paths.first().cloned();
-        let beard_tex = beard_tex_paths.first().cloned();
+        let hair_tex = if hair_tex_paths.is_empty() {
+            None
+        } else {
+            Some(hair_tex_paths[(pawn_fixture_variant / 5) % hair_tex_paths.len()].clone())
+        };
+        let beard_tex = if beard_tex_paths.is_empty() {
+            None
+        } else {
+            Some(beard_tex_paths[(pawn_fixture_variant / 7) % beard_tex_paths.len()].clone())
+        };
         let body_render = body_by_tex.get(&pawn.tex_path);
         let head_render = head_tex
             .as_ref()
@@ -1065,12 +1088,13 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
 
     if pawn_focus_only {
         info!(
-            "pawn fixture scene built: map={}x{} terrain_families={} pawns={} drawables={}",
+            "pawn fixture scene built: map={}x{} terrain_families={} pawns={} drawables={} variant={}",
             map.width,
             map.height,
             count_terrain_families(&map),
             map.pawns.len(),
-            sprites.len()
+            sprites.len(),
+            pawn_fixture_variant
         );
     } else {
         info!(
