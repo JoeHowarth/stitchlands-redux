@@ -4,6 +4,7 @@ mod cli;
 mod commands;
 mod defs;
 mod fixtures;
+mod path;
 mod pawn;
 mod renderer;
 mod scene;

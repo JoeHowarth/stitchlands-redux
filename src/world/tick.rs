@@ -1,0 +1,129 @@
+use glam::Vec2;
+
+use crate::path::{PathGrid, find_path};
+
+use super::WorldState;
+
+pub fn build_path_grid(world: &WorldState) -> PathGrid {
+    let mut grid = PathGrid::new(world.width, world.height);
+    for thing in &world.things {
+        if thing.blocks_movement {
+            grid.set_blocked(thing.cell_x, thing.cell_z, true);
+        }
+    }
+    for pawn in &world.pawns {
+        grid.set_blocked(pawn.cell_x, pawn.cell_z, true);
+    }
+    grid
+}
+
+pub fn issue_move_intent(world: &mut WorldState, pawn_id: usize, dest: (i32, i32)) -> bool {
+    let Some(pawn_index) = world.pawns.iter().position(|pawn| pawn.id == pawn_id) else {
+        return false;
+    };
+    let start = (
+        world.pawns[pawn_index].cell_x,
+        world.pawns[pawn_index].cell_z,
+    );
+    let mut grid = build_path_grid(world);
+    grid.set_blocked(start.0, start.1, false);
+
+    let Some(path) = find_path(&grid, start, dest) else {
+        return false;
+    };
+    world.pawns[pawn_index].path_cells = path;
+    world.pawns[pawn_index].path_index = 1;
+    true
+}
+
+pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
+    for pawn in &mut world.pawns {
+        if pawn.path_index >= pawn.path_cells.len() {
+            continue;
+        }
+
+        let target_cell = pawn.path_cells[pawn.path_index];
+        let target = Vec2::new(target_cell.0 as f32 + 0.5, target_cell.1 as f32 + 0.5);
+        let to_target = target - pawn.world_pos;
+        let distance = to_target.length();
+        let max_step = pawn.move_speed_cells_per_sec.max(0.1) * dt_seconds.max(0.0);
+
+        if distance <= max_step {
+            pawn.world_pos = target;
+            pawn.cell_x = target_cell.0;
+            pawn.cell_z = target_cell.1;
+            pawn.path_index += 1;
+        } else if distance > 0.0 {
+            pawn.world_pos += to_target / distance * max_step;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::fixtures::{MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn};
+    use crate::world::{WorldState, world_from_fixture};
+
+    use super::{issue_move_intent, tick_world};
+
+    fn fixture_world() -> WorldState {
+        world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 8,
+                height: 6,
+                terrain: vec![
+                    TerrainCell {
+                        terrain_def: "Soil".to_string(),
+                    };
+                    8 * 6
+                ],
+            },
+            things: vec![ThingSpawn {
+                def_name: "ChunkSlagSteel".to_string(),
+                cell_x: 3,
+                cell_z: 2,
+                blocks_movement: true,
+            }],
+            pawns: vec![PawnSpawn {
+                cell_x: 1,
+                cell_z: 1,
+                label: Some("PawnA".to_string()),
+                body: None,
+                head: None,
+                hair: None,
+                beard: None,
+                apparel_defs: Vec::new(),
+                facing: crate::fixtures::PawnFacingSpec::South,
+            }],
+            camera: None,
+        })
+    }
+
+    #[test]
+    fn move_intent_creates_non_empty_path() {
+        let mut world = fixture_world();
+        assert!(issue_move_intent(&mut world, 0, (5, 4)));
+        let pawn = world
+            .pawns
+            .iter_mut()
+            .find(|pawn| pawn.id == 0)
+            .expect("pawn");
+        assert!(!pawn.path_cells.is_empty());
+    }
+
+    #[test]
+    fn tick_moves_pawn_along_path() {
+        let mut world = fixture_world();
+        assert!(issue_move_intent(&mut world, 0, (5, 4)));
+        for _ in 0..180 {
+            tick_world(&mut world, 1.0 / 60.0);
+        }
+        let pawn = world
+            .pawns
+            .iter_mut()
+            .find(|pawn| pawn.id == 0)
+            .expect("pawn");
+        assert_eq!((pawn.cell_x, pawn.cell_z), (5, 4));
+    }
+}

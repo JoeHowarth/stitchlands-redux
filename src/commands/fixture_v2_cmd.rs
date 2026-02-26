@@ -12,14 +12,22 @@ use crate::pawn::{
 };
 use crate::renderer::SpriteParams;
 use crate::viewer::RenderSprite;
-use crate::world::world_from_fixture;
+use crate::world::{issue_move_intent, tick_world, world_from_fixture};
 
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
 pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Result<CommandAction> {
     let (should_run_renderer, render_options, hide_window) = crate::cli::render_runtime(&cmd.view);
     let fixture = crate::fixtures::load_fixture(&cmd.scene)?;
-    let world = world_from_fixture(&fixture);
+    let mut world = world_from_fixture(&fixture);
+    if let Some(first_pawn_id) = world.pawns.first().map(|pawn| pawn.id) {
+        let dest = (
+            (world.width as i32 - 2).max(0),
+            (world.height as i32 - 2).max(0),
+        );
+        let _ = issue_move_intent(&mut world, first_pawn_id, dest);
+        tick_world(&mut world, 0.0);
+    }
     let sprites = build_world_sprites(ctx, &world)?;
     let blocking_things = world
         .things
@@ -162,7 +170,7 @@ fn build_world_sprites(
         let render_input = PawnRenderInput {
             label: pawn.label.clone(),
             facing: map_facing(pawn.facing),
-            world_pos: Vec3::new(pawn.cell_x as f32 + 0.5, pawn.cell_z as f32 + 0.5, 0.0),
+            world_pos: Vec3::new(pawn.world_pos.x, pawn.world_pos.y, 0.0),
             body_tex_path: body.body_naked_graphic_path.clone(),
             head_tex_path: head.map(|v| v.graphic_path.clone()),
             stump_tex_path: None,
