@@ -9,6 +9,7 @@ use log::info;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::interaction::InteractionState;
@@ -257,7 +258,24 @@ impl App {
                 },
             });
         }
-        if let Some((x, z)) = self.interaction.selected_cell {
+        if let Some(runtime) = &self.runtime_state {
+            if let Some(selected_id) = runtime.selected_pawn_id
+                && let Some(selected) = runtime.pawns.iter().find(|pawn| pawn.id == selected_id)
+            {
+                out.push(SpriteInput {
+                    image: self.overlay_image.clone(),
+                    params: SpriteParams {
+                        world_pos: glam::Vec3::new(
+                            selected.world_pos.x,
+                            selected.world_pos.y,
+                            -0.21,
+                        ),
+                        size: Vec2::new(1.16, 1.16),
+                        tint: [1.00, 0.90, 0.20, 0.30],
+                    },
+                });
+            }
+        } else if let Some((x, z)) = self.interaction.selected_cell {
             out.push(SpriteInput {
                 image: self.overlay_image.clone(),
                 params: SpriteParams {
@@ -444,9 +462,16 @@ impl ApplicationHandler for App {
                                 runtime.selected_pawn_id = Some(hit_pawn_id);
                             }
                             self.interaction.selected_cell = Some(cell);
+                            info!(
+                                "selected pawn id={} at cell=({}, {})",
+                                hit_pawn_id, cell.0, cell.1
+                            );
                         } else if let Some(selected_pawn_id) = move_from_selected {
                             if self.issue_pawn_move(selected_pawn_id, cell) {
-                                self.interaction.selected_cell = Some(cell);
+                                info!(
+                                    "issued move pawn id={} to cell=({}, {})",
+                                    selected_pawn_id, cell.0, cell.1
+                                );
                             }
                         } else {
                             self.interaction.selected_cell = Some(cell);
@@ -457,7 +482,35 @@ impl ApplicationHandler for App {
                     }
                 }
             }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Right,
+                ..
+            } => {
+                if self.fixed_step {
+                    if let Some(runtime) = self.runtime_state.as_mut() {
+                        runtime.selected_pawn_id = None;
+                    }
+                    self.interaction.selected_cell = None;
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+            }
             _ => {
+                if let WindowEvent::KeyboardInput { event, .. } = &event
+                    && event.state == ElementState::Pressed
+                    && let PhysicalKey::Code(KeyCode::Escape) = event.physical_key
+                {
+                    if let Some(runtime) = self.runtime_state.as_mut() {
+                        runtime.selected_pawn_id = None;
+                    }
+                    self.interaction.selected_cell = None;
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                    return;
+                }
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;
                 };
