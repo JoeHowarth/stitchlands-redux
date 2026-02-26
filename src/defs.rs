@@ -81,6 +81,12 @@ impl Default for ApparelWornDirectionDef {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ApparelWornPartialDef {
+    pub offset: Option<Vec2>,
+    pub scale: Option<Vec2>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ApparelWornGraphicDef {
     pub render_utility_as_pack: bool,
@@ -88,6 +94,11 @@ pub struct ApparelWornGraphicDef {
     pub east: ApparelWornDirectionDef,
     pub south: ApparelWornDirectionDef,
     pub west: ApparelWornDirectionDef,
+    pub global_body_overrides: HashMap<String, ApparelWornPartialDef>,
+    pub north_body_overrides: HashMap<String, ApparelWornPartialDef>,
+    pub east_body_overrides: HashMap<String, ApparelWornPartialDef>,
+    pub south_body_overrides: HashMap<String, ApparelWornPartialDef>,
+    pub west_body_overrides: HashMap<String, ApparelWornPartialDef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -819,29 +830,68 @@ fn parse_apparel_worn_graphic(node: Node<'_, '_>) -> ApparelWornGraphicDef {
             .unwrap_or(false),
         ..Default::default()
     };
+    out.global_body_overrides = parse_body_override_map(node, &["north", "east", "south", "west"]);
     if let Some(north) = child_node(node, "north") {
-        out.north = parse_apparel_worn_direction(north);
+        let (dir, overrides) = parse_apparel_worn_direction(north);
+        out.north = dir;
+        out.north_body_overrides = overrides;
     }
     if let Some(east) = child_node(node, "east") {
-        out.east = parse_apparel_worn_direction(east);
+        let (dir, overrides) = parse_apparel_worn_direction(east);
+        out.east = dir;
+        out.east_body_overrides = overrides;
     }
     if let Some(south) = child_node(node, "south") {
-        out.south = parse_apparel_worn_direction(south);
+        let (dir, overrides) = parse_apparel_worn_direction(south);
+        out.south = dir;
+        out.south_body_overrides = overrides;
     }
     if let Some(west) = child_node(node, "west") {
-        out.west = parse_apparel_worn_direction(west);
+        let (dir, overrides) = parse_apparel_worn_direction(west);
+        out.west = dir;
+        out.west_body_overrides = overrides;
     }
     out
 }
 
-fn parse_apparel_worn_direction(node: Node<'_, '_>) -> ApparelWornDirectionDef {
+fn parse_apparel_worn_direction(
+    node: Node<'_, '_>,
+) -> (
+    ApparelWornDirectionDef,
+    HashMap<String, ApparelWornPartialDef>,
+) {
     let offset = child_text(node, "offset")
         .and_then(parse_vec2_inline)
         .unwrap_or(Vec2::ZERO);
     let scale = child_text(node, "scale")
         .and_then(parse_vec2_inline)
         .unwrap_or(Vec2::ONE);
-    ApparelWornDirectionDef { offset, scale }
+    let overrides = parse_body_override_map(node, &["offset", "scale"]);
+    (ApparelWornDirectionDef { offset, scale }, overrides)
+}
+
+fn parse_body_override_map(
+    node: Node<'_, '_>,
+    excluded_tags: &[&str],
+) -> HashMap<String, ApparelWornPartialDef> {
+    let mut out = HashMap::new();
+    for child in node.children().filter(|c| c.is_element()) {
+        let key = child.tag_name().name();
+        if excluded_tags
+            .iter()
+            .any(|tag| key.eq_ignore_ascii_case(tag))
+        {
+            continue;
+        }
+        let partial = ApparelWornPartialDef {
+            offset: child_text(child, "offset").and_then(parse_vec2_inline),
+            scale: child_text(child, "scale").and_then(parse_vec2_inline),
+        };
+        if partial.offset.is_some() || partial.scale.is_some() {
+            out.insert(key.to_ascii_lowercase(), partial);
+        }
+    }
+    out
 }
 
 fn parse_color(input: &str) -> Option<RgbaColor> {

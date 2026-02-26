@@ -211,3 +211,22 @@
 
 ### Conclusions
 - Basic upside-down regressions now fail in unit tests and fixture runs, giving two independent fast feedback channels.
+
+## 2026-02-26 - Iteration 12
+
+### Learnings
+- `wornGraphicData` includes body-type-specific overrides (global + per-direction) that were still being ignored.
+- Ignoring these can produce real placement/scale drift on thin/hulk/fat bodies even if orientation is correct.
+
+### Actions
+- Parsed and applied body-type overrides for apparel worn graphics:
+  - root-level overrides (e.g. `<male>`, `<female>`, `<thin>`, `<hulk>`, `<fat>`)
+  - directional overrides under north/east/south/west blocks.
+- Merged overrides in a deterministic order:
+  1. directional base
+  2. global body override
+  3. directional body override
+- Re-ran fmt/test/clippy and 10-variant fixture loop with trace checks.
+
+### Conclusions
+- We improved data fidelity for apparel transform composition without weakening fast orientation/layering guardrails.

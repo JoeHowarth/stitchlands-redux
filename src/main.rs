@@ -1075,7 +1075,11 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                 let directional =
                     resolve_directional_tex_path(asset_resolver, data_dir, &tex_path, facing);
                 let tex_path = directional.path;
-                let worn_data = apparel_worn_data_for_facing(apparel, directional.data_facing);
+                let worn_data = apparel_worn_data_for_facing(
+                    apparel,
+                    directional.data_facing,
+                    body_render.map(|b| b.def_name.as_str()),
+                );
                 let (explicit_skip_hair, explicit_skip_beard, has_explicit_skip_flags) =
                     map_explicit_skip_flags(&apparel.render_skip_flags);
                 let layer_override = apparel_draw_layer_for_facing(apparel, facing).or_else(|| {
@@ -1440,13 +1444,46 @@ fn apparel_draw_layer_for_facing(apparel: &ApparelDef, facing: ComposeFacing) ->
 fn apparel_worn_data_for_facing(
     apparel: &ApparelDef,
     facing: ComposeFacing,
+    body_type: Option<&str>,
 ) -> crate::defs::ApparelWornDirectionDef {
-    match facing {
-        ComposeFacing::North => apparel.worn_graphic.north,
-        ComposeFacing::East => apparel.worn_graphic.east,
-        ComposeFacing::South => apparel.worn_graphic.south,
-        ComposeFacing::West => apparel.worn_graphic.west,
+    let body_key = body_type.map(|s| s.to_ascii_lowercase());
+    let (mut out, directional_overrides) = match facing {
+        ComposeFacing::North => (
+            apparel.worn_graphic.north,
+            &apparel.worn_graphic.north_body_overrides,
+        ),
+        ComposeFacing::East => (
+            apparel.worn_graphic.east,
+            &apparel.worn_graphic.east_body_overrides,
+        ),
+        ComposeFacing::South => (
+            apparel.worn_graphic.south,
+            &apparel.worn_graphic.south_body_overrides,
+        ),
+        ComposeFacing::West => (
+            apparel.worn_graphic.west,
+            &apparel.worn_graphic.west_body_overrides,
+        ),
+    };
+    if let Some(body_key) = body_key {
+        if let Some(global) = apparel.worn_graphic.global_body_overrides.get(&body_key) {
+            if let Some(offset) = global.offset {
+                out.offset = offset;
+            }
+            if let Some(scale) = global.scale {
+                out.scale = scale;
+            }
+        }
+        if let Some(local) = directional_overrides.get(&body_key) {
+            if let Some(offset) = local.offset {
+                out.offset = offset;
+            }
+            if let Some(scale) = local.scale {
+                out.scale = scale;
+            }
+        }
     }
+    out
 }
 
 struct DirectionalTexturePath {
