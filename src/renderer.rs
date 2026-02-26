@@ -28,13 +28,24 @@ pub struct Renderer {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    texture_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    texture_bind_groups: HashMap<TextureId, wgpu::BindGroup>,
+    texture_keys: HashMap<TextureKey, TextureId>,
+    texture_images: HashMap<TextureId, RgbaImage>,
+    static_sprites: Vec<SpriteInput>,
+    dynamic_sprites: Vec<SpriteInput>,
+    next_texture_id: u32,
     sprite_batches: Vec<SpriteBatch>,
     camera_speed: f32,
     clear_color: wgpu::Color,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub struct TextureId(u32);
+
 struct SpriteBatch {
-    texture_bind_group: wgpu::BindGroup,
+    texture_id: TextureId,
     instance_buffer: wgpu::Buffer,
     instance_count: u32,
     min_z: f32,
@@ -345,108 +356,7 @@ impl Renderer {
             multiview: None,
         });
 
-        let mut grouped: HashMap<TextureKey, Vec<(usize, InstanceData)>> = HashMap::new();
-        let mut texture_bind_groups: HashMap<TextureKey, wgpu::BindGroup> = HashMap::new();
-
-        for (index, sprite) in sprites.iter().enumerate() {
-            let texture_key = texture_key(&sprite.image);
-            texture_bind_groups.entry(texture_key).or_insert_with(|| {
-                let tex_size = wgpu::Extent3d {
-                    width: sprite.image.width(),
-                    height: sprite.image.height(),
-                    depth_or_array_layers: 1,
-                };
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("sprite-texture"),
-                    size: tex_size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-                queue.write_texture(
-                    wgpu::ImageCopyTexture {
-                        texture: &texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    sprite.image.as_raw(),
-                    wgpu::ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: Some(4 * sprite.image.width()),
-                        rows_per_image: Some(sprite.image.height()),
-                    },
-                    tex_size,
-                );
-                let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("texture-bind-group"),
-                    layout: &texture_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&texture_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&sampler),
-                        },
-                    ],
-                })
-            });
-
-            grouped
-                .entry(texture_key)
-                .or_default()
-                .push((index, InstanceData::from_params(&sprite.params)));
-        }
-
-        let mut sprite_batches = Vec::with_capacity(grouped.len());
-        for (key, mut instances) in grouped {
-            instances.sort_by(|a, b| {
-                a.1.world_pos[2]
-                    .total_cmp(&b.1.world_pos[2])
-                    .then_with(|| a.0.cmp(&b.0))
-            });
-            let min_z = instances
-                .iter()
-                .map(|(_, instance)| instance.world_pos[2])
-                .fold(f32::INFINITY, f32::min);
-            let first_index = instances.first().map(|(idx, _)| *idx).unwrap_or(usize::MAX);
-            let packed_instances: Vec<InstanceData> =
-                instances.into_iter().map(|(_, d)| d).collect();
-            let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("instance-buffer"),
-                contents: bytemuck::cast_slice(&packed_instances),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-            let texture_bind_group = texture_bind_groups
-                .remove(&key)
-                .context("missing texture bind group while building batches")?;
-
-            sprite_batches.push(SpriteBatch {
-                texture_bind_group,
-                instance_buffer,
-                instance_count: packed_instances.len() as u32,
-                min_z,
-                first_index,
-                texture_hash: key.hash,
-            });
-        }
-
-        sprite_batches.sort_by(|a, b| {
-            a.min_z
-                .total_cmp(&b.min_z)
-                .then(a.first_index.cmp(&b.first_index))
-                .then(a.texture_hash.cmp(&b.texture_hash))
-        });
-
-        Ok(Self {
+        let mut out = Self {
             surface,
             device,
             queue,
@@ -460,7 +370,15 @@ impl Renderer {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            sprite_batches,
+            texture_layout,
+            sampler,
+            texture_bind_groups: HashMap::new(),
+            texture_keys: HashMap::new(),
+            texture_images: HashMap::new(),
+            static_sprites: Vec::new(),
+            dynamic_sprites: Vec::new(),
+            next_texture_id: 1,
+            sprite_batches: Vec::new(),
             camera_speed: 0.2,
             clear_color: wgpu::Color {
                 r: options.clear_color[0],
@@ -468,7 +386,10 @@ impl Renderer {
                 b: options.clear_color[2],
                 a: options.clear_color[3],
             },
-        })
+        };
+        out.set_static_sprites(sprites)?;
+        out.set_dynamic_sprites(Vec::new())?;
+        Ok(out)
     }
 
     pub fn resize(&mut self, size: PhysicalSize<u32>) {
@@ -548,6 +469,148 @@ impl Renderer {
         );
     }
 
+    pub fn register_texture(&mut self, image: RgbaImage) -> TextureId {
+        let key = texture_key(&image);
+        if let Some(id) = self.texture_keys.get(&key).copied() {
+            return id;
+        }
+
+        let id = TextureId(self.next_texture_id);
+        self.next_texture_id += 1;
+        let bind_group = self.create_texture_bind_group(&image);
+        self.texture_keys.insert(key, id);
+        self.texture_images.insert(id, image);
+        self.texture_bind_groups.insert(id, bind_group);
+        id
+    }
+
+    pub fn set_static_sprites(&mut self, sprites: Vec<SpriteInput>) -> Result<()> {
+        for sprite in &sprites {
+            let _ = self.register_texture(sprite.image.clone());
+        }
+        self.static_sprites = sprites;
+        self.rebuild_sprite_batches()
+    }
+
+    pub fn set_dynamic_sprites(&mut self, sprites: Vec<SpriteInput>) -> Result<()> {
+        for sprite in &sprites {
+            let _ = self.register_texture(sprite.image.clone());
+        }
+        self.dynamic_sprites = sprites;
+        self.rebuild_sprite_batches()
+    }
+
+    fn rebuild_sprite_batches(&mut self) -> Result<()> {
+        let mut grouped: HashMap<TextureId, Vec<(usize, InstanceData)>> = HashMap::new();
+        for (index, sprite) in self
+            .static_sprites
+            .iter()
+            .chain(self.dynamic_sprites.iter())
+            .enumerate()
+        {
+            let key = texture_key(&sprite.image);
+            let texture_id = self.texture_keys.get(&key).copied().with_context(|| {
+                format!(
+                    "missing TextureId for sprite texture {}x{}",
+                    sprite.image.width(),
+                    sprite.image.height()
+                )
+            })?;
+            grouped
+                .entry(texture_id)
+                .or_default()
+                .push((index, InstanceData::from_params(&sprite.params)));
+        }
+
+        let mut sprite_batches = Vec::with_capacity(grouped.len());
+        for (texture_id, mut instances) in grouped {
+            instances.sort_by(|a, b| {
+                a.1.world_pos[2]
+                    .total_cmp(&b.1.world_pos[2])
+                    .then_with(|| a.0.cmp(&b.0))
+            });
+            let min_z = instances
+                .iter()
+                .map(|(_, instance)| instance.world_pos[2])
+                .fold(f32::INFINITY, f32::min);
+            let first_index = instances.first().map(|(idx, _)| *idx).unwrap_or(usize::MAX);
+            let packed_instances: Vec<InstanceData> =
+                instances.into_iter().map(|(_, d)| d).collect();
+            let instance_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("instance-buffer"),
+                        contents: bytemuck::cast_slice(&packed_instances),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+            sprite_batches.push(SpriteBatch {
+                texture_id,
+                instance_buffer,
+                instance_count: packed_instances.len() as u32,
+                min_z,
+                first_index,
+                texture_hash: texture_id.0 as u64,
+            });
+        }
+
+        sprite_batches.sort_by(|a, b| {
+            a.min_z
+                .total_cmp(&b.min_z)
+                .then(a.first_index.cmp(&b.first_index))
+                .then(a.texture_hash.cmp(&b.texture_hash))
+        });
+        self.sprite_batches = sprite_batches;
+        Ok(())
+    }
+
+    fn create_texture_bind_group(&self, image: &RgbaImage) -> wgpu::BindGroup {
+        let tex_size = wgpu::Extent3d {
+            width: image.width(),
+            height: image.height(),
+            depth_or_array_layers: 1,
+        };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("sprite-texture"),
+            size: tex_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            image.as_raw(),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * image.width()),
+                rows_per_image: Some(image.height()),
+            },
+            tex_size,
+        );
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("texture-bind-group"),
+            layout: &self.texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        })
+    }
+
     pub fn render(&mut self, screenshot_path: Option<&Path>) -> Result<bool> {
         let surface_tex = self.surface.get_current_texture()?;
         let view = surface_tex
@@ -581,7 +644,11 @@ impl Renderer {
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             for batch in &self.sprite_batches {
-                pass.set_bind_group(1, &batch.texture_bind_group, &[]);
+                let texture_bind_group = self
+                    .texture_bind_groups
+                    .get(&batch.texture_id)
+                    .context("missing texture bind group for sprite batch")?;
+                pass.set_bind_group(1, texture_bind_group, &[]);
                 pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
                 pass.draw_indexed(0..self.num_indices, 0, 0..batch.instance_count);
             }
