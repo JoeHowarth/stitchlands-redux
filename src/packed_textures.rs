@@ -39,6 +39,12 @@ pub struct PackedTextureExtractionSummary {
     pub failed_textures: usize,
 }
 
+pub struct PackedDecodeHealth {
+    pub attempted: usize,
+    pub succeeded: usize,
+    pub sample_errors: Vec<String>,
+}
+
 impl PackedTextureResolver {
     pub fn build(roots: &[PathBuf], typetree_registries: &[PathBuf]) -> Result<Option<Self>> {
         let existing_roots: Vec<PathBuf> = roots.iter().filter(|r| r.exists()).cloned().collect();
@@ -231,6 +237,36 @@ impl PackedTextureResolver {
         }
 
         Ok(None)
+    }
+
+    pub fn decode_health_sample(&self, sample_limit: usize) -> PackedDecodeHealth {
+        let mut names: Vec<_> = self.keys_by_name.keys().cloned().collect();
+        names.sort();
+
+        let mut attempted = 0usize;
+        let mut succeeded = 0usize;
+        let mut sample_errors = Vec::new();
+
+        for name in names.into_iter().take(sample_limit) {
+            let Some(key) = self.keys_by_name.get(&name) else {
+                continue;
+            };
+            attempted += 1;
+            match self.decode_texture_for_key(key) {
+                Ok(_) => succeeded += 1,
+                Err(err) => {
+                    if sample_errors.len() < 5 {
+                        sample_errors.push(format!("{name}: {err}"));
+                    }
+                }
+            }
+        }
+
+        PackedDecodeHealth {
+            attempted,
+            succeeded,
+            sample_errors,
+        }
     }
 
     fn find_fuzzy_name_matches(&self, tex_path: &str) -> Vec<(String, BinaryObjectKey)> {

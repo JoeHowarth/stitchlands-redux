@@ -2,6 +2,7 @@
 name = "stitchlands-redux"
 version = "0.1.0"
 edition = "2021"
+default-run = "stitchlands-redux"
 
 [dependencies]
 anyhow = "1.0"

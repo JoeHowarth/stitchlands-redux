@@ -1,8 +1,9 @@
 mod assets;
 mod defs;
 mod packed_textures;
-mod rimworld_paths;
 mod renderer;
+mod rimworld_paths;
+mod typetree_registry;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,10 +21,11 @@ use winit::window::{Window, WindowId};
 use crate::assets::resolve_sprite;
 use crate::defs::{load_thing_defs, ThingDef};
 use crate::packed_textures::{
-    PackedTextureResolver, extract_all_packed_textures, infer_packed_data_roots,
+    extract_all_packed_textures, infer_packed_data_roots, PackedTextureResolver,
 };
-use crate::rimworld_paths::resolve_data_dir;
 use crate::renderer::{Renderer, SpriteInput, SpriteParams};
+use crate::rimworld_paths::resolve_data_dir;
+use crate::typetree_registry::resolve_typetree_registry_paths;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -57,6 +59,15 @@ struct Cli {
 
     #[arg(long)]
     typetree_registry: Vec<PathBuf>,
+
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    auto_typetree: bool,
+
+    #[arg(long, default_value_t = 24)]
+    packed_decode_probe: usize,
+
+    #[arg(long, default_value_t = 8)]
+    packed_decode_probe_min_attempts: usize,
 
     #[arg(long)]
     extract_packed_textures: Option<PathBuf>,
@@ -108,8 +119,12 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
 
-    let data_dir = resolve_data_dir(&cli.rimworld_data)
-        .with_context(|| format!("resolving rimworld data dir from {}", cli.rimworld_data.display()))?;
+    let data_dir = resolve_data_dir(&cli.rimworld_data).with_context(|| {
+        format!(
+            "resolving rimworld data dir from {}",
+            cli.rimworld_data.display()
+        )
+    })?;
     info!("using RimWorld data dir: {}", data_dir.display());
 
     let defs = load_thing_defs(&data_dir)
@@ -123,7 +138,29 @@ fn main() -> Result<()> {
     packed_roots.sort();
     packed_roots.dedup();
 
-    let packed_resolver = PackedTextureResolver::build(&packed_roots, &cli.typetree_registry)?;
+    for explicit in &cli.typetree_registry {
+        if !explicit.exists() {
+            warn!(
+                "typetree registry path does not exist and will be skipped: {}",
+                explicit.display()
+            );
+        }
+    }
+    let typetree_registries =
+        resolve_typetree_registry_paths(&cli.typetree_registry, cli.auto_typetree);
+    // RimWorld 2022 macOS assets in this project are typetree-stripped; without an external
+    // registry packed Texture2D parsing often falls back to invalid dimensions/format metadata.
+    if typetree_registries.is_empty() {
+        warn!(
+            "no typetree registry selected; packed texture decode may fail on stripped Unity assets (set --typetree-registry or STITCHLANDS_TYPETREE_REGISTRY)"
+        );
+    } else {
+        for registry in &typetree_registries {
+            info!("using typetree registry: {}", registry.display());
+        }
+    }
+
+    let mut packed_resolver = PackedTextureResolver::build(&packed_roots, &typetree_registries)?;
     if let Some(resolver) = packed_resolver.as_ref() {
         for root in resolver.loaded_roots() {
             info!("packed resolver root: {}", root.display());
@@ -131,9 +168,8 @@ fn main() -> Result<()> {
     }
 
     if let Some(output_dir) = &cli.extract_packed_textures {
-        let summary =
-            extract_all_packed_textures(&packed_roots, &cli.typetree_registry, output_dir)
-                .with_context(|| format!("extracting packed textures into {}", output_dir.display()))?;
+        let summary = extract_all_packed_textures(&packed_roots, &typetree_registries, output_dir)
+            .with_context(|| format!("extracting packed textures into {}", output_dir.display()))?;
         info!(
             "packed texture extraction finished: scanned={} exported={} failed={}",
             summary.scanned_textures, summary.exported_textures, summary.failed_textures
@@ -209,6 +245,37 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if cli.packed_decode_probe > 0 {
+        let mut disable_packed = false;
+        if let Some(resolver) = packed_resolver.as_ref() {
+            let health = resolver.decode_health_sample(cli.packed_decode_probe);
+            if health.attempted >= cli.packed_decode_probe_min_attempts {
+                info!(
+                    "packed decode probe: attempted={} succeeded={}",
+                    health.attempted, health.succeeded
+                );
+                if health.succeeded == 0 {
+                    warn!(
+                        "packed decode probe found 0 successful decodes in {} samples; disabling packed decode for this run",
+                        health.attempted
+                    );
+                    for sample in health.sample_errors {
+                        info!("packed decode probe sample failure: {sample}");
+                    }
+                    if typetree_registries.is_empty() {
+                        warn!(
+                            "remediation: provide --typetree-registry /path/to/registry.tpk (or set STITCHLANDS_TYPETREE_REGISTRY)"
+                        );
+                    }
+                    disable_packed = true;
+                }
+            }
+        }
+        if disable_packed {
+            packed_resolver = None;
+        }
+    }
+
     let thingdef = cli
         .thingdef
         .as_deref()
@@ -231,8 +298,8 @@ fn main() -> Result<()> {
 
     let mut render_sprites = Vec::with_capacity(selected_defs.len());
     for (index, selected) in selected_defs.iter().enumerate() {
-        let mut sprite_asset =
-            resolve_sprite(&data_dir, selected, &cli.texture_root).with_context(|| {
+        let mut sprite_asset = resolve_sprite(&data_dir, selected, &cli.texture_root)
+            .with_context(|| {
                 format!(
                     "resolving texture for def '{}' path '{}'",
                     selected.def_name, selected.graphic_data.tex_path
@@ -339,13 +406,7 @@ fn main() -> Result<()> {
 
         info!(
             "sprite params [{}] {} -> size=({:.2}, {:.2}) offset=({:.2}, {:.2}, {:.2})",
-            index,
-            selected.def_name,
-            size.x,
-            size.y,
-            draw_offset.x,
-            draw_offset.y,
-            draw_offset.z
+            index, selected.def_name, size.x, size.y, draw_offset.x, draw_offset.y, draw_offset.z
         );
 
         render_sprites.push(RenderSprite {
@@ -370,7 +431,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn list_defs(defs: &std::collections::HashMap<String, ThingDef>, filter: Option<&str>, limit: usize) {
+fn list_defs(
+    defs: &std::collections::HashMap<String, ThingDef>,
+    filter: Option<&str>,
+    limit: usize,
+) {
     let filter_lower = filter.map(|f| f.to_lowercase());
     let mut rows: Vec<_> = defs.values().collect();
     rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
@@ -533,17 +598,19 @@ impl ApplicationHandler for App {
                 params: sprite.params,
             })
             .collect();
-        let renderer = pollster::block_on(Renderer::new(
-            window.clone(),
-            sprite_inputs,
-        ))
-        .expect("create renderer");
+        let renderer = pollster::block_on(Renderer::new(window.clone(), sprite_inputs))
+            .expect("create renderer");
 
         self.renderer = Some(renderer);
         self.window = Some(window);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
         let Some(window) = self.window.as_ref() else {
             return;
         };
@@ -576,15 +643,15 @@ impl ApplicationHandler for App {
                         }
                     }
                     Err(err) => {
-                    if let Some(surface_err) = err.downcast_ref::<wgpu::SurfaceError>() {
-                        if let Err(handle_err) = renderer.handle_surface_error(surface_err) {
-                            eprintln!("render error: {handle_err:#}");
+                        if let Some(surface_err) = err.downcast_ref::<wgpu::SurfaceError>() {
+                            if let Err(handle_err) = renderer.handle_surface_error(surface_err) {
+                                eprintln!("render error: {handle_err:#}");
+                                event_loop.exit();
+                            }
+                        } else {
+                            eprintln!("render error: {err:#}");
                             event_loop.exit();
                         }
-                    } else {
-                        eprintln!("render error: {err:#}");
-                        event_loop.exit();
-                    }
                     }
                 }
             }
