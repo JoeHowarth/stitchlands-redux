@@ -230,3 +230,24 @@
 
 ### Conclusions
 - We improved data fidelity for apparel transform composition without weakening fast orientation/layering guardrails.
+
+## 2026-02-26 - Iteration 13
+
+### Learnings
+- Isolated-piece rendering showed many raw humanlike sprites were inverted before composition:
+  - hair/beard (`Bob_south`, `BeardBalin_south`, `Afro_south`)
+  - apparel (`Jacket_Thin_south`, `TribalA_Thin_south`, `Hood_south`, `CowboyHat_south`)
+  - body variants contributed to the same visual issue.
+- Node placement invariants (`head_body_delta_y > 0`, z-order checks) were all passing, so composition math was not the primary upside-down cause.
+
+### Hypotheses
+- Packed decode orientation for humanlike pawn textures is inverted relative to how we sample them in rendering.
+
+### Actions
+- Ran control test rendering extracted `Bob_south` directly through our renderer; orientation matched raw extracted image.
+- Applied an experiment/fix to vertically flip resolved `"/Pawn/Humanlike/"` textures at resolve time.
+- Re-ran deterministic 10-variant fixture screenshots; orientation improved materially and heads read correctly.
+- Re-ran fmt/test/clippy.
+
+### Conclusions
+- Primary upside-down issue was texture orientation at decode/resolve stage for humanlike pawn assets, not head/body offset composition.

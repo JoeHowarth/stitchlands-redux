@@ -1555,7 +1555,11 @@ fn resolve_pawn_texture_image(
     if let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, path)
         && !resolved.sprite.used_fallback
     {
-        return Some(resolved.sprite.image);
+        let mut image = resolved.sprite.image;
+        if path.contains("/Pawn/Humanlike/") {
+            image::imageops::flip_vertical_in_place(&mut image);
+        }
+        return Some(image);
     }
     if let Some(base_path) = strip_directional_suffix(path)
         && let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, base_path)
