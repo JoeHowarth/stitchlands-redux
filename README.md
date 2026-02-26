@@ -81,6 +81,9 @@ Render many defs in a grid (single screenshot, no manual crop/combine):
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --extra-thingdef Plasteel --extra-thingdef WoodLog --extra-thingdef ComponentIndustrial --screenshot target/thing_sheet.png --no-window --sheet-columns 2 --sheet-spacing 1.8
 ```
 
+Missing textures now fail by default instead of silently rendering checkerboards.
+Use `--allow-fallback` only when you intentionally want checker fallback output.
+
 Probe terrain decode coverage (loose + packed resolver):
 
 ```bash

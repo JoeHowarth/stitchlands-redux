@@ -164,6 +164,9 @@ struct Cli {
     #[arg(long, default_value_t = 1.75)]
     sheet_spacing: f32,
 
+    #[arg(long, default_value_t = false)]
+    allow_fallback: bool,
+
     #[arg(long, default_value_t = 0.0)]
     cell_x: f32,
 
@@ -455,6 +458,7 @@ fn main() -> Result<()> {
             pawn_fixture_variant: cli.pawn_fixture_variant,
             dump_pawn_trace: cli.dump_pawn_trace.clone(),
             compose_config: compose_config.clone(),
+            strict_missing: !cli.allow_fallback,
         })?;
         if !should_run_renderer {
             return Ok(());
@@ -488,6 +492,7 @@ fn main() -> Result<()> {
             pawn_fixture_variant: cli.pawn_fixture_variant,
             dump_pawn_trace: cli.dump_pawn_trace.clone(),
             compose_config: compose_config.clone(),
+            strict_missing: !cli.allow_fallback,
         })?;
         if !should_run_renderer {
             return Ok(());
@@ -553,6 +558,13 @@ fn main() -> Result<()> {
         let resolved_from_packed = resolved.resolved_from_packed;
 
         if sprite_asset.used_fallback {
+            if !cli.allow_fallback {
+                anyhow::bail!(
+                    "missing texture for '{}' ({}) - refusing checker fallback by default. rerun with --allow-fallback to continue",
+                    selected.def_name,
+                    selected.graphic_data.tex_path
+                );
+            }
             if asset_resolver.can_try_packed(&selected.graphic_data.tex_path) {
                 if let Some(probe) = asset_resolver
                     .maybe_probe_decode_candidates(&selected.graphic_data.tex_path, 8)?
@@ -684,6 +696,7 @@ struct FixtureSceneConfig<'a> {
     pawn_fixture_variant: usize,
     dump_pawn_trace: Option<PathBuf>,
     compose_config: PawnComposeConfig,
+    strict_missing: bool,
 }
 
 fn compose_config_from_humanlike_layers(layers: HumanlikeRenderTreeLayers) -> PawnComposeConfig {
@@ -772,6 +785,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         pawn_fixture_variant,
         dump_pawn_trace,
         compose_config,
+        strict_missing,
     } = config;
 
     let mut terrain_rows: Vec<_> = terrain_defs.values().collect();
@@ -1348,6 +1362,9 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         }
         if !pawn_layer_by_tex.contains_key(body_path) {
             trace_lines.push(format!("  missing_body_image {}", body_path));
+            if strict_missing {
+                anyhow::bail!("missing pawn body texture: {body_path}");
+            }
             continue;
         }
 
@@ -1360,6 +1377,9 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             }
             let Some(image) = pawn_layer_by_tex.get(&node.tex_path) else {
                 trace_lines.push(format!("  missing_node_image {}", node.tex_path));
+                if strict_missing {
+                    anyhow::bail!("missing pawn node texture: {}", node.tex_path);
+                }
                 continue;
             };
             sprites.push(RenderSprite {

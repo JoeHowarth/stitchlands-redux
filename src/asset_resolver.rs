@@ -161,7 +161,11 @@ impl AssetResolver {
             return Ok(false);
         };
 
-        sprite_asset.image = hit.image;
+        let mut image = hit.image;
+        if std::env::var_os("STITCHLANDS_DEBUG_FLIP_ALL_PACKED").is_some() {
+            image::imageops::flip_vertical_in_place(&mut image);
+        }
+        sprite_asset.image = image;
         sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
         sprite_asset.used_fallback = false;
         Ok(true)
