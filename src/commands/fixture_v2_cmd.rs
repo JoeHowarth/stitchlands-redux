@@ -1,0 +1,318 @@
+use anyhow::{Context, Result};
+use glam::{Vec2, Vec3};
+use log::info;
+
+use crate::cli::FixtureV2Cmd;
+use crate::defs::{
+    ApparelDef, BeardDefRender, BodyTypeDefRender, HairDefRender, HeadTypeDefRender,
+};
+use crate::pawn::{
+    ApparelLayer, ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
+    PawnComposeConfig, PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
+};
+use crate::renderer::SpriteParams;
+use crate::viewer::RenderSprite;
+use crate::world::world_from_fixture;
+
+use super::{CommandAction, DispatchContext, LaunchSpec};
+
+pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Result<CommandAction> {
+    let (should_run_renderer, render_options, hide_window) = crate::cli::render_runtime(&cmd.view);
+    let fixture = crate::fixtures::load_fixture(&cmd.scene)?;
+    let world = world_from_fixture(&fixture);
+    let sprites = build_world_sprites(ctx, &world)?;
+    let blocking_things = world
+        .things
+        .iter()
+        .filter(|thing| thing.blocks_movement)
+        .count();
+
+    let camera_focus = fixture
+        .camera
+        .as_ref()
+        .map(|camera| Vec2::new(camera.center_x, camera.center_z))
+        .or_else(|| {
+            Some(Vec2::new(
+                world.width as f32 * 0.5,
+                world.height as f32 * 0.5,
+            ))
+        });
+
+    info!(
+        "v2 fixture scene built: scene={} map={}x{} terrain={} things={} blocking_things={} pawns={} drawables={}",
+        cmd.scene.display(),
+        world.width,
+        world.height,
+        world.terrain.len(),
+        world.things.len(),
+        blocking_things,
+        world.pawns.len(),
+        sprites.len()
+    );
+
+    if !should_run_renderer {
+        return Ok(CommandAction::Done);
+    }
+
+    Ok(CommandAction::Launch(LaunchSpec {
+        sprites,
+        screenshot: cmd.view.screenshot,
+        camera_focus,
+        render_options,
+        hide_window,
+    }))
+}
+
+fn build_world_sprites(
+    ctx: &mut DispatchContext<'_>,
+    world: &crate::world::WorldState,
+) -> Result<Vec<RenderSprite>> {
+    let mut out = Vec::new();
+
+    for z in 0..world.height {
+        for x in 0..world.width {
+            let tile = &world.terrain[z * world.width + x];
+            let terrain_def = ctx
+                .terrain_defs
+                .get(&tile.terrain_def)
+                .with_context(|| format!("missing TerrainDef '{}'", tile.terrain_def))?;
+            let resolved = ctx
+                .asset_resolver
+                .resolve_texture_path(ctx.data_dir, &terrain_def.texture_path)
+                .with_context(|| {
+                    format!(
+                        "resolving terrain texture '{}' for '{}'",
+                        terrain_def.texture_path, terrain_def.def_name
+                    )
+                })?;
+            out.push(RenderSprite {
+                def_name: format!("Terrain::{}", terrain_def.def_name),
+                image: resolved.sprite.image,
+                params: SpriteParams {
+                    world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -1.0),
+                    size: Vec2::new(1.0, 1.0),
+                    tint: [1.0, 1.0, 1.0, 1.0],
+                },
+                used_fallback: resolved.sprite.used_fallback,
+            });
+        }
+    }
+
+    let mut things = world.things.clone();
+    things.sort_by(|a, b| {
+        a.cell_z
+            .cmp(&b.cell_z)
+            .then(a.cell_x.cmp(&b.cell_x))
+            .then(a.id.cmp(&b.id))
+    });
+    for thing in things {
+        let thing_def = ctx
+            .thing_defs
+            .get(&thing.def_name)
+            .with_context(|| format!("missing ThingDef '{}'", thing.def_name))?;
+        let resolved = ctx
+            .asset_resolver
+            .resolve_thing(ctx.data_dir, thing_def)
+            .with_context(|| format!("resolving ThingDef '{}'", thing_def.def_name))?;
+        let draw_offset = thing_def.graphic_data.draw_offset;
+        out.push(RenderSprite {
+            def_name: format!("Thing::{}", thing_def.def_name),
+            image: resolved.sprite.image,
+            params: SpriteParams {
+                world_pos: Vec3::new(
+                    thing.cell_x as f32 + 0.5 + draw_offset.x,
+                    thing.cell_z as f32 + 0.5 + draw_offset.z,
+                    -0.8 + draw_offset.y * 0.01,
+                ),
+                size: thing_def.graphic_data.draw_size.max(Vec2::splat(1.1)),
+                tint: [
+                    thing_def.graphic_data.color.r,
+                    thing_def.graphic_data.color.g,
+                    thing_def.graphic_data.color.b,
+                    thing_def.graphic_data.color.a,
+                ],
+            },
+            used_fallback: resolved.sprite.used_fallback,
+        });
+    }
+
+    let mut pawns = world.pawns.clone();
+    pawns.sort_by(|a, b| {
+        a.cell_z
+            .cmp(&b.cell_z)
+            .then(a.cell_x.cmp(&b.cell_x))
+            .then(a.id.cmp(&b.id))
+    });
+    for pawn in pawns {
+        let body = choose_body_def(ctx.body_type_defs, pawn.body.as_deref())?;
+        let head = choose_head_def(ctx.head_type_defs, pawn.head.as_deref());
+        let hair = choose_hair_def(ctx.hair_defs, pawn.hair.as_deref());
+        let beard = choose_beard_def(ctx.beard_defs, pawn.beard.as_deref());
+
+        let apparel_inputs = build_apparel_inputs(ctx.apparel_defs, &pawn.apparel_defs)?;
+        let render_input = PawnRenderInput {
+            label: pawn.label.clone(),
+            facing: map_facing(pawn.facing),
+            world_pos: Vec3::new(pawn.cell_x as f32 + 0.5, pawn.cell_z as f32 + 0.5, 0.0),
+            body_tex_path: body.body_naked_graphic_path.clone(),
+            head_tex_path: head.map(|v| v.graphic_path.clone()),
+            stump_tex_path: None,
+            hair_tex_path: hair.map(|v| v.tex_path.clone()),
+            beard_tex_path: beard.map(|v| v.tex_path.clone()),
+            body_size: Vec2::ONE,
+            head_size: Vec2::ONE,
+            stump_size: Vec2::splat(0.8),
+            hair_size: head.map(|v| v.hair_mesh_size).unwrap_or(Vec2::ONE),
+            beard_size: head.map(|v| v.beard_mesh_size).unwrap_or(Vec2::ONE),
+            body_type: BodyTypeRenderData {
+                head_offset: body.head_offset,
+                body_size_factor: 1.0,
+            },
+            head_type: head
+                .map(|v| HeadTypeRenderData {
+                    narrow: v.narrow,
+                    narrow_crown_horizontal_offset: 0.0,
+                    beard_offset: v.beard_offset,
+                    beard_offset_x_east: v.beard_offset_x_east,
+                })
+                .unwrap_or_default(),
+            beard_type: beard
+                .map(|v| BeardTypeRenderData {
+                    offset_narrow_east: v.offset_narrow_east,
+                    offset_narrow_south: v.offset_narrow_south,
+                })
+                .unwrap_or_default(),
+            tint: [1.0, 1.0, 1.0, 1.0],
+            apparel: apparel_inputs,
+            present_body_part_groups: vec!["UpperHead".to_string(), "Torso".to_string()],
+            hediff_overlays: Vec::new(),
+            draw_flags: PawnDrawFlags::NONE,
+        };
+
+        let composed = compose_pawn(&render_input, &PawnComposeConfig::default());
+        for node in composed.nodes {
+            let resolved = ctx
+                .asset_resolver
+                .resolve_texture_path(ctx.data_dir, &node.tex_path)
+                .with_context(|| format!("resolving pawn texture '{}'", node.tex_path))?;
+            out.push(RenderSprite {
+                def_name: format!("PawnNode::{}", node.id),
+                image: resolved.sprite.image,
+                params: SpriteParams {
+                    world_pos: node.world_pos,
+                    size: node.size,
+                    tint: node.tint,
+                },
+                used_fallback: resolved.sprite.used_fallback,
+            });
+        }
+    }
+
+    Ok(out)
+}
+
+fn choose_body_def<'a>(
+    defs: &'a std::collections::HashMap<String, BodyTypeDefRender>,
+    preferred: Option<&str>,
+) -> Result<&'a BodyTypeDefRender> {
+    if let Some(preferred) = preferred
+        && let Some(body) = defs.get(preferred)
+    {
+        return Ok(body);
+    }
+    defs.values()
+        .min_by(|a, b| a.def_name.cmp(&b.def_name))
+        .context("no BodyTypeDefRender entries are available")
+}
+
+fn choose_head_def<'a>(
+    defs: &'a std::collections::HashMap<String, HeadTypeDefRender>,
+    preferred: Option<&str>,
+) -> Option<&'a HeadTypeDefRender> {
+    if let Some(preferred) = preferred
+        && let Some(head) = defs.get(preferred)
+    {
+        return Some(head);
+    }
+    defs.values().min_by(|a, b| a.def_name.cmp(&b.def_name))
+}
+
+fn choose_hair_def<'a>(
+    defs: &'a std::collections::HashMap<String, HairDefRender>,
+    preferred: Option<&str>,
+) -> Option<&'a HairDefRender> {
+    if let Some(preferred) = preferred
+        && let Some(hair) = defs.get(preferred)
+    {
+        return Some(hair);
+    }
+    defs.values().min_by(|a, b| a.def_name.cmp(&b.def_name))
+}
+
+fn choose_beard_def<'a>(
+    defs: &'a std::collections::HashMap<String, BeardDefRender>,
+    preferred: Option<&str>,
+) -> Option<&'a BeardDefRender> {
+    if let Some(preferred) = preferred
+        && let Some(beard) = defs.get(preferred)
+    {
+        return Some(beard);
+    }
+    defs.values()
+        .filter(|beard| !beard.no_graphic && !beard.tex_path.is_empty())
+        .min_by(|a, b| a.def_name.cmp(&b.def_name))
+}
+
+fn build_apparel_inputs(
+    defs: &std::collections::HashMap<String, ApparelDef>,
+    apparel_defs: &[String],
+) -> Result<Vec<ApparelRenderInput>> {
+    let mut out = Vec::new();
+    for def_name in apparel_defs {
+        let apparel = defs
+            .get(def_name)
+            .with_context(|| format!("missing ApparelDef '{}'", def_name))?;
+        out.push(ApparelRenderInput {
+            label: apparel.def_name.clone(),
+            tex_path: apparel.tex_path.clone(),
+            layer: map_apparel_layer(apparel.layer),
+            explicit_skip_hair: false,
+            explicit_skip_beard: false,
+            has_explicit_skip_flags: false,
+            covers_upper_head: apparel.covers_upper_head,
+            covers_full_head: apparel.covers_full_head,
+            anchor_to_head: None,
+            draw_offset: Vec2::ZERO,
+            draw_scale: Vec2::ONE,
+            layer_override: None,
+            draw_size: apparel.draw_size,
+            tint: [
+                apparel.color.r,
+                apparel.color.g,
+                apparel.color.b,
+                apparel.color.a,
+            ],
+        });
+    }
+    Ok(out)
+}
+
+fn map_apparel_layer(layer: crate::defs::ApparelLayerDef) -> ApparelLayer {
+    match layer {
+        crate::defs::ApparelLayerDef::OnSkin => ApparelLayer::OnSkin,
+        crate::defs::ApparelLayerDef::Middle => ApparelLayer::Middle,
+        crate::defs::ApparelLayerDef::Shell => ApparelLayer::Shell,
+        crate::defs::ApparelLayerDef::Belt => ApparelLayer::Belt,
+        crate::defs::ApparelLayerDef::Overhead => ApparelLayer::Overhead,
+        crate::defs::ApparelLayerDef::EyeCover => ApparelLayer::EyeCover,
+    }
+}
+
+fn map_facing(facing: crate::fixtures::PawnFacingSpec) -> PawnFacing {
+    match facing {
+        crate::fixtures::PawnFacingSpec::North => PawnFacing::North,
+        crate::fixtures::PawnFacingSpec::East => PawnFacing::East,
+        crate::fixtures::PawnFacingSpec::South => PawnFacing::South,
+        crate::fixtures::PawnFacingSpec::West => PawnFacing::West,
+    }
+}

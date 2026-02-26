@@ -16,6 +16,7 @@ use crate::renderer::RendererOptions;
 pub mod common;
 mod debug_cmd;
 mod fixture_cmd;
+mod fixture_v2_cmd;
 mod render_cmd;
 
 pub struct DispatchContext<'a> {

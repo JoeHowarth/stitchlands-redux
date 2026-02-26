@@ -102,6 +102,7 @@ pub struct RenderCmd {
 pub enum FixtureCmd {
     V1(FixtureSceneCmd),
     Pawn(FixtureSceneCmd),
+    V2(FixtureV2Cmd),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -114,6 +115,14 @@ pub struct FixtureSceneCmd {
     pub map_width: usize,
     #[arg(long, default_value_t = 40)]
     pub map_height: usize,
+    #[command(flatten)]
+    pub view: ViewArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct FixtureV2Cmd {
+    #[arg(long, default_value = "fixtures/v2/move_lane.ron")]
+    pub scene: PathBuf,
     #[command(flatten)]
     pub view: ViewArgs,
 }

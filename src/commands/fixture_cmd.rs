@@ -5,9 +5,14 @@ use crate::cli::{AuditCmd, FixtureCmd};
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
 pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<CommandAction> {
+    if let FixtureCmd::V2(args) = mode {
+        return super::fixture_v2_cmd::run_fixture_v2(ctx, args);
+    }
+
     let (fixture, is_pawn) = match mode {
         FixtureCmd::V1(args) => (args, false),
         FixtureCmd::Pawn(args) => (args, true),
+        FixtureCmd::V2(_) => unreachable!("v2 handled above"),
     };
     let (should_run_renderer, render_options, hide_window) =
         crate::cli::render_runtime(&fixture.view);

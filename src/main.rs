@@ -8,6 +8,7 @@ mod pawn;
 mod renderer;
 mod scene;
 mod viewer;
+mod world;
 
 use std::path::{Path, PathBuf};
 
