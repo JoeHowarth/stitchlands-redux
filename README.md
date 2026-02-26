@@ -1,11 +1,23 @@
 # stitchlands-redux
 
-v0 prototype for loading a RimWorld core `ThingDef` and rendering a sprite with `wgpu`.
+Prototype for loading RimWorld defs/assets and rendering sprites/scenes with `wgpu`.
 
 ## Run
 
 ```bash
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld/Data" --thingdef Steel
+```
+
+If your install is in the default Steam location, `--rimworld-data` can be omitted:
+
+```bash
+cargo run -- --thingdef Steel
+```
+
+You can also set a persistent default:
+
+```bash
+export STITCHLANDS_RIMWORLD_DATA="$HOME/Library/Application Support/Steam/steamapps/common/RimWorld"
 ```
 
 On macOS Steam installs, you can also pass install root and it auto-resolves:
@@ -57,6 +69,18 @@ Capture a rendered screenshot and exit:
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --screenshot target/frame.png
 ```
 
+Probe terrain decode coverage (loose + packed resolver):
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --probe-terrain --terrain-probe-limit 60
+```
+
+Launch the v1 fixture scene (terrain tilemap + things + pawns):
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --typetree-registry /path/to/typetree.tpk --scene-v1-fixture
+```
+
 Check whether this install has loose texture PNGs:
 
 ```bash
@@ -84,6 +108,12 @@ cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/
 `--typetree-registry` also accepts a directory (it will recursively load `*.tpk` and `*.json`).
 You can set a path list via `STITCHLANDS_TYPETREE_REGISTRY` as an alternative.
 
+`--texture-root` and `--packed-data-root` also support env defaults:
+- `STITCHLANDS_TEXTURE_ROOT`
+- `STITCHLANDS_PACKED_DATA_ROOT`
+
+Both env vars accept path lists separated by `:` or `;`.
+
 Search packed Texture2D names:
 
 ```bash
@@ -92,11 +122,12 @@ cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/
 
 ## Notes
 
-- v0 supports `Graphic_Single`-style path resolution first.
+- Thing and terrain resolution use loose lookup first, then packed Unity lookup.
 - If a texture is missing, it renders a checkerboard fallback and logs a warning.
 - Use `--texture-root <path>` (repeatable) to try extra directories for loose texture PNGs.
 - Extra roots also support fuzzy filename lookup by basename (`Steel`, `Steel_south`, etc.) when exact `texPath` folders are not present.
 - Packed Unity Texture2D lookup is attempted automatically after loose file lookup misses.
+- Scene draw order is deterministic: terrain first, then things, then pawns.
 
 ## Smoke Test
 
@@ -106,4 +137,12 @@ Run the Steel no-fallback smoke test (requires local RimWorld install + typetree
 RIMWORLD_DATA_DIR="$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" \
 RIMWORLD_TYPETREE_REGISTRY="/path/to/typetree.tpk" \
 cargo test --test v0_smoke -- --nocapture
+```
+
+Run the v1 fixture scene smoke test:
+
+```bash
+RIMWORLD_DATA_DIR="$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" \
+RIMWORLD_TYPETREE_REGISTRY="/path/to/typetree.tpk" \
+cargo test --test v1_smoke -- --nocapture
 ```

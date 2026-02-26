@@ -1,16 +1,18 @@
 mod assets;
+mod default_config;
 mod defs;
 mod packed_textures;
 mod renderer;
 mod rimworld_paths;
+mod scene;
 mod typetree_registry;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 use log::{info, warn};
 use walkdir::WalkDir;
 use winit::application::ApplicationHandler;
@@ -18,20 +20,24 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
-use crate::assets::resolve_sprite;
-use crate::defs::{load_thing_defs, ThingDef};
+use crate::assets::{resolve_sprite, resolve_texture_path, SpriteAsset};
+use crate::default_config::{merge_path_list, resolve_rimworld_input};
+use crate::defs::{load_terrain_defs, load_thing_defs, TerrainDef, ThingDef};
 use crate::packed_textures::{
     extract_all_packed_textures, infer_packed_data_roots, PackedTextureResolver,
 };
 use crate::renderer::{Renderer, SpriteInput, SpriteParams};
 use crate::rimworld_paths::resolve_data_dir;
+use crate::scene::{
+    count_terrain_families, generate_fixture_map, sorted_pawns, sorted_things_by_altitude,
+};
 use crate::typetree_registry::resolve_typetree_registry_paths;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Cli {
     #[arg(long)]
-    rimworld_data: PathBuf,
+    rimworld_data: Option<PathBuf>,
 
     #[arg(long)]
     thingdef: Option<String>,
@@ -81,6 +87,21 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     diagnose_textures: bool,
 
+    #[arg(long, default_value_t = false)]
+    probe_terrain: bool,
+
+    #[arg(long, default_value_t = 64)]
+    terrain_probe_limit: usize,
+
+    #[arg(long, default_value_t = false)]
+    scene_v1_fixture: bool,
+
+    #[arg(long, default_value_t = 40)]
+    map_width: usize,
+
+    #[arg(long, default_value_t = 40)]
+    map_height: usize,
+
     #[arg(long)]
     export_resolved: Option<PathBuf>,
 
@@ -119,20 +140,34 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
 
-    let data_dir = resolve_data_dir(&cli.rimworld_data).with_context(|| {
+    let rimworld_input = resolve_rimworld_input(cli.rimworld_data.clone()).context(
+        "could not resolve RimWorld path; set --rimworld-data or STITCHLANDS_RIMWORLD_DATA",
+    )?;
+
+    let data_dir = resolve_data_dir(&rimworld_input).with_context(|| {
         format!(
             "resolving rimworld data dir from {}",
-            cli.rimworld_data.display()
+            rimworld_input.display()
         )
     })?;
     info!("using RimWorld data dir: {}", data_dir.display());
 
+    let texture_roots = merge_path_list(&cli.texture_root, "STITCHLANDS_TEXTURE_ROOT");
+    let packed_root_overrides =
+        merge_path_list(&cli.packed_data_root, "STITCHLANDS_PACKED_DATA_ROOT");
+
     let defs = load_thing_defs(&data_dir)
         .with_context(|| format!("loading defs from {}", data_dir.display()))?;
     info!("loaded {} thing defs with graphicData", defs.len());
+    let terrain_defs = load_terrain_defs(&data_dir)
+        .with_context(|| format!("loading terrain defs from {}", data_dir.display()))?;
+    info!(
+        "loaded {} terrain defs with texturePath",
+        terrain_defs.len()
+    );
 
-    let mut packed_roots = infer_packed_data_roots(&cli.rimworld_data, &data_dir);
-    for extra in &cli.packed_data_root {
+    let mut packed_roots = infer_packed_data_roots(&rimworld_input, &data_dir);
+    for extra in &packed_root_overrides {
         packed_roots.push(extra.clone());
     }
     packed_roots.sort();
@@ -191,8 +226,8 @@ fn main() -> Result<()> {
     }
 
     if cli.diagnose_textures {
-        diagnose_textures(&data_dir, &cli.texture_root);
-        let packed_roots = infer_packed_data_roots(&cli.rimworld_data, &data_dir);
+        diagnose_textures(&data_dir, &texture_roots);
+        let packed_roots = infer_packed_data_roots(&rimworld_input, &data_dir);
         for root in packed_roots {
             println!(
                 "packed candidate: {} | exists={}",
@@ -276,6 +311,36 @@ fn main() -> Result<()> {
         }
     }
 
+    if cli.probe_terrain {
+        run_terrain_probe(
+            &data_dir,
+            &terrain_defs,
+            &texture_roots,
+            packed_resolver.as_ref(),
+            cli.terrain_probe_limit,
+        )?;
+        return Ok(());
+    }
+
+    if cli.scene_v1_fixture {
+        let render_sprites = build_v1_fixture_scene(
+            &data_dir,
+            &defs,
+            &terrain_defs,
+            &texture_roots,
+            packed_resolver.as_ref(),
+            cli.map_width,
+            cli.map_height,
+        )?;
+        if cli.no_window {
+            return Ok(());
+        }
+        let mut app = App::new(render_sprites, cli.screenshot);
+        let event_loop = EventLoop::new()?;
+        event_loop.run_app(&mut app)?;
+        return Ok(());
+    }
+
     let thingdef = cli
         .thingdef
         .as_deref()
@@ -298,7 +363,7 @@ fn main() -> Result<()> {
 
     let mut render_sprites = Vec::with_capacity(selected_defs.len());
     for (index, selected) in selected_defs.iter().enumerate() {
-        let mut sprite_asset = resolve_sprite(&data_dir, selected, &cli.texture_root)
+        let mut sprite_asset = resolve_sprite(&data_dir, selected, &texture_roots)
             .with_context(|| {
                 format!(
                     "resolving texture for def '{}' path '{}'",
@@ -548,6 +613,273 @@ fn diagnose_textures(data_dir: &std::path::Path, texture_roots: &[PathBuf]) {
     );
 }
 
+fn resolve_texture_with_packed(
+    data_dir: &Path,
+    tex_path: &str,
+    extra_texture_roots: &[PathBuf],
+    packed_resolver: Option<&PackedTextureResolver>,
+) -> Result<SpriteAsset> {
+    let mut sprite_asset = resolve_texture_path(data_dir, tex_path, extra_texture_roots)?;
+    if !sprite_asset.used_fallback {
+        return Ok(sprite_asset);
+    }
+
+    if let Some(resolver) = packed_resolver {
+        if let Ok(Some(hit)) = resolver.resolve(tex_path) {
+            sprite_asset.image = hit.image;
+            sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
+            sprite_asset.used_fallback = false;
+        }
+    }
+    Ok(sprite_asset)
+}
+
+fn run_terrain_probe(
+    data_dir: &Path,
+    terrain_defs: &std::collections::HashMap<String, TerrainDef>,
+    texture_roots: &[PathBuf],
+    packed_resolver: Option<&PackedTextureResolver>,
+    limit: usize,
+) -> Result<()> {
+    let mut rows: Vec<_> = terrain_defs.values().collect();
+    rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
+    let mut success = 0usize;
+    let mut failed = 0usize;
+
+    for terrain in rows.into_iter().take(limit) {
+        let sprite = resolve_texture_with_packed(
+            data_dir,
+            terrain.texture_path.as_str(),
+            texture_roots,
+            packed_resolver,
+        )?;
+        if sprite.used_fallback {
+            failed += 1;
+            println!(
+                "FAIL {:<28} texPath={} source=<fallback>",
+                terrain.def_name, terrain.texture_path
+            );
+        } else {
+            success += 1;
+            let source = sprite
+                .source_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string());
+            println!(
+                "OK   {:<28} texPath={} source={}",
+                terrain.def_name, terrain.texture_path, source
+            );
+        }
+    }
+    println!(
+        "terrain probe summary: checked={} ok={} failed={}",
+        limit, success, failed
+    );
+    Ok(())
+}
+
+fn build_v1_fixture_scene(
+    data_dir: &Path,
+    thing_defs: &std::collections::HashMap<String, ThingDef>,
+    terrain_defs: &std::collections::HashMap<String, TerrainDef>,
+    texture_roots: &[PathBuf],
+    packed_resolver: Option<&PackedTextureResolver>,
+    width: usize,
+    height: usize,
+) -> Result<Vec<RenderSprite>> {
+    let mut terrain_rows: Vec<_> = terrain_defs.values().collect();
+    terrain_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
+
+    let mut chosen_terrain: Vec<(String, image::RgbaImage)> = Vec::new();
+    for terrain in terrain_rows {
+        let sprite = resolve_texture_with_packed(
+            data_dir,
+            terrain.texture_path.as_str(),
+            texture_roots,
+            packed_resolver,
+        )?;
+        if sprite.used_fallback {
+            continue;
+        }
+        chosen_terrain.push((terrain.def_name.clone(), sprite.image));
+        if chosen_terrain.len() >= 3 {
+            break;
+        }
+    }
+    if chosen_terrain.len() < 3 {
+        anyhow::bail!("v1 fixture needs at least 3 decodable terrain defs");
+    }
+
+    let preferred_things = [
+        "Steel",
+        "ChunkSlagSteel",
+        "Plasteel",
+        "WoodLog",
+        "ComponentIndustrial",
+    ];
+    let mut thing_choices = Vec::new();
+    for name in preferred_things {
+        if let Some(def) = thing_defs.get(name) {
+            let mut sprite_asset = resolve_sprite(data_dir, def, texture_roots)?;
+            if sprite_asset.used_fallback {
+                sprite_asset = resolve_texture_with_packed(
+                    data_dir,
+                    def.graphic_data.tex_path.as_str(),
+                    texture_roots,
+                    packed_resolver,
+                )?;
+            }
+            if sprite_asset.used_fallback {
+                continue;
+            }
+            thing_choices.push((def.clone(), sprite_asset.image));
+        }
+    }
+    if thing_choices.is_empty() {
+        anyhow::bail!("v1 fixture needs at least one decodable ThingDef");
+    }
+
+    let pawn_candidates = [
+        "Things/Pawn/Humanlike/Bodies/Naked_Male",
+        "Things/Pawn/Humanlike/Bodies/Naked_Female",
+        "Things/Pawn/Humanlike/Heads/Male/Average_Normal",
+        "Things/Pawn/Humanlike/Heads/Female/Average_Normal",
+    ];
+    let mut pawn_choices: Vec<(String, image::RgbaImage)> = Vec::new();
+    for tex_path in pawn_candidates {
+        let sprite =
+            resolve_texture_with_packed(data_dir, tex_path, texture_roots, packed_resolver)?;
+        if sprite.used_fallback {
+            continue;
+        }
+        pawn_choices.push((tex_path.to_string(), sprite.image));
+    }
+    if pawn_choices.is_empty() {
+        anyhow::bail!("v1 fixture needs at least one decodable pawn texture");
+    }
+
+    let terrain_names = [
+        chosen_terrain[0].0.as_str(),
+        chosen_terrain[1].0.as_str(),
+        chosen_terrain[2].0.as_str(),
+    ];
+    let thing_names: Vec<String> = thing_choices
+        .iter()
+        .take(20)
+        .map(|(def, _)| def.def_name.clone())
+        .collect();
+    let pawn_tex: Vec<String> = pawn_choices
+        .iter()
+        .take(6)
+        .map(|(name, _)| name.clone())
+        .collect();
+    let map = generate_fixture_map(
+        width.max(8),
+        height.max(8),
+        terrain_names,
+        &thing_names,
+        &pawn_tex,
+    );
+
+    let mut terrain_by_name = std::collections::HashMap::new();
+    for (name, image) in chosen_terrain {
+        terrain_by_name.insert(name, image);
+    }
+    let mut thing_by_name = std::collections::HashMap::new();
+    for (def, image) in thing_choices {
+        thing_by_name.insert(def.def_name.clone(), (def, image));
+    }
+    let mut pawn_by_tex = std::collections::HashMap::new();
+    for (tex_path, image) in pawn_choices {
+        pawn_by_tex.insert(tex_path, image);
+    }
+
+    let mut sprites =
+        Vec::with_capacity(map.width * map.height + map.things.len() + map.pawns.len());
+    for z in 0..map.height {
+        for x in 0..map.width {
+            let name = map.terrain_at(x, z);
+            let Some(image) = terrain_by_name.get(name) else {
+                continue;
+            };
+            sprites.push(RenderSprite {
+                def_name: format!("Terrain::{name}"),
+                image: image.clone(),
+                params: SpriteParams {
+                    world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -1.0),
+                    size: Vec2::new(1.0, 1.0),
+                    tint: [1.0, 1.0, 1.0, 1.0],
+                },
+                used_fallback: false,
+            });
+        }
+    }
+
+    for thing in sorted_things_by_altitude(&map.things) {
+        let Some((def, image)) = thing_by_name.get(&thing.def_name) else {
+            continue;
+        };
+        let draw_offset = def.graphic_data.draw_offset;
+        sprites.push(RenderSprite {
+            def_name: format!("Thing::{}", def.def_name),
+            image: image.clone(),
+            params: SpriteParams {
+                world_pos: Vec3::new(
+                    thing.cell_x as f32 + 0.5 + draw_offset.x,
+                    thing.cell_z as f32 + 0.5 + draw_offset.z,
+                    0.2 + draw_offset.y,
+                ),
+                size: def.graphic_data.draw_size,
+                tint: [
+                    def.graphic_data.color.r,
+                    def.graphic_data.color.g,
+                    def.graphic_data.color.b,
+                    def.graphic_data.color.a,
+                ],
+            },
+            used_fallback: false,
+        });
+    }
+
+    for pawn in sorted_pawns(&map.pawns) {
+        let Some(image) = pawn_by_tex.get(&pawn.tex_path) else {
+            continue;
+        };
+        let x_offset = match pawn.facing {
+            scene::PawnFacing::East => 0.05,
+            scene::PawnFacing::West => -0.05,
+            _ => 0.0,
+        };
+        sprites.push(RenderSprite {
+            def_name: format!("Pawn::{}", pawn.label),
+            image: image.clone(),
+            params: SpriteParams {
+                world_pos: Vec3::new(
+                    pawn.cell_x as f32 + 0.5 + x_offset,
+                    pawn.cell_z as f32 + 0.5,
+                    0.6,
+                ),
+                size: Vec2::new(1.0, 1.0),
+                tint: [1.0, 1.0, 1.0, 1.0],
+            },
+            used_fallback: false,
+        });
+    }
+
+    info!(
+        "v1 fixture scene built: map={}x{} terrain_families={} tiles={} things={} pawns={} drawables={}",
+        map.width,
+        map.height,
+        count_terrain_families(&map),
+        map.width * map.height,
+        map.things.len(),
+        map.pawns.len(),
+        sprites.len()
+    );
+    Ok(sprites)
+}
+
 struct App {
     sprites: Vec<RenderSprite>,
     screenshot_path: Option<PathBuf>,
@@ -583,7 +915,7 @@ impl ApplicationHandler for App {
             .expect("at least one sprite exists in app state");
         let fallback_count = self.sprites.iter().filter(|s| s.used_fallback).count();
         let attrs = Window::default_attributes().with_title(format!(
-            "stitchlands-redux v0 | sprites={} first={} fallback={} | pan: WASD/Arrows zoom: wheel/QE",
+            "stitchlands-redux | sprites={} first={} fallback={} | pan: WASD/Arrows zoom: wheel/QE",
             self.sprites.len(),
             first.def_name,
             fallback_count
