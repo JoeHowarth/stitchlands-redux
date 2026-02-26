@@ -118,6 +118,9 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     scene_v1_fixture: bool,
 
+    #[arg(long, default_value_t = false)]
+    pawn_fixture: bool,
+
     #[arg(long, default_value_t = 40)]
     map_width: usize,
 
@@ -365,6 +368,27 @@ fn main() -> Result<()> {
             asset_resolver: &mut asset_resolver,
             width: cli.map_width,
             height: cli.map_height,
+            pawn_focus_only: false,
+        })?;
+        if cli.no_window {
+            return Ok(());
+        }
+        let mut app = App::new(render_sprites, cli.screenshot, Some(camera_focus));
+        let event_loop = EventLoop::new()?;
+        event_loop.run_app(&mut app)?;
+        return Ok(());
+    }
+
+    if cli.pawn_fixture {
+        let (render_sprites, camera_focus) = build_v1_fixture_scene(FixtureSceneConfig {
+            data_dir: &data_dir,
+            thing_defs: &defs,
+            terrain_defs: &terrain_defs,
+            apparel_defs: &apparel_defs,
+            asset_resolver: &mut asset_resolver,
+            width: cli.map_width.clamp(8, 18),
+            height: cli.map_height.clamp(8, 18),
+            pawn_focus_only: true,
         })?;
         if cli.no_window {
             return Ok(());
@@ -524,6 +548,7 @@ struct FixtureSceneConfig<'a> {
     asset_resolver: &'a mut AssetResolver,
     width: usize,
     height: usize,
+    pawn_focus_only: bool,
 }
 
 fn make_missing_def_message(
@@ -568,6 +593,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         asset_resolver,
         width,
         height,
+        pawn_focus_only,
     } = config;
 
     let mut terrain_rows: Vec<_> = terrain_defs.values().collect();
@@ -709,6 +735,10 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
     }
     if chosen_apparel.is_empty() {
         warn!("v1 fixture found no decodable apparel layers; pawns will be unclothed");
+    } else if pawn_focus_only && chosen_apparel.len() < 2 {
+        anyhow::bail!(
+            "pawn fixture requires at least two decodable apparel layers (body + shell/head)"
+        );
     }
 
     let terrain_names = [
@@ -716,16 +746,28 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         chosen_terrain[1].0.as_str(),
         chosen_terrain[2].0.as_str(),
     ];
-    let thing_names: Vec<String> = thing_choices
-        .iter()
-        .take(20)
-        .map(|(def, _)| def.def_name.clone())
-        .collect();
-    let pawn_tex: Vec<String> = pawn_body_choices
-        .iter()
-        .take(6)
-        .map(|(name, _)| name.clone())
-        .collect();
+    let thing_names: Vec<String> = if pawn_focus_only {
+        Vec::new()
+    } else {
+        thing_choices
+            .iter()
+            .take(20)
+            .map(|(def, _)| def.def_name.clone())
+            .collect()
+    };
+    let pawn_tex: Vec<String> = if pawn_focus_only {
+        pawn_body_choices
+            .iter()
+            .take(1)
+            .map(|(name, _)| name.clone())
+            .collect()
+    } else {
+        pawn_body_choices
+            .iter()
+            .take(6)
+            .map(|(name, _)| name.clone())
+            .collect()
+    };
     let map = generate_fixture_map(
         width.max(8),
         height.max(8),
@@ -930,16 +972,27 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         Vec2::new(map.width as f32 * 0.5, map.height as f32 * 0.5)
     };
 
-    info!(
-        "v1 fixture scene built: map={}x{} terrain_families={} tiles={} things={} pawns={} drawables={} zbands=terrain(-1.0),thing(~-0.8),pawn(~-0.6)",
-        map.width,
-        map.height,
-        count_terrain_families(&map),
-        map.width * map.height,
-        map.things.len(),
-        map.pawns.len(),
-        sprites.len()
-    );
+    if pawn_focus_only {
+        info!(
+            "pawn fixture scene built: map={}x{} terrain_families={} pawns={} drawables={}",
+            map.width,
+            map.height,
+            count_terrain_families(&map),
+            map.pawns.len(),
+            sprites.len()
+        );
+    } else {
+        info!(
+            "v1 fixture scene built: map={}x{} terrain_families={} tiles={} things={} pawns={} drawables={} zbands=terrain(-1.0),thing(~-0.8),pawn(~-0.6)",
+            map.width,
+            map.height,
+            count_terrain_families(&map),
+            map.width * map.height,
+            map.things.len(),
+            map.pawns.len(),
+            sprites.len()
+        );
+    }
     Ok((sprites, camera_focus))
 }
 

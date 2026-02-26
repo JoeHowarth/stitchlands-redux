@@ -81,6 +81,12 @@ Launch the v1 fixture scene (terrain tilemap + things + pawns):
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --typetree-registry /path/to/typetree.tpk --scene-v1-fixture
 ```
 
+Launch pawn-focused fixture scene (single pawn with composed body/head/hair/beard/apparel/overlay layers):
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --typetree-registry /path/to/typetree.tpk --pawn-fixture --map-width 16 --map-height 16
+```
+
 `--packed-decode-probe` is now opt-in (default `0`) for faster startup.  
 Use it only when debugging decode health:
 
