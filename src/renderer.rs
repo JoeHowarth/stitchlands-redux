@@ -244,7 +244,7 @@ impl Renderer {
 
         let camera = Camera {
             center: initial_camera_center.unwrap_or(Vec2::new(0.5, 0.5)),
-            zoom: 6.0,
+            zoom: options.initial_zoom.unwrap_or(6.0).max(0.2),
         };
         let camera_uniform = CameraUniform {
             view_proj: camera
@@ -736,6 +736,7 @@ pub struct SpriteParams {
 pub struct RendererOptions {
     pub clear_color: [f64; 4],
     pub surface_size: Option<PhysicalSize<u32>>,
+    pub initial_zoom: Option<f32>,
 }
 
 impl Default for RendererOptions {
@@ -743,6 +744,7 @@ impl Default for RendererOptions {
         Self {
             clear_color: [0.05, 0.08, 0.10, 1.0],
             surface_size: None,
+            initial_zoom: None,
         }
     }
 }

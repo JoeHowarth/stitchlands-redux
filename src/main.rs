@@ -125,6 +125,12 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     pawn_fixture: bool,
 
+    #[arg(long, default_value_t = false)]
+    pawn_audit: bool,
+
+    #[arg(long, default_value_t = 10)]
+    pawn_audit_count: usize,
+
     #[arg(long, default_value_t = 0)]
     pawn_fixture_variant: usize,
 
@@ -154,6 +160,9 @@ struct Cli {
 
     #[arg(long, default_value_t = 1024)]
     viewport_height: u32,
+
+    #[arg(long, default_value_t = 6.0)]
+    camera_zoom: f32,
 
     #[arg(long, value_parser = parse_clear_color, default_value = "0.05,0.08,0.10,1")]
     clear_color: [f64; 4],
@@ -214,6 +223,7 @@ fn main() -> Result<()> {
             cli.viewport_width.max(1),
             cli.viewport_height.max(1),
         )),
+        initial_zoom: Some(cli.camera_zoom.max(0.2)),
     };
     let hide_window = cli.hidden_window || (cli.no_window && cli.screenshot.is_some());
 
@@ -455,6 +465,8 @@ fn main() -> Result<()> {
             width: cli.map_width,
             height: cli.map_height,
             pawn_focus_only: false,
+            pawn_audit_mode: false,
+            pawn_count: 6,
             pawn_fixture_variant: cli.pawn_fixture_variant,
             dump_pawn_trace: cli.dump_pawn_trace.clone(),
             compose_config: compose_config.clone(),
@@ -489,6 +501,44 @@ fn main() -> Result<()> {
             width: cli.map_width.clamp(8, 18),
             height: cli.map_height.clamp(8, 18),
             pawn_focus_only: true,
+            pawn_audit_mode: false,
+            pawn_count: 1,
+            pawn_fixture_variant: cli.pawn_fixture_variant,
+            dump_pawn_trace: cli.dump_pawn_trace.clone(),
+            compose_config: compose_config.clone(),
+            strict_missing: !cli.allow_fallback,
+        })?;
+        if !should_run_renderer {
+            return Ok(());
+        }
+        let mut app = App::new(
+            render_sprites,
+            cli.screenshot,
+            Some(camera_focus),
+            render_options,
+            hide_window,
+        );
+        let event_loop = EventLoop::new()?;
+        event_loop.run_app(&mut app)?;
+        return Ok(());
+    }
+
+    if cli.pawn_audit {
+        let (render_sprites, camera_focus) = build_v1_fixture_scene(FixtureSceneConfig {
+            data_dir: &data_dir,
+            thing_defs: &defs,
+            terrain_defs: &terrain_defs,
+            apparel_defs: &apparel_defs,
+            body_type_defs: &body_type_defs,
+            head_type_defs: &head_type_defs,
+            beard_defs: &beard_defs,
+            hair_defs: &hair_defs,
+            asset_resolver: &mut asset_resolver,
+            width: cli.map_width.max(24),
+            height: cli.map_height.max(24),
+            pawn_focus_only: false,
+            pawn_audit_mode: true,
+            pawn_count: cli.pawn_audit_count.clamp(6, 20),
             pawn_fixture_variant: cli.pawn_fixture_variant,
             dump_pawn_trace: cli.dump_pawn_trace.clone(),
             compose_config: compose_config.clone(),
@@ -693,6 +743,8 @@ struct FixtureSceneConfig<'a> {
     width: usize,
     height: usize,
     pawn_focus_only: bool,
+    pawn_audit_mode: bool,
+    pawn_count: usize,
     pawn_fixture_variant: usize,
     dump_pawn_trace: Option<PathBuf>,
     compose_config: PawnComposeConfig,
@@ -782,6 +834,8 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         width,
         height,
         pawn_focus_only,
+        pawn_audit_mode,
+        pawn_count,
         pawn_fixture_variant,
         dump_pawn_trace,
         compose_config,
@@ -934,7 +988,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         chosen_terrain[1].0.as_str(),
         chosen_terrain[2].0.as_str(),
     ];
-    let thing_names: Vec<String> = if pawn_focus_only {
+    let thing_names: Vec<String> = if pawn_focus_only || pawn_audit_mode {
         Vec::new()
     } else {
         thing_choices
@@ -950,6 +1004,13 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                 .body_naked_graphic_path
                 .clone(),
         ]
+    } else if pawn_audit_mode {
+        (0..pawn_count)
+            .map(|i| {
+                let idx = (pawn_fixture_variant + i) % pawn_body_choices.len();
+                pawn_body_choices[idx].0.body_naked_graphic_path.clone()
+            })
+            .collect()
     } else {
         pawn_body_choices
             .iter()
@@ -957,13 +1018,28 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             .map(|(body, _)| body.body_naked_graphic_path.clone())
             .collect()
     };
-    let map = generate_fixture_map(
+    let mut map = generate_fixture_map(
         width.max(8),
         height.max(8),
         terrain_names,
         &thing_names,
         &pawn_tex,
     );
+    if pawn_audit_mode {
+        let cols = 5usize;
+        let spacing = 4i32;
+        let rows = map.pawns.len().div_ceil(cols).max(1);
+        let span_x = (cols.saturating_sub(1) as i32) * spacing;
+        let span_z = (rows.saturating_sub(1) as i32) * spacing;
+        let origin_x = ((map.width as i32 - 1 - span_x) / 2).max(0);
+        let origin_z = ((map.height as i32 - 1 - span_z) / 2).max(0);
+        for (i, pawn) in map.pawns.iter_mut().enumerate() {
+            let col = (i % cols) as i32;
+            let row = (i / cols) as i32;
+            pawn.cell_x = (origin_x + col * spacing).min(map.width.saturating_sub(1) as i32);
+            pawn.cell_z = (origin_z + row * spacing).min(map.height.saturating_sub(1) as i32);
+        }
+    }
 
     let mut terrain_by_name = std::collections::HashMap::new();
     for (name, image) in chosen_terrain {
@@ -1045,8 +1121,8 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         Vec::with_capacity(map.width * map.height + map.things.len() + map.pawns.len());
     let mut trace_lines = Vec::new();
     trace_lines.push(format!(
-        "variant={} map={}x{} pawn_focus_only={}",
-        pawn_fixture_variant, map.width, map.height, pawn_focus_only
+        "variant={} map={}x{} pawn_focus_only={} pawn_audit_mode={} pawn_count={}",
+        pawn_fixture_variant, map.width, map.height, pawn_focus_only, pawn_audit_mode, pawn_count
     ));
     for z in 0..map.height {
         for x in 0..map.width {
@@ -1436,7 +1512,9 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         }
     }
 
-    let camera_focus = if let Some(thing) = map.things.first() {
+    let camera_focus = if pawn_audit_mode {
+        Vec2::new(map.width as f32 * 0.5, map.height as f32 * 0.5)
+    } else if let Some(thing) = map.things.first() {
         Vec2::new(thing.cell_x as f32 + 0.5, thing.cell_z as f32 + 0.5)
     } else if let Some(pawn) = map.pawns.first() {
         Vec2::new(pawn.cell_x as f32 + 0.5, pawn.cell_z as f32 + 0.5)
@@ -1453,6 +1531,17 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             map.pawns.len(),
             sprites.len(),
             pawn_fixture_variant
+        );
+    } else if pawn_audit_mode {
+        info!(
+            "pawn audit scene built: map={}x{} terrain_families={} pawns={} drawables={} variant={} (target pawns={})",
+            map.width,
+            map.height,
+            count_terrain_families(&map),
+            map.pawns.len(),
+            sprites.len(),
+            pawn_fixture_variant,
+            pawn_count
         );
     } else {
         info!(
