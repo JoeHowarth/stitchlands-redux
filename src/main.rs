@@ -1239,6 +1239,17 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                 }
             })
             .collect();
+        let apparel_labels: Vec<String> = apparel_inputs.iter().map(|a| a.label.clone()).collect();
+        info!(
+            "pawn loadout {} facing={:?} body={} head={} hair={} beard={} apparel=[{}]",
+            pawn.label,
+            facing,
+            body_directional.path,
+            head_tex.as_deref().unwrap_or("<none>"),
+            hair_tex.as_deref().unwrap_or("<none>"),
+            beard_tex.as_deref().unwrap_or("<none>"),
+            apparel_labels.join(", ")
+        );
         let hediff_overlays = if std::env::var_os("STITCHLANDS_ENABLE_DEBUG_HEDIFFS").is_some() {
             vec![
                 HediffOverlayInput {
