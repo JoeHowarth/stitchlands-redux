@@ -47,10 +47,10 @@ pub fn default_packed_index_path() -> PathBuf {
         return PathBuf::from(home)
             .join(".cache")
             .join("stitchlands-redux")
-            .join("packed_texture_index_v1.txt");
+            .join("packed_texture_index_v2.txt");
     }
 
-    PathBuf::from(".stitchlands-packed-index-v1.txt")
+    PathBuf::from(".stitchlands-packed-index-v2.txt")
 }
 
 fn common_rimworld_candidates() -> Vec<PathBuf> {

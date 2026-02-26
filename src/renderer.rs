@@ -374,7 +374,7 @@ impl Renderer {
                 );
                 let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-                let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("texture-bind-group"),
                     layout: &texture_layout,
                     entries: &[
@@ -387,8 +387,7 @@ impl Renderer {
                             resource: wgpu::BindingResource::Sampler(&sampler),
                         },
                     ],
-                });
-                texture_bind_group
+                })
             });
 
             grouped

@@ -94,12 +94,12 @@ impl PackedTextureResolver {
                     Err(_) => None,
                 },
             };
-            if let Some(name) = name {
-                if !name.is_empty() {
-                    keys_by_name
-                        .entry(name.to_ascii_lowercase())
-                        .or_insert(key.clone());
-                }
+            if let Some(name) = name
+                && !name.is_empty()
+            {
+                keys_by_name
+                    .entry(name.to_ascii_lowercase())
+                    .or_insert(key.clone());
             }
         }
 
@@ -140,10 +140,10 @@ impl PackedTextureResolver {
         let mut seen = std::collections::HashSet::new();
 
         for wanted in wanted_texture_names(tex_path) {
-            if let Some(key) = self.keys_by_name.get(&wanted) {
-                if seen.insert((key.source.describe(), key.path_id)) {
-                    candidates.push((wanted, key.clone()));
-                }
+            if let Some(key) = self.keys_by_name.get(&wanted)
+                && seen.insert((key.source.describe(), key.path_id))
+            {
+                candidates.push((wanted, key.clone()));
             }
         }
         for (name, key) in self.find_fuzzy_name_matches(tex_path) {
@@ -290,17 +290,16 @@ impl PackedTextureResolver {
         if texture.image_data.is_empty()
             && !texture.stream_info.path.is_empty()
             && texture.stream_info.size > 0
-        {
-            if let Ok(bytes) = self.env.read_stream_data_source(
+            && let Ok(bytes) = self.env.read_stream_data_source(
                 &key.source,
                 key.source_kind,
                 &texture.stream_info.path,
                 texture.stream_info.offset,
                 texture.stream_info.size,
-            ) {
-                texture.data_size = bytes.len() as i32;
-                texture.image_data = bytes;
-            }
+            )
+        {
+            texture.data_size = bytes.len() as i32;
+            texture.image_data = bytes;
         }
         let image = self.converter.decode_to_image(&texture)?;
         Ok(image)
@@ -388,17 +387,16 @@ pub fn extract_all_packed_textures(
         if texture.image_data.is_empty()
             && !texture.stream_info.path.is_empty()
             && texture.stream_info.size > 0
-        {
-            if let Ok(bytes) = env.read_stream_data_source(
+            && let Ok(bytes) = env.read_stream_data_source(
                 &key.source,
                 key.source_kind,
                 &texture.stream_info.path,
                 texture.stream_info.offset,
                 texture.stream_info.size,
-            ) {
-                texture.data_size = bytes.len() as i32;
-                texture.image_data = bytes;
-            }
+            )
+        {
+            texture.data_size = bytes.len() as i32;
+            texture.image_data = bytes;
         }
         let image = match converter.decode_to_image(&texture) {
             Ok(image) => image,

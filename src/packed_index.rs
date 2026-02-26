@@ -6,6 +6,10 @@ use anyhow::Result;
 use log::info;
 use unity_asset::environment::{Environment, EnvironmentObjectRef};
 use unity_asset_core::constants::class_ids;
+use unity_asset_decode::texture::Texture2DConverter;
+use unity_asset_decode::unity_version::UnityVersion;
+
+use crate::typetree_registry::load_typetree_registry;
 
 pub struct PackedTextureIndex {
     signature: String,
@@ -15,23 +19,27 @@ pub struct PackedTextureIndex {
 }
 
 impl PackedTextureIndex {
-    pub fn load_or_build(roots: &[PathBuf], cache_path: &Path, rebuild: bool) -> Result<Self> {
-        let signature = roots_signature(roots);
-        if !rebuild {
-            if let Ok(cached) = Self::load(cache_path) {
-                if cached.signature == signature {
-                    info!(
-                        "loaded packed texture index cache: {} (names={} container={})",
-                        cache_path.display(),
-                        cached.names.len(),
-                        cached.container_paths.len()
-                    );
-                    return Ok(cached);
-                }
-            }
+    pub fn load_or_build(
+        roots: &[PathBuf],
+        typetree_registries: &[PathBuf],
+        cache_path: &Path,
+        rebuild: bool,
+    ) -> Result<Self> {
+        let signature = roots_signature(roots, typetree_registries);
+        if !rebuild
+            && let Ok(cached) = Self::load(cache_path)
+            && cached.signature == signature
+        {
+            info!(
+                "loaded packed texture index cache: {} (names={} container={})",
+                cache_path.display(),
+                cached.names.len(),
+                cached.container_paths.len()
+            );
+            return Ok(cached);
         }
 
-        let built = Self::build(roots, signature)?;
+        let built = Self::build(roots, typetree_registries, signature)?;
         built.save(cache_path)?;
         info!(
             "rebuilt packed texture index cache: {} (names={} container={})",
@@ -85,7 +93,11 @@ impl PackedTextureIndex {
         self.names_set.is_empty() && self.container_paths.is_empty()
     }
 
-    fn build(roots: &[PathBuf], signature: String) -> Result<Self> {
+    fn build(
+        roots: &[PathBuf],
+        typetree_registries: &[PathBuf],
+        signature: String,
+    ) -> Result<Self> {
         let existing_roots: Vec<PathBuf> = roots.iter().filter(|r| r.exists()).cloned().collect();
         if existing_roots.is_empty() {
             return Ok(Self {
@@ -97,6 +109,9 @@ impl PackedTextureIndex {
         }
 
         let mut env = Environment::new();
+        if let Some(registry) = load_typetree_registry(typetree_registries)? {
+            env.set_type_tree_registry(Some(registry));
+        }
         for root in &existing_roots {
             if let Err(err) = env.load(root) {
                 info!(
@@ -106,6 +121,7 @@ impl PackedTextureIndex {
             }
         }
 
+        let converter = Texture2DConverter::new(UnityVersion::default());
         let mut names_set = HashSet::new();
         for obj in env.objects() {
             let EnvironmentObjectRef::Binary(binary) = obj else {
@@ -115,7 +131,17 @@ impl PackedTextureIndex {
                 continue;
             }
             let key = binary.key();
-            if let Ok(Some(name)) = env.peek_binary_object_name(&key) {
+            if let Ok(Some(name)) = env.peek_binary_object_name(&key)
+                && !name.is_empty()
+            {
+                names_set.insert(name.to_ascii_lowercase());
+                continue;
+            }
+
+            if let Ok(parsed) = binary.read()
+                && let Ok(texture) = converter.from_unity_object(&parsed)
+            {
+                let name = texture.name;
                 if !name.is_empty() {
                     names_set.insert(name.to_ascii_lowercase());
                 }
@@ -147,7 +173,7 @@ impl PackedTextureIndex {
         }
 
         let mut out = String::new();
-        out.push_str("STITCHLANDS_PACKED_INDEX_V1\n");
+        out.push_str("STITCHLANDS_PACKED_INDEX_V2\n");
         out.push_str(&self.signature);
         out.push('\n');
         out.push_str(&format!("{}\n", self.names.len()));
@@ -170,7 +196,7 @@ impl PackedTextureIndex {
         let mut lines = input.lines();
 
         let version = lines.next().unwrap_or_default();
-        if version != "STITCHLANDS_PACKED_INDEX_V1" {
+        if version != "STITCHLANDS_PACKED_INDEX_V2" {
             anyhow::bail!("unsupported packed index version");
         }
 
@@ -202,7 +228,7 @@ impl PackedTextureIndex {
     }
 }
 
-fn roots_signature(roots: &[PathBuf]) -> String {
+fn roots_signature(roots: &[PathBuf], typetree_registries: &[PathBuf]) -> String {
     let mut parts = Vec::new();
     for root in roots {
         let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
@@ -212,7 +238,17 @@ fn roots_signature(roots: &[PathBuf]) -> String {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        parts.push(format!("{}|{}", canonical.display(), mtime));
+        parts.push(format!("data:{}|{}", canonical.display(), mtime));
+    }
+    for registry in typetree_registries {
+        let canonical = std::fs::canonicalize(registry).unwrap_or_else(|_| registry.clone());
+        let mtime = std::fs::metadata(registry)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        parts.push(format!("typetree:{}|{}", canonical.display(), mtime));
     }
     parts.sort();
     parts.join(";")
@@ -262,10 +298,10 @@ mod tests {
         let cache_path = root.join("cache.txt");
 
         let first =
-            PackedTextureIndex::load_or_build(std::slice::from_ref(&root), &cache_path, false)
+            PackedTextureIndex::load_or_build(std::slice::from_ref(&root), &[], &cache_path, false)
                 .unwrap();
         let second =
-            PackedTextureIndex::load_or_build(std::slice::from_ref(&root), &cache_path, false)
+            PackedTextureIndex::load_or_build(std::slice::from_ref(&root), &[], &cache_path, false)
                 .unwrap();
 
         assert!(cache_path.exists());
@@ -288,7 +324,7 @@ mod tests {
         let cache_path = root.join("cache.txt");
 
         let stale = [
-            "STITCHLANDS_PACKED_INDEX_V1",
+            "STITCHLANDS_PACKED_INDEX_V2",
             "stale_signature",
             "1",
             "made_up_texture",
@@ -299,7 +335,7 @@ mod tests {
         fs::write(&cache_path, stale).unwrap();
 
         let rebuilt =
-            PackedTextureIndex::load_or_build(std::slice::from_ref(&root), &cache_path, false)
+            PackedTextureIndex::load_or_build(std::slice::from_ref(&root), &[], &cache_path, false)
                 .unwrap();
         assert!(rebuilt.search_names("made_up_texture", 5).is_empty());
 
@@ -317,7 +353,7 @@ mod tests {
         let cache_path = root.join("cache.txt");
 
         let input = [
-            "STITCHLANDS_PACKED_INDEX_V1",
+            "STITCHLANDS_PACKED_INDEX_V2",
             "any",
             "1",
             "steel",
@@ -346,7 +382,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let cache_path = root.join("cache.txt");
 
-        let input = ["STITCHLANDS_PACKED_INDEX_V1", "any", "0", "0", ""].join("\n");
+        let input = ["STITCHLANDS_PACKED_INDEX_V2", "any", "0", "0", ""].join("\n");
         fs::write(&cache_path, input).unwrap();
 
         let index = PackedTextureIndex::load(&cache_path).unwrap();

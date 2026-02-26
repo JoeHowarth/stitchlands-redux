@@ -89,7 +89,7 @@ cargo run -- --scene-v1-fixture --packed-decode-probe 24
 ```
 
 Packed texture metadata index (names/container paths) is cached on disk to speed repeated runs.
-Defaults to `$HOME/.cache/stitchlands-redux/packed_texture_index_v1.txt`.
+Defaults to `$HOME/.cache/stitchlands-redux/packed_texture_index_v2.txt`.
 
 ```bash
 # force a rebuild

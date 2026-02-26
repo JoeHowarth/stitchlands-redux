@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 pub fn resolve_data_dir(input: &Path) -> Result<PathBuf> {
     let candidates = [
