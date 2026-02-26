@@ -297,7 +297,8 @@ impl PackedTextureResolver {
             texture.data_size = bytes.len() as i32;
             texture.image_data = bytes;
         }
-        let image = self.converter.decode_to_image(&texture)?;
+        let mut image = self.converter.decode_to_image(&texture)?;
+        normalize_packed_texture_orientation(&mut image);
         Ok(image)
     }
 
@@ -394,13 +395,14 @@ pub fn extract_all_packed_textures(
             texture.data_size = bytes.len() as i32;
             texture.image_data = bytes;
         }
-        let image = match converter.decode_to_image(&texture) {
+        let mut image = match converter.decode_to_image(&texture) {
             Ok(image) => image,
             Err(_) => {
                 failed += 1;
                 continue;
             }
         };
+        normalize_packed_texture_orientation(&mut image);
 
         let texture_name = parsed
             .name()
@@ -506,6 +508,10 @@ fn sanitize_filename(input: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn normalize_packed_texture_orientation(image: &mut RgbaImage) {
+    image::imageops::flip_vertical_in_place(image);
 }
 
 #[cfg(test)]

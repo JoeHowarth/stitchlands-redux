@@ -161,9 +161,7 @@ impl AssetResolver {
             return Ok(false);
         };
 
-        let mut image = hit.image;
-        image::imageops::flip_vertical_in_place(&mut image);
-        sprite_asset.image = image;
+        sprite_asset.image = hit.image;
         sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
         sprite_asset.used_fallback = false;
         Ok(true)
