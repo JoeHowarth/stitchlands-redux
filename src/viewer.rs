@@ -58,6 +58,7 @@ struct App {
     base_dynamic_inputs: Vec<SpriteInput>,
     interaction: InteractionState,
     overlay_image: RgbaImage,
+    map_bounds: Option<(usize, usize)>,
     frame_count: u64,
     tick_count: u64,
     step_accumulator: Duration,
@@ -89,6 +90,7 @@ impl App {
             interaction: InteractionState::default(),
             overlay_image: RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255])
                 .expect("1x1 overlay texture"),
+            map_bounds: None,
             frame_count: 0,
             tick_count: 0,
             step_accumulator: Duration::ZERO,
@@ -116,8 +118,8 @@ impl App {
             out.push(SpriteInput {
                 image: self.overlay_image.clone(),
                 params: SpriteParams {
-                    world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, 4.0),
-                    size: Vec2::new(1.0, 1.0),
+                    world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.22),
+                    size: Vec2::new(1.04, 1.04),
                     tint: [0.20, 0.90, 1.00, 0.28],
                 },
             });
@@ -126,8 +128,8 @@ impl App {
             out.push(SpriteInput {
                 image: self.overlay_image.clone(),
                 params: SpriteParams {
-                    world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, 4.2),
-                    size: Vec2::new(1.0, 1.0),
+                    world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.21),
+                    size: Vec2::new(1.10, 1.10),
                     tint: [1.00, 0.90, 0.20, 0.30],
                 },
             });
@@ -151,6 +153,7 @@ impl ApplicationHandler for App {
             .filter(|s| s.used_fallback)
             .count();
         let total_sprites = self.static_sprites.len() + self.dynamic_sprites.len();
+        self.map_bounds = infer_map_bounds(&self.static_sprites);
         let attrs = Window::default_attributes().with_title(format!(
             "stitchlands-redux | sprites={} first={} fallback={} | pan: WASD/Arrows zoom: wheel/QE",
             total_sprites, first.def_name, fallback_count
@@ -265,9 +268,13 @@ impl ApplicationHandler for App {
                         return;
                     };
                     let world = renderer.screen_to_world(position.x as f32, position.y as f32);
-                    let cell = crate::interaction::world_to_cell(world);
-                    if self.interaction.hovered_cell != Some(cell) {
-                        self.interaction.hovered_cell = Some(cell);
+                    let cell = if let Some((w, h)) = self.map_bounds {
+                        crate::interaction::world_to_cell_in_bounds(world, w, h)
+                    } else {
+                        Some(crate::interaction::world_to_cell(world))
+                    };
+                    if self.interaction.hovered_cell != cell {
+                        self.interaction.hovered_cell = cell;
                         window.request_redraw();
                     }
                 }
@@ -298,4 +305,22 @@ impl ApplicationHandler for App {
             window.request_redraw();
         }
     }
+}
+
+fn infer_map_bounds(static_sprites: &[RenderSprite]) -> Option<(usize, usize)> {
+    let mut max_x = -1i32;
+    let mut max_z = -1i32;
+    for sprite in static_sprites {
+        if !sprite.def_name.starts_with("Terrain::") {
+            continue;
+        }
+        let x = sprite.params.world_pos.x.floor() as i32;
+        let z = sprite.params.world_pos.y.floor() as i32;
+        max_x = max_x.max(x);
+        max_z = max_z.max(z);
+    }
+    if max_x < 0 || max_z < 0 {
+        return None;
+    }
+    Some(((max_x + 1) as usize, (max_z + 1) as usize))
 }
