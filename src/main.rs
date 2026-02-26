@@ -5,6 +5,7 @@ mod default_config;
 mod defs;
 mod packed_index;
 mod packed_textures;
+mod pawn;
 mod renderer;
 mod rimworld_paths;
 mod scene;
@@ -31,6 +32,9 @@ use crate::default_config::{default_packed_index_path, merge_path_list, resolve_
 use crate::defs::{TerrainDef, ThingDef, load_terrain_defs, load_thing_defs};
 use crate::packed_index::PackedTextureIndex;
 use crate::packed_textures::infer_packed_data_roots;
+use crate::pawn::{
+    PawnComposeConfig, PawnDrawFlags, PawnFacing as ComposeFacing, PawnRenderInput, compose_pawn,
+};
 use crate::renderer::{Renderer, SpriteInput, SpriteParams};
 use crate::rimworld_paths::resolve_data_dir;
 use crate::scene::{
@@ -593,22 +597,61 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         anyhow::bail!("v1 fixture needs at least one decodable ThingDef");
     }
 
-    let pawn_candidates = [
+    let pawn_body_candidates = [
         "Things/Pawn/Humanlike/Bodies/Naked_Male",
         "Things/Pawn/Humanlike/Bodies/Naked_Female",
+    ];
+    let pawn_head_candidates = [
         "Things/Pawn/Humanlike/Heads/Male/Average_Normal",
         "Things/Pawn/Humanlike/Heads/Female/Average_Normal",
     ];
-    let mut pawn_choices: Vec<(String, image::RgbaImage)> = Vec::new();
-    for tex_path in pawn_candidates {
+    let pawn_hair_candidates = [
+        "Things/Pawn/Humanlike/Hairs/Shaved",
+        "Things/Pawn/Humanlike/Hairs/Bob",
+        "Things/Pawn/Humanlike/Hairs/Pompadour",
+    ];
+    let pawn_beard_candidates = [
+        "Things/Pawn/Humanlike/Beards/Beard_Full",
+        "Things/Pawn/Humanlike/Beards/Beard_Short",
+    ];
+
+    let mut pawn_body_choices: Vec<(String, image::RgbaImage)> = Vec::new();
+    for tex_path in pawn_body_candidates {
         let resolved = asset_resolver.resolve_texture_path(data_dir, tex_path)?;
         if resolved.sprite.used_fallback {
             continue;
         }
-        pawn_choices.push((tex_path.to_string(), resolved.sprite.image));
+        pawn_body_choices.push((tex_path.to_string(), resolved.sprite.image));
     }
-    if pawn_choices.is_empty() {
-        anyhow::bail!("v1 fixture needs at least one decodable pawn texture");
+    if pawn_body_choices.is_empty() {
+        anyhow::bail!("v1 fixture needs at least one decodable pawn body texture");
+    }
+
+    let mut pawn_head_choices: Vec<(String, image::RgbaImage)> = Vec::new();
+    for tex_path in pawn_head_candidates {
+        let resolved = asset_resolver.resolve_texture_path(data_dir, tex_path)?;
+        if resolved.sprite.used_fallback {
+            continue;
+        }
+        pawn_head_choices.push((tex_path.to_string(), resolved.sprite.image));
+    }
+
+    let mut pawn_hair_choices: Vec<(String, image::RgbaImage)> = Vec::new();
+    for tex_path in pawn_hair_candidates {
+        let resolved = asset_resolver.resolve_texture_path(data_dir, tex_path)?;
+        if resolved.sprite.used_fallback {
+            continue;
+        }
+        pawn_hair_choices.push((tex_path.to_string(), resolved.sprite.image));
+    }
+
+    let mut pawn_beard_choices: Vec<(String, image::RgbaImage)> = Vec::new();
+    for tex_path in pawn_beard_candidates {
+        let resolved = asset_resolver.resolve_texture_path(data_dir, tex_path)?;
+        if resolved.sprite.used_fallback {
+            continue;
+        }
+        pawn_beard_choices.push((tex_path.to_string(), resolved.sprite.image));
     }
 
     let terrain_names = [
@@ -621,7 +664,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         .take(20)
         .map(|(def, _)| def.def_name.clone())
         .collect();
-    let pawn_tex: Vec<String> = pawn_choices
+    let pawn_tex: Vec<String> = pawn_body_choices
         .iter()
         .take(6)
         .map(|(name, _)| name.clone())
@@ -642,10 +685,33 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
     for (def, image) in thing_choices {
         thing_by_name.insert(def.def_name.clone(), (def, image));
     }
-    let mut pawn_by_tex = std::collections::HashMap::new();
-    for (tex_path, image) in pawn_choices {
-        pawn_by_tex.insert(tex_path, image);
+    let mut pawn_layer_by_tex = std::collections::HashMap::new();
+    for (tex_path, image) in pawn_body_choices
+        .into_iter()
+        .chain(pawn_head_choices.into_iter())
+        .chain(pawn_hair_choices.into_iter())
+        .chain(pawn_beard_choices.into_iter())
+    {
+        pawn_layer_by_tex.insert(tex_path, image);
     }
+    let mut head_tex_paths: Vec<String> = pawn_layer_by_tex
+        .keys()
+        .filter(|path| path.contains("/Heads/"))
+        .cloned()
+        .collect();
+    head_tex_paths.sort();
+    let mut hair_tex_paths: Vec<String> = pawn_layer_by_tex
+        .keys()
+        .filter(|path| path.contains("/Hairs/"))
+        .cloned()
+        .collect();
+    hair_tex_paths.sort();
+    let mut beard_tex_paths: Vec<String> = pawn_layer_by_tex
+        .keys()
+        .filter(|path| path.contains("/Beards/"))
+        .cloned()
+        .collect();
+    beard_tex_paths.sort();
 
     let mut sprites =
         Vec::with_capacity(map.width * map.height + map.things.len() + map.pawns.len());
@@ -673,16 +739,21 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             continue;
         };
         let draw_offset = def.graphic_data.draw_offset;
+        let thing_pos = Vec3::new(
+            thing.cell_x as f32 + 0.5 + draw_offset.x,
+            thing.cell_z as f32 + 0.5 + draw_offset.z,
+            -0.8 + draw_offset.y * 0.01,
+        );
+        let thing_size = Vec2::new(
+            def.graphic_data.draw_size.x.max(1.1),
+            def.graphic_data.draw_size.y.max(1.1),
+        );
         sprites.push(RenderSprite {
             def_name: format!("Thing::{}", def.def_name),
             image: image.clone(),
             params: SpriteParams {
-                world_pos: Vec3::new(
-                    thing.cell_x as f32 + 0.5 + draw_offset.x,
-                    thing.cell_z as f32 + 0.5 + draw_offset.z,
-                    0.2 + draw_offset.y,
-                ),
-                size: def.graphic_data.draw_size,
+                world_pos: thing_pos,
+                size: thing_size,
                 tint: [
                     def.graphic_data.color.r,
                     def.graphic_data.color.g,
@@ -695,28 +766,51 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
     }
 
     for pawn in sorted_pawns(&map.pawns) {
-        let Some(image) = pawn_by_tex.get(&pawn.tex_path) else {
+        let head_tex = if head_tex_paths.is_empty() {
+            None
+        } else {
+            Some(head_tex_paths[pawn.label.len() % head_tex_paths.len()].clone())
+        };
+        let hair_tex = hair_tex_paths.first().cloned();
+        let beard_tex = beard_tex_paths.first().cloned();
+        let compose_input = PawnRenderInput {
+            label: pawn.label.clone(),
+            facing: map_facing(pawn.facing),
+            world_pos: Vec3::new(pawn.cell_x as f32 + 0.5, pawn.cell_z as f32 + 0.5, 0.0),
+            body_tex_path: pawn.tex_path.clone(),
+            head_tex_path: head_tex,
+            hair_tex_path: hair_tex,
+            beard_tex_path: beard_tex,
+            body_size: Vec2::new(1.4, 1.4),
+            head_size: Vec2::new(1.05, 1.05),
+            hair_size: Vec2::new(1.1, 1.1),
+            beard_size: Vec2::new(0.95, 0.95),
+            tint: [1.0, 1.0, 1.0, 1.0],
+            apparel: Vec::new(),
+            draw_flags: PawnDrawFlags::NONE,
+        };
+        let composed = compose_pawn(&compose_input, &PawnComposeConfig::default());
+
+        let body_path = &compose_input.body_tex_path;
+        if !pawn_layer_by_tex.contains_key(body_path) {
             continue;
-        };
-        let x_offset = match pawn.facing {
-            scene::PawnFacing::East => 0.05,
-            scene::PawnFacing::West => -0.05,
-            _ => 0.0,
-        };
-        sprites.push(RenderSprite {
-            def_name: format!("Pawn::{}", pawn.label),
-            image: image.clone(),
-            params: SpriteParams {
-                world_pos: Vec3::new(
-                    pawn.cell_x as f32 + 0.5 + x_offset,
-                    pawn.cell_z as f32 + 0.5,
-                    0.6,
-                ),
-                size: Vec2::new(1.0, 1.0),
-                tint: [1.0, 1.0, 1.0, 1.0],
-            },
-            used_fallback: false,
-        });
+        }
+
+        for node in composed.nodes {
+            let Some(image) = pawn_layer_by_tex.get(&node.tex_path) else {
+                continue;
+            };
+            sprites.push(RenderSprite {
+                def_name: format!("Pawn::{}::{:?}::{}", pawn.label, node.kind, node.id),
+                image: image.clone(),
+                params: SpriteParams {
+                    world_pos: node.world_pos,
+                    size: node.size,
+                    tint: node.tint,
+                },
+                used_fallback: false,
+            });
+        }
     }
 
     let camera_focus = if let Some(thing) = map.things.first() {
@@ -728,7 +822,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
     };
 
     info!(
-        "v1 fixture scene built: map={}x{} terrain_families={} tiles={} things={} pawns={} drawables={}",
+        "v1 fixture scene built: map={}x{} terrain_families={} tiles={} things={} pawns={} drawables={} zbands=terrain(-1.0),thing(~-0.8),pawn(~-0.6)",
         map.width,
         map.height,
         count_terrain_families(&map),
@@ -738,6 +832,15 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         sprites.len()
     );
     Ok((sprites, camera_focus))
+}
+
+fn map_facing(facing: scene::PawnFacing) -> ComposeFacing {
+    match facing {
+        scene::PawnFacing::North => ComposeFacing::North,
+        scene::PawnFacing::East => ComposeFacing::East,
+        scene::PawnFacing::South => ComposeFacing::South,
+        scene::PawnFacing::West => ComposeFacing::West,
+    }
 }
 
 struct App {
