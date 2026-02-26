@@ -94,3 +94,13 @@ cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/
 - Use `--texture-root <path>` (repeatable) to try extra directories for loose texture PNGs.
 - Extra roots also support fuzzy filename lookup by basename (`Steel`, `Steel_south`, etc.) when exact `texPath` folders are not present.
 - Packed Unity Texture2D lookup is attempted automatically after loose file lookup misses.
+
+## Smoke Test
+
+Run the Steel no-fallback smoke test (requires local RimWorld install + typetree registry):
+
+```bash
+RIMWORLD_DATA_DIR="$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" \
+RIMWORLD_TYPETREE_REGISTRY="/path/to/typetree.tpk" \
+cargo test --test v0_smoke -- --nocapture
+```
