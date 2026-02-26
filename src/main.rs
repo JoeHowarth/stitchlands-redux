@@ -36,8 +36,9 @@ use crate::defs::{
 use crate::packed_index::PackedTextureIndex;
 use crate::packed_textures::infer_packed_data_roots;
 use crate::pawn::{
-    ApparelLayer as ComposeApparelLayer, ApparelRenderInput, HediffOverlayInput, OverlayAnchor,
-    PawnComposeConfig, PawnDrawFlags, PawnFacing as ComposeFacing, PawnRenderInput, compose_pawn,
+    ApparelLayer as ComposeApparelLayer, ApparelRenderInput, BeardTypeRenderData,
+    BodyTypeRenderData, HeadTypeRenderData, HediffOverlayInput, OverlayAnchor, PawnComposeConfig,
+    PawnDrawFlags, PawnFacing as ComposeFacing, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::{Renderer, SpriteInput, SpriteParams};
 use crate::rimworld_paths::resolve_data_dir;
@@ -930,6 +931,12 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             stump_size: Vec2::new(0.8, 0.8),
             hair_size: Vec2::new(1.1, 1.1),
             beard_size: Vec2::new(0.95, 0.95),
+            body_type: BodyTypeRenderData {
+                head_offset: Vec2::new(0.0, 0.22),
+                body_size_factor: 1.0,
+            },
+            head_type: HeadTypeRenderData::default(),
+            beard_type: BeardTypeRenderData::default(),
             tint: [1.0, 1.0, 1.0, 1.0],
             apparel: apparel_inputs,
             present_body_part_groups: vec![

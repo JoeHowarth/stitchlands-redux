@@ -51,6 +51,55 @@ pub struct ApparelRenderInput {
     pub tint: [f32; 4],
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BodyTypeRenderData {
+    pub head_offset: Vec2,
+    pub body_size_factor: f32,
+}
+
+impl Default for BodyTypeRenderData {
+    fn default() -> Self {
+        Self {
+            head_offset: Vec2::new(0.0, 0.22),
+            body_size_factor: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HeadTypeRenderData {
+    pub narrow: bool,
+    pub narrow_crown_horizontal_offset: f32,
+    pub beard_offset: Vec3,
+    pub beard_offset_x_east: f32,
+}
+
+impl Default for HeadTypeRenderData {
+    fn default() -> Self {
+        Self {
+            narrow: false,
+            narrow_crown_horizontal_offset: 0.0,
+            beard_offset: Vec3::ZERO,
+            beard_offset_x_east: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BeardTypeRenderData {
+    pub offset_narrow_east: Vec3,
+    pub offset_narrow_south: Vec3,
+}
+
+impl Default for BeardTypeRenderData {
+    fn default() -> Self {
+        Self {
+            offset_narrow_east: Vec3::ZERO,
+            offset_narrow_south: Vec3::ZERO,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum OverlayAnchor {
     Body,
@@ -101,6 +150,9 @@ pub struct PawnRenderInput {
     pub stump_size: Vec2,
     pub hair_size: Vec2,
     pub beard_size: Vec2,
+    pub body_type: BodyTypeRenderData,
+    pub head_type: HeadTypeRenderData,
+    pub beard_type: BeardTypeRenderData,
     pub tint: [f32; 4],
     pub apparel: Vec<ApparelRenderInput>,
     pub present_body_part_groups: Vec<String>,

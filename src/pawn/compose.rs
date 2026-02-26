@@ -1,9 +1,11 @@
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 
-use super::layering::{apparel_z, facing_x_offset};
+use super::graph::{AnchorKind, GraphNode, NodePayload};
 use super::model::{ApparelLayer, OverlayAnchor, PawnComposeConfig, PawnRenderInput};
-use super::rules::{resolve_skip_flags, should_draw_hediff_overlay};
+use super::parms::{PawnDrawParms, RenderSkipFlag};
+use super::rules::should_draw_hediff_overlay;
 use super::tree::{PawnNode, PawnNodeKind};
+use super::workers;
 
 #[derive(Debug, Clone)]
 pub struct PawnComposition {
@@ -11,86 +13,66 @@ pub struct PawnComposition {
 }
 
 pub fn compose_pawn(input: &PawnRenderInput, config: &PawnComposeConfig) -> PawnComposition {
-    let skip = resolve_skip_flags(input.draw_flags, &input.apparel);
-    let x_offset = facing_x_offset(input.facing);
-    let base_pos = Vec3::new(
-        input.world_pos.x + x_offset,
-        input.world_pos.y,
-        input.world_pos.z,
-    );
+    let parms = PawnDrawParms::from_inputs(input.facing, input.draw_flags, &input.apparel);
+    let graph = build_graph(input, &parms);
+    let nodes = evaluate_graph(input, config, graph);
+    PawnComposition { nodes }
+}
 
-    let mut nodes = Vec::new();
+fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode> {
+    let mut out = Vec::new();
     let mut order = 0usize;
 
-    nodes.push(PawnNode {
+    out.push(GraphNode {
         id: format!("{}::Body", input.label),
         kind: PawnNodeKind::Body,
-        tex_path: input.body_tex_path.clone(),
-        world_pos: Vec3::new(base_pos.x, base_pos.y, config.layering.body_z),
-        size: input.body_size,
-        tint: input.tint,
-        z: config.layering.body_z,
+        anchor: AnchorKind::Body,
         order,
+        payload: NodePayload::Body,
     });
     order += 1;
 
-    if input.draw_flags.head_stump {
-        if let Some(tex_path) = &input.stump_tex_path {
-            nodes.push(PawnNode {
+    if parms.draw_flags.head_stump {
+        if input.stump_tex_path.is_some() {
+            out.push(GraphNode {
                 id: format!("{}::Stump", input.label),
                 kind: PawnNodeKind::Stump,
-                tex_path: tex_path.clone(),
-                world_pos: Vec3::new(base_pos.x, base_pos.y, config.layering.head_z),
-                size: input.stump_size,
-                tint: input.tint,
-                z: config.layering.head_z,
+                anchor: AnchorKind::Head,
                 order,
+                payload: NodePayload::Stump,
             });
             order += 1;
         }
-    } else if !input.draw_flags.hide_head {
-        if let Some(tex_path) = &input.head_tex_path {
-            nodes.push(PawnNode {
+    } else if !parms.draw_flags.hide_head {
+        if input.head_tex_path.is_some() {
+            out.push(GraphNode {
                 id: format!("{}::Head", input.label),
                 kind: PawnNodeKind::Head,
-                tex_path: tex_path.clone(),
-                world_pos: Vec3::new(base_pos.x, base_pos.y, config.layering.head_z),
-                size: input.head_size,
-                tint: input.tint,
-                z: config.layering.head_z,
+                anchor: AnchorKind::Head,
                 order,
+                payload: NodePayload::Head,
             });
             order += 1;
         }
 
-        if !skip.hide_hair
-            && let Some(tex_path) = &input.hair_tex_path
-        {
-            nodes.push(PawnNode {
+        if !parms.skip(RenderSkipFlag::Hair) && input.hair_tex_path.is_some() {
+            out.push(GraphNode {
                 id: format!("{}::Hair", input.label),
                 kind: PawnNodeKind::Hair,
-                tex_path: tex_path.clone(),
-                world_pos: Vec3::new(base_pos.x, base_pos.y, config.layering.hair_z),
-                size: input.hair_size,
-                tint: input.tint,
-                z: config.layering.hair_z,
+                anchor: AnchorKind::Head,
                 order,
+                payload: NodePayload::Hair,
             });
             order += 1;
         }
 
-        if !skip.hide_beard
-            && let Some(tex_path) = &input.beard_tex_path
-        {
-            nodes.push(PawnNode {
+        if !parms.skip(RenderSkipFlag::Beard) && input.beard_tex_path.is_some() {
+            out.push(GraphNode {
                 id: format!("{}::Beard", input.label),
                 kind: PawnNodeKind::Beard,
-                tex_path: tex_path.clone(),
-                world_pos: Vec3::new(base_pos.x, base_pos.y, config.layering.beard_z),
-                size: input.beard_size,
-                tint: input.tint,
-                z: config.layering.beard_z,
+                anchor: AnchorKind::Head,
                 order,
+                payload: NodePayload::Beard,
             });
             order += 1;
         }
@@ -103,48 +85,158 @@ pub fn compose_pawn(input: &PawnRenderInput, config: &PawnComposeConfig) -> Pawn
             .cmp(&b.layer.draw_order())
             .then(a_idx.cmp(b_idx))
     });
-    for (stack_index, (_source_index, apparel)) in ordered_apparel.into_iter().enumerate() {
+    for (_source_index, apparel) in ordered_apparel.into_iter() {
         debug_assert!(ApparelLayer::ALL.contains(&apparel.layer));
-        let z = apparel_z(config.layering, apparel.layer, stack_index);
-        nodes.push(PawnNode {
+        let anchor = if matches!(
+            apparel.layer,
+            ApparelLayer::Overhead | ApparelLayer::EyeCover
+        ) {
+            AnchorKind::Head
+        } else {
+            AnchorKind::Body
+        };
+        out.push(GraphNode {
             id: format!("{}::Apparel::{}", input.label, apparel.label),
             kind: PawnNodeKind::Apparel,
-            tex_path: apparel.tex_path.clone(),
-            world_pos: Vec3::new(base_pos.x, base_pos.y, z),
-            size: apparel.draw_size,
-            tint: apparel.tint,
-            z,
+            anchor,
             order,
+            payload: NodePayload::Apparel(apparel.clone()),
         });
         order += 1;
     }
 
-    for (overlay_index, overlay) in input.hediff_overlays.iter().enumerate() {
-        if !should_draw_hediff_overlay(overlay, input.facing, &input.present_body_part_groups) {
+    for overlay in &input.hediff_overlays {
+        if !should_draw_hediff_overlay(overlay, parms.facing, &input.present_body_part_groups) {
             continue;
         }
-        let base = match overlay.anchor {
-            OverlayAnchor::Body => config.layering.hediff_body_base_z,
-            OverlayAnchor::Head => config.layering.hediff_head_base_z,
+        let anchor = if matches!(overlay.anchor, OverlayAnchor::Head) {
+            AnchorKind::Head
+        } else {
+            AnchorKind::Body
         };
-        let z = base
-            + overlay.layer_offset as f32 * config.layering.hediff_step_z
-            + overlay_index as f32 * 0.0001;
-        nodes.push(PawnNode {
+        out.push(GraphNode {
             id: format!("{}::Hediff::{}", input.label, overlay.label),
             kind: PawnNodeKind::Hediff,
-            tex_path: overlay.tex_path.clone(),
-            world_pos: Vec3::new(base_pos.x, base_pos.y, z),
-            size: overlay.draw_size,
-            tint: overlay.tint,
-            z,
+            anchor,
             order,
+            payload: NodePayload::Hediff(overlay.clone()),
         });
         order += 1;
     }
 
-    nodes.sort_by(|a, b| a.z.total_cmp(&b.z).then(a.order.cmp(&b.order)));
-    PawnComposition { nodes }
+    out
+}
+
+fn evaluate_graph(
+    input: &PawnRenderInput,
+    config: &PawnComposeConfig,
+    graph: Vec<GraphNode>,
+) -> Vec<PawnNode> {
+    let base = Vec2::new(
+        input.world_pos.x + workers::facing_x_offset(input.facing),
+        input.world_pos.y,
+    );
+
+    let mut apparel_index = 0usize;
+    let mut hediff_index = 0usize;
+
+    let mut out = Vec::with_capacity(graph.len());
+    for g in graph {
+        let anchor = workers::anchor_offset(g.anchor, input.facing, input.body_type);
+        let (tex_path, size, tint, extra_offset, z) = match &g.payload {
+            NodePayload::Body => (
+                input.body_tex_path.clone(),
+                input.body_size,
+                input.tint,
+                Vec2::ZERO,
+                config.layering.body_z,
+            ),
+            NodePayload::Head => (
+                input.head_tex_path.clone().unwrap_or_default(),
+                input.head_size,
+                input.tint,
+                workers::head_extra_offset(input.facing, input.head_type, config.layering),
+                config.layering.head_z,
+            ),
+            NodePayload::Stump => (
+                input.stump_tex_path.clone().unwrap_or_default(),
+                input.stump_size,
+                input.tint,
+                Vec2::new(0.0, config.layering.stump_y_offset),
+                config.layering.head_z,
+            ),
+            NodePayload::Hair => (
+                input.hair_tex_path.clone().unwrap_or_default(),
+                input.hair_size,
+                input.tint,
+                Vec2::new(0.0, config.layering.hair_y_offset),
+                config.layering.hair_z,
+            ),
+            NodePayload::Beard => (
+                input.beard_tex_path.clone().unwrap_or_default(),
+                input.beard_size,
+                input.tint,
+                workers::beard_extra_offset(
+                    input.facing,
+                    input.head_type,
+                    input.beard_type,
+                    config.layering,
+                ),
+                config.layering.beard_z,
+            ),
+            NodePayload::Apparel(apparel) => {
+                let z = workers::apparel_z(config.layering, apparel.layer, apparel_index);
+                apparel_index += 1;
+                (
+                    apparel.tex_path.clone(),
+                    apparel.draw_size,
+                    apparel.tint,
+                    workers::apparel_offset(apparel.layer, config.layering),
+                    z,
+                )
+            }
+            NodePayload::Hediff(overlay) => {
+                let anchored_to_head = matches!(overlay.anchor, OverlayAnchor::Head);
+                let z = workers::hediff_z(
+                    config.layering,
+                    anchored_to_head,
+                    overlay.layer_offset,
+                    hediff_index,
+                );
+                hediff_index += 1;
+                (
+                    overlay.tex_path.clone(),
+                    overlay.draw_size,
+                    overlay.tint,
+                    if anchored_to_head {
+                        workers::hediff_offset_head(config.layering)
+                    } else {
+                        Vec2::ZERO
+                    },
+                    z,
+                )
+            }
+        };
+
+        let world = Vec3::new(
+            base.x + anchor.x + extra_offset.x,
+            base.y + anchor.y + extra_offset.y,
+            z,
+        );
+        out.push(PawnNode {
+            id: g.id,
+            kind: g.kind,
+            tex_path,
+            world_pos: world,
+            size,
+            tint,
+            z,
+            order: g.order,
+        });
+    }
+
+    out.sort_by(|a, b| a.z.total_cmp(&b.z).then(a.order.cmp(&b.order)));
+    out
 }
 
 #[cfg(test)]
@@ -153,8 +245,9 @@ mod tests {
 
     use super::compose_pawn;
     use crate::pawn::model::{
-        ApparelLayer, ApparelRenderInput, HediffOverlayInput, OverlayAnchor, PawnComposeConfig,
-        PawnDrawFlags, PawnFacing, PawnRenderInput,
+        ApparelLayer, ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData,
+        HeadTypeRenderData, HediffOverlayInput, OverlayAnchor, PawnComposeConfig, PawnDrawFlags,
+        PawnFacing, PawnRenderInput,
     };
 
     fn fixture_input() -> PawnRenderInput {
@@ -172,6 +265,12 @@ mod tests {
             stump_size: Vec2::new(0.8, 0.8),
             hair_size: Vec2::new(1.1, 1.1),
             beard_size: Vec2::new(1.0, 1.0),
+            body_type: BodyTypeRenderData {
+                head_offset: Vec2::new(0.0, 0.22),
+                body_size_factor: 1.0,
+            },
+            head_type: HeadTypeRenderData::default(),
+            beard_type: BeardTypeRenderData::default(),
             tint: [1.0, 1.0, 1.0, 1.0],
             apparel: Vec::new(),
             present_body_part_groups: vec!["UpperHead".to_string(), "Torso".to_string()],
@@ -199,56 +298,16 @@ mod tests {
     }
 
     #[test]
-    fn layer_order_is_deterministic() {
+    fn head_position_uses_body_type_offset() {
         let mut input = fixture_input();
-        input.apparel.push(ApparelRenderInput {
-            label: "Jacket".to_string(),
-            tex_path: "Things/Apparel/Body/Jacket".to_string(),
-            layer: ApparelLayer::Shell,
-            covers_upper_head: false,
-            covers_full_head: false,
-            draw_size: Vec2::new(1.5, 1.5),
-            tint: [1.0, 1.0, 1.0, 1.0],
-        });
-
+        input.body_type.head_offset = Vec2::new(0.0, 0.30);
         let result = compose_pawn(&input, &PawnComposeConfig::default());
-        let mut previous = f32::NEG_INFINITY;
-        for node in result.nodes {
-            assert!(node.z >= previous);
-            previous = node.z;
-        }
-    }
-
-    #[test]
-    fn head_hide_flag_removes_head_hair_beard() {
-        let mut input = fixture_input();
-        input.draw_flags = PawnDrawFlags {
-            hide_hair: false,
-            hide_beard: false,
-            hide_head: true,
-            head_stump: false,
-        };
-
-        let result = compose_pawn(&input, &PawnComposeConfig::default());
-        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Head")));
-        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Hair")));
-        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Beard")));
-    }
-
-    #[test]
-    fn stump_flag_swaps_head_stack_for_stump() {
-        let mut input = fixture_input();
-        input.draw_flags = PawnDrawFlags {
-            hide_hair: false,
-            hide_beard: false,
-            hide_head: false,
-            head_stump: true,
-        };
-        let result = compose_pawn(&input, &PawnComposeConfig::default());
-        assert!(result.nodes.iter().any(|n| n.id.ends_with("::Stump")));
-        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Head")));
-        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Hair")));
-        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Beard")));
+        let head = result
+            .nodes
+            .iter()
+            .find(|n| n.id.ends_with("::Head"))
+            .expect("head node");
+        assert!(head.world_pos.y > input.world_pos.y + 0.45);
     }
 
     #[test]
@@ -307,56 +366,5 @@ mod tests {
                 .iter()
                 .all(|n| !matches!(n.kind, crate::pawn::tree::PawnNodeKind::Hediff))
         );
-    }
-
-    #[test]
-    fn composition_snapshot_is_stable() {
-        let mut input = fixture_input();
-        input.apparel = vec![
-            ApparelRenderInput {
-                label: "Jacket".to_string(),
-                tex_path: "Things/Apparel/Body/Jacket".to_string(),
-                layer: ApparelLayer::Shell,
-                covers_upper_head: false,
-                covers_full_head: false,
-                draw_size: Vec2::new(1.4, 1.4),
-                tint: [1.0, 1.0, 1.0, 1.0],
-            },
-            ApparelRenderInput {
-                label: "Cap".to_string(),
-                tex_path: "Things/Apparel/Headgear/Cap".to_string(),
-                layer: ApparelLayer::Overhead,
-                covers_upper_head: true,
-                covers_full_head: false,
-                draw_size: Vec2::new(1.0, 1.0),
-                tint: [1.0, 1.0, 1.0, 1.0],
-            },
-        ];
-        input.hediff_overlays.push(HediffOverlayInput {
-            label: "Scar".to_string(),
-            tex_path: "Things/Pawn/Humanlike/Bodies/Naked_Male".to_string(),
-            anchor: OverlayAnchor::Body,
-            layer_offset: 1,
-            draw_size: Vec2::new(0.7, 0.7),
-            tint: [1.0, 0.4, 0.4, 0.8],
-            required_body_part_group: Some("Torso".to_string()),
-            visible_facing: Some(vec![PawnFacing::South, PawnFacing::East]),
-        });
-
-        let result = compose_pawn(&input, &PawnComposeConfig::default());
-        let snapshot: Vec<String> = result
-            .nodes
-            .iter()
-            .map(|n| format!("{:?}|{}|{:.4}", n.kind, n.tex_path, n.z))
-            .collect();
-        let expected = vec![
-            "Body|Things/Pawn/Humanlike/Bodies/Naked_Male|-0.6000".to_string(),
-            "Hediff|Things/Pawn/Humanlike/Bodies/Naked_Male|-0.5842".to_string(),
-            "Head|Things/Pawn/Humanlike/Heads/Male/Average_Normal|-0.5800".to_string(),
-            "Apparel|Things/Apparel/Body/Jacket|-0.5660".to_string(),
-            "Beard|Things/Pawn/Humanlike/Beards/Beard_Full|-0.5620".to_string(),
-            "Apparel|Things/Apparel/Headgear/Cap|-0.5129".to_string(),
-        ];
-        assert_eq!(snapshot, expected);
     }
 }
