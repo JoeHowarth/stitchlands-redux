@@ -1,0 +1,32 @@
+(
+  schema_version: 2,
+  map: (
+    width: 12,
+    height: 8,
+    terrain: [
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+    ],
+  ),
+  things: [
+    (def_name: "Steel", cell_x: 2, cell_z: 2, blocks_movement: false),
+    (def_name: "WoodLog", cell_x: 3, cell_z: 3, blocks_movement: false),
+    (def_name: "ChunkSlagSteel", cell_x: 8, cell_z: 2, blocks_movement: true),
+    (def_name: "ChunkSlagSteel", cell_x: 8, cell_z: 3, blocks_movement: true),
+  ],
+  pawns: [
+    (label: "Alpha", cell_x: 1, cell_z: 6, facing: north, apparel_defs: ["Apparel_Duster"]),
+    (label: "Beta", cell_x: 10, cell_z: 6, facing: west, apparel_defs: ["Apparel_Parka"]),
+  ],
+  camera: (
+    center_x: 6.0,
+    center_z: 4.0,
+    zoom: 8.0,
+  ),
+)

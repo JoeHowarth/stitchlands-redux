@@ -3,6 +3,7 @@ mod assets;
 mod cli;
 mod commands;
 mod defs;
+mod fixtures;
 mod pawn;
 mod renderer;
 mod scene;

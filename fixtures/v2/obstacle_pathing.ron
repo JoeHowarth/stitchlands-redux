@@ -1,0 +1,32 @@
+(
+  schema_version: 2,
+  map: (
+    width: 10,
+    height: 8,
+    terrain: [
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+    ],
+  ),
+  things: [
+    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 2, blocks_movement: true),
+    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 3, blocks_movement: true),
+    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 4, blocks_movement: true),
+    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 5, blocks_movement: true),
+  ],
+  pawns: [
+    (label: "RunnerA", cell_x: 1, cell_z: 1, facing: east),
+    (label: "RunnerB", cell_x: 8, cell_z: 6, facing: west),
+  ],
+  camera: (
+    center_x: 5.0,
+    center_z: 4.0,
+    zoom: 7.0,
+  ),
+)

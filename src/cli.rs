@@ -161,6 +161,9 @@ pub enum DebugCmd {
         #[arg(long, default_value_t = 8)]
         min_attempts: usize,
     },
+    ValidateFixture {
+        path: PathBuf,
+    },
 }
 
 pub fn parse_tint(input: &str) -> Result<[f32; 4], String> {

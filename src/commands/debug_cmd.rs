@@ -76,5 +76,19 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             }
             Ok(CommandAction::Done)
         }
+        DebugCmd::ValidateFixture { path } => {
+            let fixture = crate::fixtures::load_fixture(&path)?;
+            info!(
+                "fixture valid: {} schema={} map={}x{} terrain={} things={} pawns={}",
+                path.display(),
+                fixture.schema_version,
+                fixture.map.width,
+                fixture.map.height,
+                fixture.map.terrain.len(),
+                fixture.things.len(),
+                fixture.pawns.len()
+            );
+            Ok(CommandAction::Done)
+        }
     }
 }
