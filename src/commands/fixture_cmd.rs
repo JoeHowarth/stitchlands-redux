@@ -63,15 +63,16 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<Co
     if !should_run_renderer {
         return Ok(CommandAction::Done);
     }
-    Ok(CommandAction::Launch(LaunchSpec {
+    Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: render_sprites,
         dynamic_sprites: Vec::new(),
+        runtime_hints: None,
         screenshot: fixture.view.screenshot,
         camera_focus: Some(camera_focus),
         render_options,
         hide_window,
         fixed_step: false,
-    }))
+    })))
 }
 
 pub fn run_audit(ctx: &mut DispatchContext<'_>, audit: AuditCmd) -> Result<CommandAction> {
@@ -102,13 +103,14 @@ pub fn run_audit(ctx: &mut DispatchContext<'_>, audit: AuditCmd) -> Result<Comma
     if !should_run_renderer {
         return Ok(CommandAction::Done);
     }
-    Ok(CommandAction::Launch(LaunchSpec {
+    Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: render_sprites,
         dynamic_sprites: Vec::new(),
+        runtime_hints: None,
         screenshot: audit.view.screenshot,
         camera_focus: Some(camera_focus),
         render_options,
         hide_window,
         fixed_step: false,
-    }))
+    })))
 }

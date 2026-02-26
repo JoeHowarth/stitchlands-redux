@@ -70,15 +70,18 @@ fn main() -> Result<()> {
 
     match crate::commands::dispatch(&mut dispatch, cli.command)? {
         crate::commands::CommandAction::Done => Ok(()),
-        crate::commands::CommandAction::Launch(spec) => crate::viewer::run_viewer(
-            spec.static_sprites,
-            spec.dynamic_sprites,
-            spec.screenshot,
-            spec.camera_focus,
-            spec.render_options,
-            spec.hide_window,
-            spec.fixed_step,
-        ),
+        crate::commands::CommandAction::Launch(spec) => {
+            crate::viewer::run_viewer(crate::viewer::ViewerLaunch {
+                static_sprites: spec.static_sprites,
+                dynamic_sprites: spec.dynamic_sprites,
+                screenshot_path: spec.screenshot,
+                initial_camera_center: spec.camera_focus,
+                renderer_options: spec.render_options,
+                hidden_window: spec.hide_window,
+                fixed_step: spec.fixed_step,
+                runtime_hints: spec.runtime_hints,
+            })
+        }
     }
 }
 
@@ -493,6 +496,7 @@ pub(crate) fn build_v1_fixture_scene(
                     tint: [1.0, 1.0, 1.0, 1.0],
                 },
                 used_fallback: false,
+                pawn_id: None,
             });
         }
     }
@@ -525,6 +529,7 @@ pub(crate) fn build_v1_fixture_scene(
                 ],
             },
             used_fallback: false,
+            pawn_id: None,
         });
     }
 
@@ -862,6 +867,7 @@ pub(crate) fn build_v1_fixture_scene(
                     tint: node.tint,
                 },
                 used_fallback: false,
+                pawn_id: None,
             });
         }
     }

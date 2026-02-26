@@ -25,6 +25,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                 tint: render.tint,
             },
             used_fallback: false,
+            pawn_id: None,
         };
 
         if let Some(screenshot) = &render.view.screenshot {
@@ -41,15 +42,16 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             return Ok(CommandAction::Done);
         }
 
-        return Ok(CommandAction::Launch(LaunchSpec {
+        return Ok(CommandAction::Launch(Box::new(LaunchSpec {
             static_sprites: vec![sprite],
             dynamic_sprites: Vec::new(),
+            runtime_hints: None,
             screenshot: render.view.screenshot,
             camera_focus: None,
             render_options,
             hide_window,
             fixed_step: false,
-        }));
+        })));
     }
 
     let thingdef = render
@@ -194,6 +196,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                 tint,
             },
             used_fallback: resolved.sprite.used_fallback,
+            pawn_id: None,
         });
     }
 
@@ -201,13 +204,14 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         return Ok(CommandAction::Done);
     }
 
-    Ok(CommandAction::Launch(LaunchSpec {
+    Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: render_sprites,
         dynamic_sprites: Vec::new(),
+        runtime_hints: None,
         screenshot: render.view.screenshot,
         camera_focus: None,
         render_options,
         hide_window,
         fixed_step: false,
-    }))
+    })))
 }

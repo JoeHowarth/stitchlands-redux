@@ -19,26 +19,39 @@ pub(crate) struct RenderSprite {
     pub(crate) image: image::RgbaImage,
     pub(crate) params: SpriteParams,
     pub(crate) used_fallback: bool,
+    pub(crate) pawn_id: Option<usize>,
 }
 
-pub(crate) fn run_viewer(
-    static_sprites: Vec<RenderSprite>,
-    dynamic_sprites: Vec<RenderSprite>,
-    screenshot_path: Option<std::path::PathBuf>,
-    initial_camera_center: Option<Vec2>,
-    renderer_options: RendererOptions,
-    hidden_window: bool,
-    fixed_step: bool,
-) -> Result<()> {
-    let mut app = App::new(
-        static_sprites,
-        dynamic_sprites,
-        screenshot_path,
-        initial_camera_center,
-        renderer_options,
-        hidden_window,
-        fixed_step,
-    );
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimePawnHint {
+    pub(crate) id: usize,
+    pub(crate) cell_x: i32,
+    pub(crate) cell_z: i32,
+    pub(crate) world_pos: Vec2,
+    pub(crate) move_speed_cells_per_sec: f32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeHints {
+    pub(crate) map_width: usize,
+    pub(crate) map_height: usize,
+    pub(crate) blocking_cells: Vec<(i32, i32)>,
+    pub(crate) pawns: Vec<RuntimePawnHint>,
+}
+
+pub(crate) struct ViewerLaunch {
+    pub(crate) static_sprites: Vec<RenderSprite>,
+    pub(crate) dynamic_sprites: Vec<RenderSprite>,
+    pub(crate) screenshot_path: Option<std::path::PathBuf>,
+    pub(crate) initial_camera_center: Option<Vec2>,
+    pub(crate) renderer_options: RendererOptions,
+    pub(crate) hidden_window: bool,
+    pub(crate) fixed_step: bool,
+    pub(crate) runtime_hints: Option<RuntimeHints>,
+}
+
+pub(crate) fn run_viewer(launch: ViewerLaunch) -> Result<()> {
+    let mut app = App::new(launch);
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -56,41 +69,78 @@ struct App {
     hidden_window: bool,
     fixed_step: bool,
     base_dynamic_inputs: Vec<SpriteInput>,
+    base_dynamic_pawn_ids: Vec<Option<usize>>,
     interaction: InteractionState,
     overlay_image: RgbaImage,
     map_bounds: Option<(usize, usize)>,
+    runtime_state: Option<RuntimeState>,
     frame_count: u64,
     tick_count: u64,
     step_accumulator: Duration,
     last_step_instant: Option<Instant>,
 }
 
+#[derive(Debug, Clone)]
+struct RuntimePawnState {
+    id: usize,
+    cell_x: i32,
+    cell_z: i32,
+    initial_world_pos: Vec2,
+    world_pos: Vec2,
+    move_speed_cells_per_sec: f32,
+    path_cells: Vec<(i32, i32)>,
+    path_index: usize,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeState {
+    map_width: usize,
+    map_height: usize,
+    blocking_cells: Vec<(i32, i32)>,
+    pawns: Vec<RuntimePawnState>,
+    selected_pawn_id: Option<usize>,
+}
+
 impl App {
-    fn new(
-        static_sprites: Vec<RenderSprite>,
-        dynamic_sprites: Vec<RenderSprite>,
-        screenshot_path: Option<std::path::PathBuf>,
-        initial_camera_center: Option<Vec2>,
-        renderer_options: RendererOptions,
-        hidden_window: bool,
-        fixed_step: bool,
-    ) -> Self {
+    fn new(launch: ViewerLaunch) -> Self {
+        let runtime_state = launch.runtime_hints.map(|hints| RuntimeState {
+            map_width: hints.map_width,
+            map_height: hints.map_height,
+            blocking_cells: hints.blocking_cells,
+            pawns: hints
+                .pawns
+                .into_iter()
+                .map(|pawn| RuntimePawnState {
+                    id: pawn.id,
+                    cell_x: pawn.cell_x,
+                    cell_z: pawn.cell_z,
+                    initial_world_pos: pawn.world_pos,
+                    world_pos: pawn.world_pos,
+                    move_speed_cells_per_sec: pawn.move_speed_cells_per_sec,
+                    path_cells: Vec::new(),
+                    path_index: 0,
+                })
+                .collect(),
+            selected_pawn_id: None,
+        });
         Self {
-            static_sprites,
-            dynamic_sprites,
-            screenshot_path,
-            initial_camera_center,
+            static_sprites: launch.static_sprites,
+            dynamic_sprites: launch.dynamic_sprites,
+            screenshot_path: launch.screenshot_path,
+            initial_camera_center: launch.initial_camera_center,
             screenshot_taken: false,
             window: None,
             renderer: None,
-            renderer_options,
-            hidden_window,
-            fixed_step,
+            renderer_options: launch.renderer_options,
+            hidden_window: launch.hidden_window,
+            fixed_step: launch.fixed_step,
             base_dynamic_inputs: Vec::new(),
+            base_dynamic_pawn_ids: Vec::new(),
             interaction: InteractionState::default(),
             overlay_image: RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255])
                 .expect("1x1 overlay texture"),
             map_bounds: None,
+            runtime_state,
             frame_count: 0,
             tick_count: 0,
             step_accumulator: Duration::ZERO,
@@ -108,11 +158,94 @@ impl App {
         while self.step_accumulator >= fixed_dt {
             self.step_accumulator -= fixed_dt;
             self.tick_count += 1;
+            self.tick_runtime(fixed_dt.as_secs_f32());
         }
+    }
+
+    fn tick_runtime(&mut self, dt_seconds: f32) {
+        let Some(runtime) = self.runtime_state.as_mut() else {
+            return;
+        };
+        for pawn in &mut runtime.pawns {
+            if pawn.path_index >= pawn.path_cells.len() {
+                continue;
+            }
+            let target_cell = pawn.path_cells[pawn.path_index];
+            let target = Vec2::new(target_cell.0 as f32 + 0.5, target_cell.1 as f32 + 0.5);
+            let to_target = target - pawn.world_pos;
+            let distance = to_target.length();
+            let max_step = pawn.move_speed_cells_per_sec.max(0.1) * dt_seconds.max(0.0);
+            if distance <= max_step {
+                pawn.world_pos = target;
+                pawn.cell_x = target_cell.0;
+                pawn.cell_z = target_cell.1;
+                pawn.path_index += 1;
+            } else if distance > 0.0 {
+                pawn.world_pos += to_target / distance * max_step;
+            }
+        }
+    }
+
+    fn issue_pawn_move(&mut self, pawn_id: usize, dest: (i32, i32)) -> bool {
+        let Some(runtime) = self.runtime_state.as_mut() else {
+            return false;
+        };
+        let Some(pawn_index) = runtime.pawns.iter().position(|pawn| pawn.id == pawn_id) else {
+            return false;
+        };
+        let start = (
+            runtime.pawns[pawn_index].cell_x,
+            runtime.pawns[pawn_index].cell_z,
+        );
+        let mut grid = crate::path::PathGrid::new(runtime.map_width, runtime.map_height);
+        for &(x, z) in &runtime.blocking_cells {
+            grid.set_blocked(x, z, true);
+        }
+        for pawn in &runtime.pawns {
+            grid.set_blocked(pawn.cell_x, pawn.cell_z, true);
+        }
+        grid.set_blocked(start.0, start.1, false);
+        let Some(path) = crate::path::find_path(&grid, start, dest) else {
+            return false;
+        };
+        runtime.pawns[pawn_index].path_cells = path;
+        runtime.pawns[pawn_index].path_index = 1;
+        true
     }
 
     fn dynamic_with_overlays(&self) -> Vec<SpriteInput> {
         let mut out = self.base_dynamic_inputs.clone();
+        if let Some(runtime) = &self.runtime_state {
+            for (sprite, pawn_id) in out.iter_mut().zip(self.base_dynamic_pawn_ids.iter()) {
+                let Some(pawn_id) = pawn_id else {
+                    continue;
+                };
+                let Some(pawn) = runtime.pawns.iter().find(|p| p.id == *pawn_id) else {
+                    continue;
+                };
+                let delta = pawn.world_pos - pawn.initial_world_pos;
+                sprite.params.world_pos.x += delta.x;
+                sprite.params.world_pos.y += delta.y;
+            }
+            if let Some(selected_id) = runtime.selected_pawn_id
+                && let Some(selected) = runtime.pawns.iter().find(|pawn| pawn.id == selected_id)
+            {
+                for cell in selected.path_cells.iter().skip(selected.path_index) {
+                    out.push(SpriteInput {
+                        image: self.overlay_image.clone(),
+                        params: SpriteParams {
+                            world_pos: glam::Vec3::new(
+                                cell.0 as f32 + 0.5,
+                                cell.1 as f32 + 0.5,
+                                -0.23,
+                            ),
+                            size: Vec2::new(0.36, 0.36),
+                            tint: [0.35, 1.00, 0.45, 0.65],
+                        },
+                    });
+                }
+            }
+        }
 
         if let Some((x, z)) = self.interaction.hovered_cell {
             out.push(SpriteInput {
@@ -173,6 +306,7 @@ impl ApplicationHandler for App {
                 params: sprite.params,
             })
             .collect();
+        self.base_dynamic_pawn_ids = self.dynamic_sprites.iter().map(|s| s.pawn_id).collect();
         self.base_dynamic_inputs = self
             .dynamic_sprites
             .drain(..)
@@ -203,10 +337,10 @@ impl ApplicationHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        let Some(window) = self.window.as_ref() else {
+        let Some(expected_window_id) = self.window.as_ref().map(|window| window.id()) else {
             return;
         };
-        if window.id() != window_id {
+        if expected_window_id != window_id {
             return;
         }
 
@@ -268,14 +402,21 @@ impl ApplicationHandler for App {
                         return;
                     };
                     let world = renderer.screen_to_world(position.x as f32, position.y as f32);
-                    let cell = if let Some((w, h)) = self.map_bounds {
+                    let bounds = self
+                        .runtime_state
+                        .as_ref()
+                        .map(|r| (r.map_width, r.map_height))
+                        .or(self.map_bounds);
+                    let cell = if let Some((w, h)) = bounds {
                         crate::interaction::world_to_cell_in_bounds(world, w, h)
                     } else {
                         Some(crate::interaction::world_to_cell(world))
                     };
                     if self.interaction.hovered_cell != cell {
                         self.interaction.hovered_cell = cell;
-                        window.request_redraw();
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
                     }
                 }
             }
@@ -285,15 +426,44 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 if self.fixed_step {
-                    self.interaction.selected_cell = self.interaction.hovered_cell;
-                    window.request_redraw();
+                    if let Some(cell) = self.interaction.hovered_cell {
+                        let mut selected_hit: Option<usize> = None;
+                        let mut move_from_selected: Option<usize> = None;
+                        if let Some(runtime) = self.runtime_state.as_ref() {
+                            selected_hit = runtime
+                                .pawns
+                                .iter()
+                                .find(|pawn| pawn.cell_x == cell.0 && pawn.cell_z == cell.1)
+                                .map(|pawn| pawn.id);
+                            if selected_hit.is_none() {
+                                move_from_selected = runtime.selected_pawn_id;
+                            }
+                        }
+                        if let Some(hit_pawn_id) = selected_hit {
+                            if let Some(runtime) = self.runtime_state.as_mut() {
+                                runtime.selected_pawn_id = Some(hit_pawn_id);
+                            }
+                            self.interaction.selected_cell = Some(cell);
+                        } else if let Some(selected_pawn_id) = move_from_selected {
+                            if self.issue_pawn_move(selected_pawn_id, cell) {
+                                self.interaction.selected_cell = Some(cell);
+                            }
+                        } else {
+                            self.interaction.selected_cell = Some(cell);
+                        }
+                    }
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                 }
             }
             _ => {
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;
                 };
-                if renderer.input(&event) {
+                if renderer.input(&event)
+                    && let Some(window) = self.window.as_ref()
+                {
                     window.request_redraw();
                 }
             }

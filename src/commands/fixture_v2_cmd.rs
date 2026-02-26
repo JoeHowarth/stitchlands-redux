@@ -11,8 +11,8 @@ use crate::pawn::{
     PawnComposeConfig, PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::SpriteParams;
-use crate::viewer::RenderSprite;
-use crate::world::{issue_move_intent, tick_world, world_from_fixture};
+use crate::viewer::{RenderSprite, RuntimeHints, RuntimePawnHint};
+use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
 
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
@@ -20,12 +20,14 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
     let (should_run_renderer, render_options, hide_window) = crate::cli::render_runtime(&cmd.view);
     let fixture = crate::fixtures::load_fixture(&cmd.scene)?;
     let mut world = world_from_fixture(&fixture);
+    let _ = build_path_grid(&world);
     if let Some(first_pawn_id) = world.pawns.first().map(|pawn| pawn.id) {
-        let dest = (
-            (world.width as i32 - 2).max(0),
-            (world.height as i32 - 2).max(0),
-        );
-        let _ = issue_move_intent(&mut world, first_pawn_id, dest);
+        let start = {
+            let pawn = world.pawns.iter().find(|pawn| pawn.id == first_pawn_id);
+            pawn.map(|pawn| (pawn.cell_x, pawn.cell_z))
+                .unwrap_or((0, 0))
+        };
+        let _ = issue_move_intent(&mut world, first_pawn_id, start);
         tick_world(&mut world, 0.0);
     }
     let sprites = build_world_sprites(ctx, &world)?;
@@ -63,15 +65,40 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         return Ok(CommandAction::Done);
     }
 
-    Ok(CommandAction::Launch(LaunchSpec {
+    Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: sprites.static_sprites,
         dynamic_sprites: sprites.dynamic_sprites,
+        runtime_hints: Some(build_runtime_hints(&world)),
         screenshot: cmd.view.screenshot,
         camera_focus,
         render_options,
         hide_window,
         fixed_step: true,
-    }))
+    })))
+}
+
+fn build_runtime_hints(world: &crate::world::WorldState) -> RuntimeHints {
+    RuntimeHints {
+        map_width: world.width,
+        map_height: world.height,
+        blocking_cells: world
+            .things
+            .iter()
+            .filter(|thing| thing.blocks_movement)
+            .map(|thing| (thing.cell_x, thing.cell_z))
+            .collect(),
+        pawns: world
+            .pawns
+            .iter()
+            .map(|pawn| RuntimePawnHint {
+                id: pawn.id,
+                cell_x: pawn.cell_x,
+                cell_z: pawn.cell_z,
+                world_pos: pawn.world_pos,
+                move_speed_cells_per_sec: pawn.move_speed_cells_per_sec,
+            })
+            .collect(),
+    }
 }
 
 struct SpriteLayers {
@@ -111,6 +138,7 @@ fn build_world_sprites(
                     tint: [1.0, 1.0, 1.0, 1.0],
                 },
                 used_fallback: resolved.sprite.used_fallback,
+                pawn_id: None,
             });
         }
     }
@@ -150,6 +178,7 @@ fn build_world_sprites(
                 ],
             },
             used_fallback: resolved.sprite.used_fallback,
+            pawn_id: None,
         });
     }
 
@@ -221,6 +250,7 @@ fn build_world_sprites(
                     tint: node.tint,
                 },
                 used_fallback: resolved.sprite.used_fallback,
+                pawn_id: Some(pawn.id),
             });
         }
     }
