@@ -99,3 +99,41 @@
 ### Conclusions
 - Composition is now backed by real render-tree layer data instead of hardcoded constants.
 - Remaining visual deltas are likely in deeper worker behaviors (e.g. special-case node logic) rather than base layer ordering.
+
+## 2026-02-26 - Iteration 6
+
+### Learnings
+- `ApparelProperties.parentTagDef` can override inferred head/body apparel anchoring and is used by dynamic node setup when present.
+
+### Hypotheses
+- Respecting `parentTagDef` in compose will avoid subtle mis-anchoring for apparel defs that intentionally attach outside default layer heuristics.
+
+### Actions
+- Parsed `parentTagDef` in apparel defs and normalized to tag token (`ApparelHead` / `ApparelBody`).
+- Added `anchor_to_head` override in composed apparel input.
+- Updated graph anchoring to prefer explicit anchor override before layer-based fallback.
+- Re-ran fmt/test/clippy and deterministic 10-variant screenshot/trace loop.
+
+### Conclusions
+- Data model now supports explicit parent-tag anchoring parity.
+- Remaining mismatches are no longer from missing core def fields; likely from worker-level behavior still simplified versus full RimWorld render tree.
+
+## 2026-02-26 - Iteration 7
+
+### Learnings
+- We were still coupling Rim-local composition math with engine world/screen mapping inside compose node evaluation.
+- Hypothesis test: flipping Rim `+z` to world `-y` in the new mapping produces globally upside-down pawns, so sign inversion is not the root cause.
+
+### Hypotheses
+- A principled boundary layer (`RimLocal -> World`) is required so future visual fixes happen in one adapter, not spread across workers and offset sites.
+
+### Actions
+- Added `RimToWorldTransform` to `PawnComposeConfig`.
+- Changed compose evaluation to build Rim-local offsets first and apply one mapping call at the end.
+- Added unit test proving transform sign behavior (`rim_z_to_world_y = -1` drives head below body).
+- Ran controlled screenshot experiment with sign-flipped mapping and rejected it based on clear inversion artifacts.
+- Restored default sign mapping and reran fmt/test/clippy.
+
+### Conclusions
+- Coordinate mapping is now explicit and testable, reducing risk of hidden band-aid fixes.
+- Remaining fidelity work should target higher-level render-tree behavior parity, not coordinate sign hacks.

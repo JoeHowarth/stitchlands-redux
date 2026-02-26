@@ -50,6 +50,7 @@ pub struct ApparelRenderInput {
     pub has_explicit_skip_flags: bool,
     pub covers_upper_head: bool,
     pub covers_full_head: bool,
+    pub anchor_to_head: Option<bool>,
     pub draw_offset: Vec2,
     pub draw_scale: Vec2,
     pub layer_override: Option<f32>,
@@ -205,7 +206,32 @@ impl Default for LayeringProfile {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RimToWorldTransform {
+    pub rim_x_to_world_x: f32,
+    pub rim_z_to_world_y: f32,
+}
+
+impl RimToWorldTransform {
+    pub fn apply(self, world_base: Vec2, rim_offset: Vec2) -> Vec2 {
+        Vec2::new(
+            world_base.x + rim_offset.x * self.rim_x_to_world_x,
+            world_base.y + rim_offset.y * self.rim_z_to_world_y,
+        )
+    }
+}
+
+impl Default for RimToWorldTransform {
+    fn default() -> Self {
+        Self {
+            rim_x_to_world_x: 1.0,
+            rim_z_to_world_y: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PawnComposeConfig {
     pub layering: LayeringProfile,
+    pub transform: RimToWorldTransform,
 }

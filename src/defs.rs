@@ -124,6 +124,7 @@ pub struct ApparelDef {
     pub draw_data: ApparelDrawDataDef,
     pub worn_graphic: ApparelWornGraphicDef,
     pub shell_rendered_behind_head: bool,
+    pub parent_tag_def: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -712,6 +713,8 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
     let shell_rendered_behind_head = child_text(apparel_node, "shellRenderedBehindHead")
         .and_then(parse_bool)
         .unwrap_or(false);
+    let parent_tag_def = child_text(apparel_node, "parentTagDef")
+        .map(|v| v.rsplit('.').next().unwrap_or(v).to_string());
 
     Some(ApparelDef {
         def_name,
@@ -725,6 +728,7 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
         draw_data,
         worn_graphic,
         shell_rendered_behind_head,
+        parent_tag_def,
     })
 }
 

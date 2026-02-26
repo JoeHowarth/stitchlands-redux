@@ -1099,6 +1099,11 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                     has_explicit_skip_flags,
                     covers_upper_head: apparel.covers_upper_head,
                     covers_full_head: apparel.covers_full_head,
+                    anchor_to_head: match apparel.parent_tag_def.as_deref() {
+                        Some("ApparelHead") => Some(true),
+                        Some("ApparelBody") => Some(false),
+                        _ => None,
+                    },
                     draw_offset: worn_data.offset,
                     draw_scale: worn_data.scale,
                     layer_override,

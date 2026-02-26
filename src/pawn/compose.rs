@@ -87,10 +87,10 @@ fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode>
     });
     for (_source_index, apparel) in ordered_apparel.into_iter() {
         debug_assert!(ApparelLayer::ALL.contains(&apparel.layer));
-        let anchor = if matches!(
+        let anchor = if apparel.anchor_to_head.unwrap_or(matches!(
             apparel.layer,
             ApparelLayer::Overhead | ApparelLayer::EyeCover
-        ) {
+        )) {
             AnchorKind::Head
         } else {
             AnchorKind::Body
@@ -132,7 +132,7 @@ fn evaluate_graph(
     config: &PawnComposeConfig,
     graph: Vec<GraphNode>,
 ) -> Vec<PawnNode> {
-    let base = Vec2::new(
+    let world_base = Vec2::new(
         input.world_pos.x + workers::facing_x_offset(input.facing),
         input.world_pos.y,
     );
@@ -238,11 +238,9 @@ fn evaluate_graph(
             }
         };
 
-        let world = Vec3::new(
-            base.x + anchor.x + extra_offset.x,
-            base.y + anchor.y + extra_offset.y,
-            z,
-        );
+        let rim_offset = Vec2::new(anchor.x + extra_offset.x, anchor.y + extra_offset.y);
+        let mapped = config.transform.apply(world_base, rim_offset);
+        let world = Vec3::new(mapped.x, mapped.y, z);
         out.push(PawnNode {
             id: g.id,
             kind: g.kind,
@@ -311,6 +309,7 @@ mod tests {
             has_explicit_skip_flags: false,
             covers_upper_head: false,
             covers_full_head: true,
+            anchor_to_head: None,
             draw_offset: Vec2::ZERO,
             draw_scale: Vec2::ONE,
             layer_override: None,
@@ -337,6 +336,23 @@ mod tests {
     }
 
     #[test]
+    fn transform_controls_rim_z_to_world_y_mapping() {
+        let mut input = fixture_input();
+        input.body_type.head_offset = Vec2::new(0.0, 0.30);
+
+        let mut cfg = PawnComposeConfig::default();
+        cfg.transform.rim_z_to_world_y = -1.0;
+
+        let result = compose_pawn(&input, &cfg);
+        let head = result
+            .nodes
+            .iter()
+            .find(|n| n.id.ends_with("::Head"))
+            .expect("head node");
+        assert!(head.world_pos.y < input.world_pos.y - 0.25);
+    }
+
+    #[test]
     fn apparel_sorted_by_layer_draw_order() {
         let mut input = fixture_input();
         input.apparel = vec![
@@ -349,6 +365,7 @@ mod tests {
                 has_explicit_skip_flags: false,
                 covers_upper_head: true,
                 covers_full_head: false,
+                anchor_to_head: None,
                 draw_offset: Vec2::ZERO,
                 draw_scale: Vec2::ONE,
                 layer_override: None,
@@ -364,6 +381,7 @@ mod tests {
                 has_explicit_skip_flags: false,
                 covers_upper_head: false,
                 covers_full_head: false,
+                anchor_to_head: None,
                 draw_offset: Vec2::ZERO,
                 draw_scale: Vec2::ONE,
                 layer_override: None,
