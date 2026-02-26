@@ -137,3 +137,24 @@
 ### Conclusions
 - Coordinate mapping is now explicit and testable, reducing risk of hidden band-aid fixes.
 - Remaining fidelity work should target higher-level render-tree behavior parity, not coordinate sign hacks.
+
+## 2026-02-26 - Iteration 8
+
+### Learnings
+- Naive west mirroring via negative sprite width causes severe composition artifacts when combined with existing west-facing offset rules.
+- Directional fallback had a semantic mismatch: when west textures were missing and east textures were used, we still applied west directional data in some paths.
+
+### Hypotheses
+- Correctness should come from consistent texture+data pairing first; mirroring can be revisited later with full drawData flip parity.
+
+### Actions
+- Reverted naive west-mirror experiment.
+- Added resolver-backed directional selection that returns both:
+  - concrete texture path used (`_north/_south/_east/_west` fallback),
+  - directional basis for data lookups (`data_facing`).
+- Applied this in apparel directional handling so worn offsets/scales align with the actual chosen directional texture.
+- Re-ran fmt/test/clippy and deterministic screenshot loop.
+
+### Conclusions
+- Removed a real east/west semantic bug without introducing new visual artifacts.
+- Remaining gaps are still in deeper render-worker parity, not coordinate sign or naive mirroring.

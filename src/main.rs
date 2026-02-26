@@ -1029,6 +1029,8 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             Some(beard_tex_paths[(pawn_fixture_variant / 7) % beard_tex_paths.len()].clone())
         };
         let body_render = body_by_tex.get(&pawn.tex_path);
+        let body_directional =
+            resolve_directional_tex_path(asset_resolver, data_dir, &pawn.tex_path, facing);
         let head_render = head_tex
             .as_ref()
             .and_then(|tex| head_by_tex.get(tex))
@@ -1070,8 +1072,10 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                         ));
                     }
                 }
-                let tex_path = directional_tex_path(&tex_path, facing);
-                let worn_data = apparel_worn_data_for_facing(apparel, facing);
+                let directional =
+                    resolve_directional_tex_path(asset_resolver, data_dir, &tex_path, facing);
+                let tex_path = directional.path;
+                let worn_data = apparel_worn_data_for_facing(apparel, directional.data_facing);
                 let (explicit_skip_hair, explicit_skip_beard, has_explicit_skip_flags) =
                     map_explicit_skip_flags(&apparel.render_skip_flags);
                 let layer_override = apparel_draw_layer_for_facing(apparel, facing).or_else(|| {
@@ -1121,7 +1125,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             vec![
                 HediffOverlayInput {
                     label: "TorsoScar".to_string(),
-                    tex_path: directional_tex_path(&pawn.tex_path, facing),
+                    tex_path: body_directional.path.clone(),
                     anchor: OverlayAnchor::Body,
                     layer_offset: 1,
                     draw_size: Vec2::new(0.75, 0.75),
@@ -1133,8 +1137,10 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                     label: "FaceBruise".to_string(),
                     tex_path: head_tex
                         .as_ref()
-                        .map(|p| directional_tex_path(p, facing))
-                        .unwrap_or_else(|| directional_tex_path(&pawn.tex_path, facing)),
+                        .map(|p| {
+                            resolve_directional_tex_path(asset_resolver, data_dir, p, facing).path
+                        })
+                        .unwrap_or_else(|| body_directional.path.clone()),
                     anchor: OverlayAnchor::Head,
                     layer_offset: 1,
                     draw_size: Vec2::new(0.6, 0.6),
@@ -1150,11 +1156,14 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             label: pawn.label.clone(),
             facing,
             world_pos: Vec3::new(pawn.cell_x as f32 + 0.5, pawn.cell_z as f32 + 0.5, 0.0),
-            body_tex_path: directional_tex_path(&pawn.tex_path, facing),
-            head_tex_path: head_tex.map(|p| directional_tex_path(&p, facing)),
+            body_tex_path: body_directional.path.clone(),
+            head_tex_path: head_tex
+                .map(|p| resolve_directional_tex_path(asset_resolver, data_dir, &p, facing).path),
             stump_tex_path: None,
-            hair_tex_path: hair_tex.map(|p| directional_tex_path(&p, facing)),
-            beard_tex_path: beard_tex.map(|p| directional_tex_path(&p, facing)),
+            hair_tex_path: hair_tex
+                .map(|p| resolve_directional_tex_path(asset_resolver, data_dir, &p, facing).path),
+            beard_tex_path: beard_tex
+                .map(|p| resolve_directional_tex_path(asset_resolver, data_dir, &p, facing).path),
             body_size: Vec2::new(1.0, 1.0),
             head_size: head_render
                 .as_ref()
@@ -1203,8 +1212,9 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         };
         let composed = compose_pawn(&compose_input, &compose_config);
         trace_lines.push(format!(
-            "pawn={} body={} head={:?} hair={:?} beard={:?} apparel_count={}",
+            "pawn={} facing={:?} body={} head={:?} hair={:?} beard={:?} apparel_count={}",
             pawn.label,
+            compose_input.facing,
             compose_input.body_tex_path,
             compose_input.head_tex_path,
             compose_input.hair_tex_path,
@@ -1359,21 +1369,58 @@ fn apparel_worn_data_for_facing(
     }
 }
 
-fn directional_tex_path(path: &str, facing: ComposeFacing) -> String {
+struct DirectionalTexturePath {
+    path: String,
+    data_facing: ComposeFacing,
+}
+
+fn resolve_directional_tex_path(
+    asset_resolver: &mut AssetResolver,
+    data_dir: &Path,
+    path: &str,
+    facing: ComposeFacing,
+) -> DirectionalTexturePath {
     if path.ends_with("_north")
         || path.ends_with("_south")
         || path.ends_with("_east")
         || path.ends_with("_west")
     {
-        return path.to_string();
+        return DirectionalTexturePath {
+            path: path.to_string(),
+            data_facing: facing,
+        };
     }
-    let suffix = match facing {
-        ComposeFacing::North => "_north",
-        ComposeFacing::South => "_south",
-        ComposeFacing::East => "_east",
-        ComposeFacing::West => "_east",
+
+    let candidates: &[(ComposeFacing, &str)] = match facing {
+        ComposeFacing::North => &[(ComposeFacing::North, "_north")],
+        ComposeFacing::South => &[(ComposeFacing::South, "_south")],
+        ComposeFacing::East => &[
+            (ComposeFacing::East, "_east"),
+            (ComposeFacing::West, "_west"),
+        ],
+        ComposeFacing::West => &[
+            (ComposeFacing::West, "_west"),
+            (ComposeFacing::East, "_east"),
+        ],
     };
-    format!("{path}{suffix}")
+
+    for (data_facing, suffix) in candidates {
+        let candidate = format!("{path}{suffix}");
+        if let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, &candidate)
+            && !resolved.sprite.used_fallback
+        {
+            return DirectionalTexturePath {
+                path: candidate,
+                data_facing: *data_facing,
+            };
+        }
+    }
+
+    let (data_facing, suffix) = candidates[0];
+    DirectionalTexturePath {
+        path: format!("{path}{suffix}"),
+        data_facing,
+    }
 }
 
 fn strip_directional_suffix(path: &str) -> Option<&str> {
