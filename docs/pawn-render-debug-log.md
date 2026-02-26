@@ -79,3 +79,23 @@
 ### Conclusions
 - Silhouettes now track expected pawn proportions better, especially in mixed body+head gear combinations.
 - Remaining mismatch appears concentrated in deeper render-tree parity details (node-parent behavior and some per-item drawData edge cases), not raw size multipliers.
+
+## 2026-02-26 - Iteration 5
+
+### Learnings
+- We still had hardcoded layering assumptions in compose defaults even though real constants are declared in `Core/Defs/PawnRenderTreeDefs/PawnRenderTreeDefs.xml`.
+- Visual debugging is easier when fixture combos avoid cross-body/head mismatches and random facings.
+
+### Hypotheses
+- Reading Humanlike render-tree layers directly from defs will make future tuning more stable and reduce hidden drift from decompiled assumptions.
+
+### Actions
+- Added `load_humanlike_render_tree_layers(...)` parser and tests in `src/defs.rs`.
+- Wired fixture compose config to use parsed Humanlike layers for body/head/beard/hair/apparel z computation.
+- Added fixture compatibility guard that prefers male heads for male bodies and female heads for female bodies.
+- Forced `--pawn-fixture` renders to south-facing for deterministic visual comparison.
+- Re-ran fmt/test/clippy and regenerated deterministic 10-variant screenshots/traces.
+
+### Conclusions
+- Composition is now backed by real render-tree layer data instead of hardcoded constants.
+- Remaining visual deltas are likely in deeper worker behaviors (e.g. special-case node logic) rather than base layer ordering.

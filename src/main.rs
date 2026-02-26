@@ -31,8 +31,9 @@ use crate::commands::{
 use crate::default_config::{default_packed_index_path, merge_path_list, resolve_rimworld_input};
 use crate::defs::{
     ApparelDef, ApparelLayerDef, ApparelSkipFlagDef, BeardDefRender, BodyTypeDefRender,
-    HairDefRender, HeadTypeDefRender, TerrainDef, ThingDef, load_apparel_defs, load_beard_defs,
-    load_body_type_defs, load_hair_defs, load_head_type_defs, load_terrain_defs, load_thing_defs,
+    HairDefRender, HeadTypeDefRender, HumanlikeRenderTreeLayers, TerrainDef, ThingDef,
+    load_apparel_defs, load_beard_defs, load_body_type_defs, load_hair_defs, load_head_type_defs,
+    load_humanlike_render_tree_layers, load_terrain_defs, load_thing_defs,
 };
 use crate::packed_index::PackedTextureIndex;
 use crate::packed_textures::infer_packed_data_roots;
@@ -216,6 +217,18 @@ fn main() -> Result<()> {
     let hair_defs = load_hair_defs(&data_dir)
         .with_context(|| format!("loading hair defs from {}", data_dir.display()))?;
     info!("loaded {} hair defs", hair_defs.len());
+    let humanlike_layers = load_humanlike_render_tree_layers(&data_dir)
+        .with_context(|| format!("loading humanlike render tree from {}", data_dir.display()))?;
+    info!(
+        "loaded humanlike render tree layers: body={} head={} beard={} hair={} apparel_body={} apparel_head={}",
+        humanlike_layers.body_base_layer,
+        humanlike_layers.head_base_layer,
+        humanlike_layers.beard_base_layer,
+        humanlike_layers.hair_base_layer,
+        humanlike_layers.apparel_body_base_layer,
+        humanlike_layers.apparel_head_base_layer
+    );
+    let compose_config = compose_config_from_humanlike_layers(humanlike_layers);
 
     let mut packed_roots = infer_packed_data_roots(&rimworld_input, &data_dir);
     for extra in &packed_root_overrides {
@@ -395,6 +408,7 @@ fn main() -> Result<()> {
             pawn_focus_only: false,
             pawn_fixture_variant: cli.pawn_fixture_variant,
             dump_pawn_trace: cli.dump_pawn_trace.clone(),
+            compose_config: compose_config.clone(),
         })?;
         if cli.no_window {
             return Ok(());
@@ -421,6 +435,7 @@ fn main() -> Result<()> {
             pawn_focus_only: true,
             pawn_fixture_variant: cli.pawn_fixture_variant,
             dump_pawn_trace: cli.dump_pawn_trace.clone(),
+            compose_config: compose_config.clone(),
         })?;
         if cli.no_window {
             return Ok(());
@@ -587,6 +602,43 @@ struct FixtureSceneConfig<'a> {
     pawn_focus_only: bool,
     pawn_fixture_variant: usize,
     dump_pawn_trace: Option<PathBuf>,
+    compose_config: PawnComposeConfig,
+}
+
+fn compose_config_from_humanlike_layers(layers: HumanlikeRenderTreeLayers) -> PawnComposeConfig {
+    let mut out = PawnComposeConfig::default();
+    let pawn_base_z = -0.6;
+    out.layering.body_z =
+        pawn_base_z + crate::pawn::workers::layer_to_z_delta(layers.body_base_layer);
+    out.layering.head_z =
+        pawn_base_z + crate::pawn::workers::layer_to_z_delta(layers.head_base_layer);
+    out.layering.beard_z =
+        pawn_base_z + crate::pawn::workers::layer_to_z_delta(layers.beard_base_layer);
+    out.layering.hair_z =
+        pawn_base_z + crate::pawn::workers::layer_to_z_delta(layers.hair_base_layer);
+    out.layering.apparel_body_base_z =
+        pawn_base_z + crate::pawn::workers::layer_to_z_delta(layers.apparel_body_base_layer);
+    out.layering.apparel_head_base_z =
+        pawn_base_z + crate::pawn::workers::layer_to_z_delta(layers.apparel_head_base_layer);
+    out.layering.apparel_step_z = crate::pawn::workers::layer_to_z_delta(1.0);
+    out.layering.hediff_body_base_z =
+        out.layering.apparel_body_base_z - out.layering.apparel_step_z;
+    out.layering.hediff_head_base_z =
+        out.layering.head_z + crate::pawn::workers::layer_to_z_delta(4.0);
+    out.layering.hediff_step_z = crate::pawn::workers::layer_to_z_delta(1.0);
+    out
+}
+
+fn body_head_compatible(body_tex: &str, head_tex: &str) -> bool {
+    let body_lower = body_tex.to_ascii_lowercase();
+    let head_lower = head_tex.to_ascii_lowercase();
+    if body_lower.contains("female") {
+        return head_lower.contains("female");
+    }
+    if body_lower.contains("male") {
+        return head_lower.contains("male");
+    }
+    true
 }
 
 fn make_missing_def_message(
@@ -638,6 +690,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         pawn_focus_only,
         pawn_fixture_variant,
         dump_pawn_trace,
+        compose_config,
     } = config;
 
     let mut terrain_rows: Vec<_> = terrain_defs.values().collect();
@@ -946,11 +999,24 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
     }
 
     for pawn in sorted_pawns(&map.pawns) {
-        let facing = map_facing(pawn.facing);
-        let head_tex = if head_tex_paths.is_empty() {
+        let facing = if pawn_focus_only {
+            ComposeFacing::South
+        } else {
+            map_facing(pawn.facing)
+        };
+        let compatible_heads: Vec<&String> = head_tex_paths
+            .iter()
+            .filter(|path| body_head_compatible(&pawn.tex_path, path))
+            .collect();
+        let head_pool: Vec<&String> = if compatible_heads.is_empty() {
+            head_tex_paths.iter().collect()
+        } else {
+            compatible_heads
+        };
+        let head_tex = if head_pool.is_empty() {
             None
         } else {
-            Some(head_tex_paths[pawn_fixture_variant % head_tex_paths.len()].clone())
+            Some(head_pool[pawn_fixture_variant % head_pool.len()].to_string())
         };
         let hair_tex = if hair_tex_paths.is_empty() {
             None
@@ -1130,7 +1196,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             hediff_overlays,
             draw_flags: PawnDrawFlags::NONE,
         };
-        let composed = compose_pawn(&compose_input, &PawnComposeConfig::default());
+        let composed = compose_pawn(&compose_input, &compose_config);
         trace_lines.push(format!(
             "pawn={} body={} head={:?} hair={:?} beard={:?} apparel_count={}",
             pawn.label,

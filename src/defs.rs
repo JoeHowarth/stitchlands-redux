@@ -160,6 +160,16 @@ pub struct HairDefRender {
     pub tex_path: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HumanlikeRenderTreeLayers {
+    pub body_base_layer: f32,
+    pub head_base_layer: f32,
+    pub beard_base_layer: f32,
+    pub hair_base_layer: f32,
+    pub apparel_body_base_layer: f32,
+    pub apparel_head_base_layer: f32,
+}
+
 pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>> {
     let defs_dir = core_data_dir.join("Core").join("Defs");
     if !defs_dir.exists() {
@@ -497,6 +507,22 @@ pub fn load_hair_defs(core_data_dir: &Path) -> Result<HashMap<String, HairDefRen
     Ok(defs)
 }
 
+pub fn load_humanlike_render_tree_layers(
+    core_data_dir: &Path,
+) -> Result<HumanlikeRenderTreeLayers> {
+    let path = core_data_dir
+        .join("Core")
+        .join("Defs")
+        .join("PawnRenderTreeDefs")
+        .join("PawnRenderTreeDefs.xml");
+    let xml =
+        fs::read_to_string(&path).with_context(|| format!("failed reading {}", path.display()))?;
+    let doc =
+        Document::parse(&xml).with_context(|| format!("failed parsing {}", path.display()))?;
+    parse_humanlike_render_tree_layers(&doc)
+        .context("failed extracting Humanlike render-tree layers")
+}
+
 fn parse_doc_body_type_defs(doc: &Document<'_>, defs: &mut HashMap<String, BodyTypeDefRender>) {
     for node in doc.descendants().filter(|n| n.has_tag_name("BodyTypeDef")) {
         let Some(def_name) = child_text(node, "defName").map(str::to_string) else {
@@ -523,6 +549,67 @@ fn parse_doc_body_type_defs(doc: &Document<'_>, defs: &mut HashMap<String, BodyT
             },
         );
     }
+}
+
+fn parse_humanlike_render_tree_layers(doc: &Document<'_>) -> Result<HumanlikeRenderTreeLayers> {
+    #[derive(Default)]
+    struct Layers {
+        body: Option<f32>,
+        head: Option<f32>,
+        beard: Option<f32>,
+        hair: Option<f32>,
+        apparel_body: Option<f32>,
+        apparel_head: Option<f32>,
+    }
+
+    fn parse_node(node: Node<'_, '_>, layers: &mut Layers) {
+        let base = child_text(node, "baseLayer")
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        let label = child_text(node, "debugLabel").unwrap_or_default();
+        let tag = child_text(node, "tagDef").unwrap_or_default();
+
+        match label {
+            "Body" => layers.body = Some(base),
+            "Head" => layers.head = Some(base),
+            "Beard" => layers.beard = Some(base),
+            "Hair" => layers.hair = Some(base),
+            _ => {}
+        }
+        match tag {
+            "ApparelBody" => layers.apparel_body = Some(base),
+            "ApparelHead" => layers.apparel_head = Some(base),
+            _ => {}
+        }
+
+        if let Some(children) = child_node(node, "children") {
+            for child in children.children().filter(|c| c.is_element()) {
+                parse_node(child, layers);
+            }
+        }
+    }
+
+    let humanlike = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("PawnRenderTreeDef"))
+        .find(|n| child_text(*n, "defName") == Some("Humanlike"))
+        .context("Humanlike PawnRenderTreeDef not found")?;
+    let root = child_node(humanlike, "root").context("Humanlike root not found")?;
+    let mut layers = Layers::default();
+    parse_node(root, &mut layers);
+
+    Ok(HumanlikeRenderTreeLayers {
+        body_base_layer: layers.body.context("Body base layer missing")?,
+        head_base_layer: layers.head.context("Head base layer missing")?,
+        beard_base_layer: layers.beard.context("Beard base layer missing")?,
+        hair_base_layer: layers.hair.context("Hair base layer missing")?,
+        apparel_body_base_layer: layers
+            .apparel_body
+            .context("ApparelBody base layer missing")?,
+        apparel_head_base_layer: layers
+            .apparel_head
+            .context("ApparelHead base layer missing")?,
+    })
 }
 
 fn parse_doc_thing_defs(doc: &Document<'_>, defs: &mut HashMap<String, ThingDef>) {
@@ -962,5 +1049,43 @@ mod tests {
         }
         assert!(raw.contains_key("NarrowBase"));
         assert!(raw.contains_key("Male_NarrowNormal"));
+    }
+
+    #[test]
+    fn parses_humanlike_render_tree_layers() {
+        let xml = r#"
+        <Defs>
+          <PawnRenderTreeDef>
+            <defName>Humanlike</defName>
+            <root>
+              <children>
+                <li>
+                  <debugLabel>Body</debugLabel>
+                  <children>
+                    <li><tagDef>ApparelBody</tagDef><baseLayer>20</baseLayer></li>
+                  </children>
+                </li>
+                <li>
+                  <debugLabel>Head</debugLabel>
+                  <baseLayer>50</baseLayer>
+                  <children>
+                    <li><debugLabel>Beard</debugLabel><baseLayer>60</baseLayer></li>
+                    <li><debugLabel>Hair</debugLabel><baseLayer>62</baseLayer></li>
+                    <li><tagDef>ApparelHead</tagDef><baseLayer>70</baseLayer></li>
+                  </children>
+                </li>
+              </children>
+            </root>
+          </PawnRenderTreeDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let layers = parse_humanlike_render_tree_layers(&doc).unwrap();
+        assert_eq!(layers.body_base_layer, 0.0);
+        assert_eq!(layers.head_base_layer, 50.0);
+        assert_eq!(layers.beard_base_layer, 60.0);
+        assert_eq!(layers.hair_base_layer, 62.0);
+        assert_eq!(layers.apparel_body_base_layer, 20.0);
+        assert_eq!(layers.apparel_head_base_layer, 70.0);
     }
 }
