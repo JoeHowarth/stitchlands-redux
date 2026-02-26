@@ -353,6 +353,38 @@ mod tests {
     }
 
     #[test]
+    fn default_transform_keeps_head_above_body_for_all_facings() {
+        for facing in [
+            PawnFacing::North,
+            PawnFacing::East,
+            PawnFacing::South,
+            PawnFacing::West,
+        ] {
+            let mut input = fixture_input();
+            input.facing = facing;
+            input.body_type.head_offset = Vec2::new(0.06, 0.30);
+            let result = compose_pawn(&input, &PawnComposeConfig::default());
+            let body = result
+                .nodes
+                .iter()
+                .find(|n| n.id.ends_with("::Body"))
+                .expect("body node");
+            let head = result
+                .nodes
+                .iter()
+                .find(|n| n.id.ends_with("::Head"))
+                .expect("head node");
+            assert!(
+                head.world_pos.y > body.world_pos.y,
+                "head should be above body for {:?}, got head_y={} body_y={}",
+                facing,
+                head.world_pos.y,
+                body.world_pos.y
+            );
+        }
+    }
+
+    #[test]
     fn apparel_sorted_by_layer_draw_order() {
         let mut input = fixture_input();
         input.apparel = vec![

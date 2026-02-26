@@ -199,3 +199,15 @@
   - orientation (`head_body_delta_y > 0`)
   - baseline layer ordering (head/hair/beard vs body)
 - This gives a faster scientific loop before screenshot review.
+
+## 2026-02-26 - Iteration 11
+
+### Learnings
+- Fixture-time checks are useful, but we also need compile-time regression guards independent of runtime scene setup.
+
+### Actions
+- Added unit test in `pawn::compose` to assert default transform keeps head above body for all four facings.
+- Re-ran fmt/test/clippy to verify no regressions.
+
+### Conclusions
+- Basic upside-down regressions now fail in unit tests and fixture runs, giving two independent fast feedback channels.
