@@ -19,6 +19,7 @@ use clap::Parser;
 use glam::{Vec2, Vec3};
 use log::{info, warn};
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
@@ -42,7 +43,7 @@ use crate::pawn::{
     BodyTypeRenderData, HeadTypeRenderData, HediffOverlayInput, OverlayAnchor, PawnComposeConfig,
     PawnDrawFlags, PawnFacing as ComposeFacing, PawnRenderInput, compose_pawn,
 };
-use crate::renderer::{Renderer, SpriteInput, SpriteParams};
+use crate::renderer::{Renderer, RendererOptions, SpriteInput, SpriteParams};
 use crate::rimworld_paths::resolve_data_dir;
 use crate::scene::{
     count_terrain_families, generate_fixture_map, sorted_pawns, sorted_things_by_altitude,
@@ -145,6 +146,24 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     no_window: bool,
 
+    #[arg(long, default_value_t = false)]
+    hidden_window: bool,
+
+    #[arg(long, default_value_t = 1024)]
+    viewport_width: u32,
+
+    #[arg(long, default_value_t = 1024)]
+    viewport_height: u32,
+
+    #[arg(long, value_parser = parse_clear_color, default_value = "0.05,0.08,0.10,1")]
+    clear_color: [f64; 4],
+
+    #[arg(long, default_value_t = 0)]
+    sheet_columns: usize,
+
+    #[arg(long, default_value_t = 1.75)]
+    sheet_spacing: f32,
+
     #[arg(long, default_value_t = 0.0)]
     cell_x: f32,
 
@@ -170,9 +189,30 @@ fn parse_tint(input: &str) -> Result<[f32; 4], String> {
     Ok([r, g, b, a])
 }
 
+fn parse_clear_color(input: &str) -> Result<[f64; 4], String> {
+    let cleaned = input.replace(',', " ");
+    let mut nums = cleaned
+        .split_whitespace()
+        .map(|v| v.parse::<f64>().map_err(|e| e.to_string()));
+    let r = nums.next().ok_or_else(|| "missing r".to_string())??;
+    let g = nums.next().ok_or_else(|| "missing g".to_string())??;
+    let b = nums.next().ok_or_else(|| "missing b".to_string())??;
+    let a = nums.next().transpose()?.unwrap_or(1.0);
+    Ok([r, g, b, a])
+}
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
+    let should_run_renderer = !cli.no_window || cli.screenshot.is_some();
+    let render_options = RendererOptions {
+        clear_color: cli.clear_color,
+        surface_size: Some(PhysicalSize::new(
+            cli.viewport_width.max(1),
+            cli.viewport_height.max(1),
+        )),
+    };
+    let hide_window = cli.hidden_window || (cli.no_window && cli.screenshot.is_some());
 
     let rimworld_input = resolve_rimworld_input(cli.rimworld_data.clone()).context(
         "could not resolve RimWorld path; set --rimworld-data or STITCHLANDS_RIMWORLD_DATA",
@@ -339,7 +379,7 @@ fn main() -> Result<()> {
         if let Some(screenshot) = &cli.screenshot {
             info!("screenshot output: {}", screenshot.display());
         }
-        if cli.no_window {
+        if !should_run_renderer {
             if let Some(export_path) = &cli.export_resolved {
                 sprite
                     .image
@@ -350,7 +390,13 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        let mut app = App::new(vec![sprite], cli.screenshot, None);
+        let mut app = App::new(
+            vec![sprite],
+            cli.screenshot,
+            None,
+            render_options,
+            hide_window,
+        );
         let event_loop = EventLoop::new()?;
         event_loop.run_app(&mut app)?;
         return Ok(());
@@ -410,10 +456,16 @@ fn main() -> Result<()> {
             dump_pawn_trace: cli.dump_pawn_trace.clone(),
             compose_config: compose_config.clone(),
         })?;
-        if cli.no_window {
+        if !should_run_renderer {
             return Ok(());
         }
-        let mut app = App::new(render_sprites, cli.screenshot, Some(camera_focus));
+        let mut app = App::new(
+            render_sprites,
+            cli.screenshot,
+            Some(camera_focus),
+            render_options,
+            hide_window,
+        );
         let event_loop = EventLoop::new()?;
         event_loop.run_app(&mut app)?;
         return Ok(());
@@ -437,10 +489,16 @@ fn main() -> Result<()> {
             dump_pawn_trace: cli.dump_pawn_trace.clone(),
             compose_config: compose_config.clone(),
         })?;
-        if cli.no_window {
+        if !should_run_renderer {
             return Ok(());
         }
-        let mut app = App::new(render_sprites, cli.screenshot, Some(camera_focus));
+        let mut app = App::new(
+            render_sprites,
+            cli.screenshot,
+            Some(camera_focus),
+            render_options,
+            hide_window,
+        );
         let event_loop = EventLoop::new()?;
         event_loop.run_app(&mut app)?;
         return Ok(());
@@ -467,6 +525,21 @@ fn main() -> Result<()> {
     }
 
     let mut render_sprites = Vec::with_capacity(selected_defs.len());
+    let sheet_columns = if cli.sheet_columns == 0 {
+        selected_defs.len().max(1)
+    } else {
+        cli.sheet_columns
+    };
+    let sheet_spacing = cli.sheet_spacing.max(0.1);
+    let sheet_rows = selected_defs.len().div_ceil(sheet_columns);
+    let sheet_camera_center = if selected_defs.len() > 1 {
+        Some(Vec2::new(
+            cli.cell_x + 0.5 + ((sheet_columns - 1) as f32 * sheet_spacing * 0.5),
+            cli.cell_z + 0.5 + ((sheet_rows - 1) as f32 * sheet_spacing * 0.5),
+        ))
+    } else {
+        None
+    };
     for (index, selected) in selected_defs.iter().enumerate() {
         let resolved = asset_resolver
             .resolve_thing(&data_dir, selected)
@@ -548,9 +621,11 @@ fn main() -> Result<()> {
 
         let size = selected.graphic_data.draw_size * cli.scale;
         let draw_offset = selected.graphic_data.draw_offset;
+        let col = index % sheet_columns;
+        let row = index / sheet_columns;
         let world_pos = Vec3::new(
-            cli.cell_x + index as f32 * 1.75 + 0.5 + draw_offset.x,
-            cli.cell_z + 0.5 + draw_offset.z,
+            cli.cell_x + col as f32 * sheet_spacing + 0.5 + draw_offset.x,
+            cli.cell_z + row as f32 * sheet_spacing + 0.5 + draw_offset.z,
             draw_offset.y,
         );
         let tint = [
@@ -577,11 +652,17 @@ fn main() -> Result<()> {
         });
     }
 
-    if cli.no_window {
+    if !should_run_renderer {
         return Ok(());
     }
 
-    let mut app = App::new(render_sprites, cli.screenshot, None);
+    let mut app = App::new(
+        render_sprites,
+        cli.screenshot,
+        sheet_camera_center,
+        render_options,
+        hide_window,
+    );
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -1556,7 +1637,7 @@ fn resolve_pawn_texture_image(
         && !resolved.sprite.used_fallback
     {
         let mut image = resolved.sprite.image;
-        if path.contains("/Pawn/Humanlike/") {
+        if resolved.resolved_from_packed && path.contains("/Pawn/Humanlike/") {
             image::imageops::flip_vertical_in_place(&mut image);
         }
         return Some(image);
@@ -1565,7 +1646,11 @@ fn resolve_pawn_texture_image(
         && let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, base_path)
         && !resolved.sprite.used_fallback
     {
-        return Some(resolved.sprite.image);
+        let mut image = resolved.sprite.image;
+        if resolved.resolved_from_packed && base_path.contains("/Pawn/Humanlike/") {
+            image::imageops::flip_vertical_in_place(&mut image);
+        }
+        return Some(image);
     }
     None
 }
@@ -1577,6 +1662,8 @@ struct App {
     screenshot_taken: bool,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
+    renderer_options: RendererOptions,
+    hidden_window: bool,
 }
 
 struct RenderSprite {
@@ -1591,6 +1678,8 @@ impl App {
         sprites: Vec<RenderSprite>,
         screenshot_path: Option<PathBuf>,
         initial_camera_center: Option<Vec2>,
+        renderer_options: RendererOptions,
+        hidden_window: bool,
     ) -> Self {
         Self {
             sprites,
@@ -1599,6 +1688,8 @@ impl App {
             screenshot_taken: false,
             window: None,
             renderer: None,
+            renderer_options,
+            hidden_window,
         }
     }
 }
@@ -1616,6 +1707,11 @@ impl ApplicationHandler for App {
             first.def_name,
             fallback_count
         ));
+        let attrs = if self.hidden_window {
+            attrs.with_visible(false)
+        } else {
+            attrs
+        };
 
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let sprite_inputs = self
@@ -1630,6 +1726,7 @@ impl ApplicationHandler for App {
             window.clone(),
             sprite_inputs,
             self.initial_camera_center,
+            self.renderer_options,
         ))
         .expect("create renderer");
 

@@ -30,6 +30,7 @@ pub struct Renderer {
     camera_bind_group: wgpu::BindGroup,
     sprite_batches: Vec<SpriteBatch>,
     camera_speed: f32,
+    clear_color: wgpu::Color,
 }
 
 struct SpriteBatch {
@@ -151,12 +152,16 @@ impl Renderer {
         window: Arc<Window>,
         sprites: Vec<SpriteInput>,
         initial_camera_center: Option<Vec2>,
+        options: RendererOptions,
     ) -> Result<Self> {
         if sprites.is_empty() {
             anyhow::bail!("renderer requires at least one sprite");
         }
 
-        let size = window.inner_size();
+        if let Some(surface_size) = options.surface_size {
+            let _ = window.request_inner_size(surface_size);
+        }
+        let size = options.surface_size.unwrap_or_else(|| window.inner_size());
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window).context("create surface")?;
 
@@ -457,6 +462,12 @@ impl Renderer {
             camera_bind_group,
             sprite_batches,
             camera_speed: 0.2,
+            clear_color: wgpu::Color {
+                r: options.clear_color[0],
+                g: options.clear_color[1],
+                b: options.clear_color[2],
+                a: options.clear_color[3],
+            },
         })
     }
 
@@ -556,12 +567,7 @@ impl Renderer {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.05,
-                            g: 0.08,
-                            b: 0.1,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -724,4 +730,19 @@ pub struct SpriteParams {
     pub world_pos: Vec3,
     pub size: Vec2,
     pub tint: [f32; 4],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RendererOptions {
+    pub clear_color: [f64; 4],
+    pub surface_size: Option<PhysicalSize<u32>>,
+}
+
+impl Default for RendererOptions {
+    fn default() -> Self {
+        Self {
+            clear_color: [0.05, 0.08, 0.10, 1.0],
+            surface_size: None,
+        }
+    }
 }
