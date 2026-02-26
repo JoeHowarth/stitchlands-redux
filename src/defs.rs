@@ -41,6 +41,13 @@ pub struct ThingDef {
     pub graphic_data: GraphicData,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TerrainDef {
+    pub def_name: String,
+    pub texture_path: String,
+    pub edge_texture_path: Option<String>,
+}
+
 pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>> {
     let defs_dir = core_data_dir.join("Core").join("Defs");
     if !defs_dir.exists() {
@@ -76,10 +83,51 @@ pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>
     Ok(defs)
 }
 
+pub fn load_terrain_defs(core_data_dir: &Path) -> Result<HashMap<String, TerrainDef>> {
+    let defs_dir = core_data_dir.join("Core").join("Defs");
+    if !defs_dir.exists() {
+        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
+    }
+
+    let mut defs = HashMap::new();
+    for entry in WalkDir::new(&defs_dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let Some(ext) = entry.path().extension() else {
+            continue;
+        };
+        if ext != "xml" {
+            continue;
+        }
+
+        let xml = fs::read_to_string(entry.path())
+            .with_context(|| format!("failed reading {}", entry.path().display()))?;
+        if let Ok(doc) = Document::parse(&xml) {
+            parse_doc_terrain_defs(&doc, &mut defs);
+        }
+    }
+
+    Ok(defs)
+}
+
 fn parse_doc_thing_defs(doc: &Document<'_>, defs: &mut HashMap<String, ThingDef>) {
     for node in doc.descendants().filter(|n| n.has_tag_name("ThingDef")) {
         if let Some(thing_def) = parse_thing_def(node) {
             defs.insert(thing_def.def_name.clone(), thing_def);
+        }
+    }
+}
+
+fn parse_doc_terrain_defs(doc: &Document<'_>, defs: &mut HashMap<String, TerrainDef>) {
+    for node in doc.descendants().filter(|n| n.has_tag_name("TerrainDef")) {
+        if let Some(terrain_def) = parse_terrain_def(node) {
+            defs.insert(terrain_def.def_name.clone(), terrain_def);
         }
     }
 }
@@ -92,6 +140,22 @@ fn parse_thing_def(node: Node<'_, '_>) -> Option<ThingDef> {
     Some(ThingDef {
         def_name,
         graphic_data,
+    })
+}
+
+fn parse_terrain_def(node: Node<'_, '_>) -> Option<TerrainDef> {
+    let def_name = child_text(node, "defName")?.to_string();
+    let texture_path = child_text(node, "texturePath")
+        .or_else(|| child_text(node, "texPath"))
+        .map(str::to_string)?;
+    let edge_texture_path = child_text(node, "edgePath")
+        .or_else(|| child_text(node, "edgeTexturePath"))
+        .map(str::to_string);
+
+    Some(TerrainDef {
+        def_name,
+        texture_path,
+        edge_texture_path,
     })
 }
 
@@ -216,5 +280,28 @@ mod tests {
         assert_eq!(thing.graphic_data.tex_path, "Things/Test");
         assert_eq!(thing.graphic_data.draw_size, Vec2::new(2.0, 3.0));
         assert_eq!(thing.graphic_data.draw_offset, Vec3::new(0.1, 0.2, 0.3));
+    }
+
+    #[test]
+    fn parses_minimal_terraindef() {
+        let xml = r#"
+        <Defs>
+            <TerrainDef>
+                <defName>SoilRich</defName>
+                <texturePath>Terrain/Surfaces/SoilRich</texturePath>
+                <edgePath>Terrain/Edges/Soil</edgePath>
+            </TerrainDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut defs = HashMap::new();
+        parse_doc_terrain_defs(&doc, &mut defs);
+
+        let terrain = defs.get("SoilRich").unwrap();
+        assert_eq!(terrain.texture_path, "Terrain/Surfaces/SoilRich");
+        assert_eq!(
+            terrain.edge_texture_path.as_deref(),
+            Some("Terrain/Edges/Soil")
+        );
     }
 }

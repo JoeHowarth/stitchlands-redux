@@ -35,6 +35,24 @@ pub fn merge_path_list(explicit: &[PathBuf], env_var: &str) -> Vec<PathBuf> {
     out
 }
 
+pub fn default_packed_index_path() -> PathBuf {
+    if let Ok(path) = std::env::var("STITCHLANDS_PACKED_INDEX_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".cache")
+            .join("stitchlands-redux")
+            .join("packed_texture_index_v1.txt");
+    }
+
+    PathBuf::from(".stitchlands-packed-index-v1.txt")
+}
+
 fn common_rimworld_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
 

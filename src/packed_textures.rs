@@ -135,19 +135,6 @@ impl PackedTextureResolver {
         &self.loaded_roots
     }
 
-    pub fn search_names(&self, query: &str, limit: usize) -> Vec<String> {
-        let needle = query.to_ascii_lowercase();
-        let mut matches: Vec<String> = self
-            .keys_by_name
-            .keys()
-            .filter(|name| name.contains(&needle))
-            .take(limit)
-            .cloned()
-            .collect();
-        matches.sort();
-        matches
-    }
-
     pub fn probe_decode_candidates(&self, tex_path: &str, limit: usize) -> PackedProbeSummary {
         let mut candidates: Vec<(String, BinaryObjectKey)> = Vec::new();
         let mut seen = std::collections::HashSet::new();

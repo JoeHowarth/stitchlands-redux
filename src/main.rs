@@ -1,6 +1,7 @@
 mod assets;
 mod default_config;
 mod defs;
+mod packed_index;
 mod packed_textures;
 mod renderer;
 mod rimworld_paths;
@@ -21,8 +22,9 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::assets::{resolve_sprite, resolve_texture_path, SpriteAsset};
-use crate::default_config::{merge_path_list, resolve_rimworld_input};
+use crate::default_config::{default_packed_index_path, merge_path_list, resolve_rimworld_input};
 use crate::defs::{load_terrain_defs, load_thing_defs, TerrainDef, ThingDef};
+use crate::packed_index::PackedTextureIndex;
 use crate::packed_textures::{
     extract_all_packed_textures, infer_packed_data_roots, PackedTextureResolver,
 };
@@ -64,12 +66,21 @@ struct Cli {
     packed_data_root: Vec<PathBuf>,
 
     #[arg(long)]
+    packed_index_path: Option<PathBuf>,
+
+    #[arg(long, default_value_t = false)]
+    rebuild_packed_index: bool,
+
+    #[arg(long, default_value_t = false)]
+    no_packed_index: bool,
+
+    #[arg(long)]
     typetree_registry: Vec<PathBuf>,
 
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     auto_typetree: bool,
 
-    #[arg(long, default_value_t = 24)]
+    #[arg(long, default_value_t = 0)]
     packed_decode_probe: usize,
 
     #[arg(long, default_value_t = 8)]
@@ -136,6 +147,107 @@ fn parse_tint(input: &str) -> Result<[f32; 4], String> {
     Ok([r, g, b, a])
 }
 
+struct PackedResolverState {
+    packed_roots: Vec<PathBuf>,
+    typetree_registries: Vec<PathBuf>,
+    resolver: Option<PackedTextureResolver>,
+    build_attempted: bool,
+    build_fn: Box<BuildPackedResolverFn>,
+}
+
+type BuildPackedResolverFn =
+    dyn FnMut(&[PathBuf], &[PathBuf]) -> Result<Option<PackedTextureResolver>>;
+
+impl PackedResolverState {
+    fn new(packed_roots: Vec<PathBuf>, typetree_registries: Vec<PathBuf>) -> Self {
+        Self {
+            packed_roots,
+            typetree_registries,
+            resolver: None,
+            build_attempted: false,
+            build_fn: Box::new(PackedTextureResolver::build),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_builder(
+        packed_roots: Vec<PathBuf>,
+        typetree_registries: Vec<PathBuf>,
+        build_fn: Box<BuildPackedResolverFn>,
+    ) -> Self {
+        Self {
+            packed_roots,
+            typetree_registries,
+            resolver: None,
+            build_attempted: false,
+            build_fn,
+        }
+    }
+
+    fn get(&mut self) -> Result<Option<&PackedTextureResolver>> {
+        if !self.build_attempted {
+            self.resolver = (self.build_fn)(&self.packed_roots, &self.typetree_registries)?;
+            self.build_attempted = true;
+            if let Some(resolver) = self.resolver.as_ref() {
+                for root in resolver.loaded_roots() {
+                    info!("packed resolver root: {}", root.display());
+                }
+            }
+        }
+        Ok(self.resolver.as_ref())
+    }
+
+    fn disable(&mut self) {
+        self.build_attempted = true;
+        self.resolver = None;
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod packed_resolver_state_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::PackedResolverState;
+
+    #[test]
+    fn lazy_builder_runs_once_when_result_is_none() {
+        let calls = Rc::new(RefCell::new(0usize));
+        let calls_for_builder = Rc::clone(&calls);
+        let mut state = PackedResolverState::with_builder(
+            vec![],
+            vec![],
+            Box::new(move |_, _| {
+                *calls_for_builder.borrow_mut() += 1;
+                Ok(None)
+            }),
+        );
+
+        let _ = state.get().unwrap();
+        let _ = state.get().unwrap();
+        assert_eq!(*calls.borrow(), 1);
+    }
+
+    #[test]
+    fn disable_prevents_builder_execution() {
+        let calls = Rc::new(RefCell::new(0usize));
+        let calls_for_builder = Rc::clone(&calls);
+        let mut state = PackedResolverState::with_builder(
+            vec![],
+            vec![],
+            Box::new(move |_, _| {
+                *calls_for_builder.borrow_mut() += 1;
+                Ok(None)
+            }),
+        );
+
+        state.disable();
+        let _ = state.get().unwrap();
+        assert_eq!(*calls.borrow(), 0);
+    }
+}
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
@@ -195,12 +307,28 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut packed_resolver = PackedTextureResolver::build(&packed_roots, &typetree_registries)?;
-    if let Some(resolver) = packed_resolver.as_ref() {
-        for root in resolver.loaded_roots() {
-            info!("packed resolver root: {}", root.display());
+    let packed_index = if cli.no_packed_index {
+        None
+    } else {
+        let index_path = cli
+            .packed_index_path
+            .clone()
+            .unwrap_or_else(default_packed_index_path);
+        let index = PackedTextureIndex::load_or_build(
+            &packed_roots,
+            &index_path,
+            cli.rebuild_packed_index,
+        )?;
+        if index.is_empty() {
+            warn!(
+                "packed texture metadata index is empty; packed lookup gating disabled for this run"
+            );
         }
-    }
+        Some(index)
+    };
+
+    let mut packed_resolver_state =
+        PackedResolverState::new(packed_roots.clone(), typetree_registries.clone());
 
     if let Some(output_dir) = &cli.extract_packed_textures {
         let summary = extract_all_packed_textures(&packed_roots, &typetree_registries, output_dir)
@@ -213,14 +341,14 @@ fn main() -> Result<()> {
     }
 
     if let Some(query) = &cli.search_packed_textures {
-        if let Some(resolver) = packed_resolver.as_ref() {
-            let matches = resolver.search_names(query, cli.search_limit);
+        if let Some(index) = packed_index.as_ref() {
+            let matches = index.search_names(query, cli.search_limit);
             for name in &matches {
                 println!("{name}");
             }
             println!("matched {} packed texture names", matches.len());
         } else {
-            println!("no packed roots loaded");
+            println!("no packed texture index loaded");
         }
         return Ok(());
     }
@@ -282,7 +410,7 @@ fn main() -> Result<()> {
 
     if cli.packed_decode_probe > 0 {
         let mut disable_packed = false;
-        if let Some(resolver) = packed_resolver.as_ref() {
+        if let Some(resolver) = packed_resolver_state.get()? {
             let health = resolver.decode_health_sample(cli.packed_decode_probe);
             if health.attempted >= cli.packed_decode_probe_min_attempts {
                 info!(
@@ -307,7 +435,7 @@ fn main() -> Result<()> {
             }
         }
         if disable_packed {
-            packed_resolver = None;
+            packed_resolver_state.disable();
         }
     }
 
@@ -316,7 +444,8 @@ fn main() -> Result<()> {
             &data_dir,
             &terrain_defs,
             &texture_roots,
-            packed_resolver.as_ref(),
+            packed_index.as_ref(),
+            &mut packed_resolver_state,
             cli.terrain_probe_limit,
         )?;
         return Ok(());
@@ -328,7 +457,8 @@ fn main() -> Result<()> {
             &defs,
             &terrain_defs,
             &texture_roots,
-            packed_resolver.as_ref(),
+            packed_index.as_ref(),
+            &mut packed_resolver_state,
             cli.map_width,
             cli.map_height,
         )?;
@@ -363,8 +493,8 @@ fn main() -> Result<()> {
 
     let mut render_sprites = Vec::with_capacity(selected_defs.len());
     for (index, selected) in selected_defs.iter().enumerate() {
-        let mut sprite_asset = resolve_sprite(&data_dir, selected, &texture_roots)
-            .with_context(|| {
+        let mut sprite_asset =
+            resolve_sprite(&data_dir, selected, &texture_roots).with_context(|| {
                 format!(
                     "resolving texture for def '{}' path '{}'",
                     selected.def_name, selected.graphic_data.tex_path
@@ -373,47 +503,65 @@ fn main() -> Result<()> {
 
         let mut resolved_from_packed = false;
         if sprite_asset.used_fallback {
-            if let Some(resolver) = packed_resolver.as_ref() {
-                match resolver.resolve(&selected.graphic_data.tex_path) {
-                    Ok(Some(hit)) => {
-                        sprite_asset.image = hit.image;
-                        sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
-                        sprite_asset.used_fallback = false;
-                        resolved_from_packed = true;
-                        info!(
-                            "resolved packed texture for '{}' via name '{}'",
-                            selected.def_name, hit.matched_name
-                        );
-                    }
-                    Ok(None) => {}
-                    Err(err) => {
-                        warn!(
-                            "packed texture resolve failed for '{}' ({}): {err}",
-                            selected.def_name, selected.graphic_data.tex_path
-                        );
+            let can_try_packed = packed_index
+                .as_ref()
+                .map(|index| index.maybe_contains(&selected.graphic_data.tex_path))
+                .unwrap_or(true);
+            if can_try_packed {
+                if let Some(resolver) = packed_resolver_state.get()? {
+                    match resolver.resolve(&selected.graphic_data.tex_path) {
+                        Ok(Some(hit)) => {
+                            sprite_asset.image = hit.image;
+                            sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
+                            sprite_asset.used_fallback = false;
+                            resolved_from_packed = true;
+                            info!(
+                                "resolved packed texture for '{}' via name '{}'",
+                                selected.def_name, hit.matched_name
+                            );
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            warn!(
+                                "packed texture resolve failed for '{}' ({}): {err}",
+                                selected.def_name, selected.graphic_data.tex_path
+                            );
+                        }
                     }
                 }
             }
         }
 
         if sprite_asset.used_fallback {
-            if let Some(resolver) = packed_resolver.as_ref() {
-                let probe = resolver.probe_decode_candidates(&selected.graphic_data.tex_path, 8);
-                if probe.attempted > 0 {
-                    warn!(
-                        "packed texture probe for '{}' attempted {} candidates, {} decodable",
-                        selected.def_name, probe.attempted, probe.succeeded
-                    );
-                    for (name, err) in probe.sample_errors {
-                        info!("packed candidate '{}' failed decode: {}", name, err);
-                    }
-                    if probe.succeeded == 0 {
+            let can_try_packed = packed_index
+                .as_ref()
+                .map(|index| index.maybe_contains(&selected.graphic_data.tex_path))
+                .unwrap_or(true);
+            if can_try_packed {
+                if let Some(resolver) = packed_resolver_state.get()? {
+                    let probe =
+                        resolver.probe_decode_candidates(&selected.graphic_data.tex_path, 8);
+                    if probe.attempted > 0 {
                         warn!(
-                            "no decodable packed candidates for '{}'; this usually means stripped/missing TypeTree metadata for this Unity build",
-                            selected.def_name
+                            "packed texture probe for '{}' attempted {} candidates, {} decodable",
+                            selected.def_name, probe.attempted, probe.succeeded
                         );
+                        for (name, err) in probe.sample_errors {
+                            info!("packed candidate '{}' failed decode: {}", name, err);
+                        }
+                        if probe.succeeded == 0 {
+                            warn!(
+                                "no decodable packed candidates for '{}'; this usually means stripped/missing TypeTree metadata for this Unity build",
+                                selected.def_name
+                            );
+                        }
                     }
                 }
+            } else {
+                info!(
+                    "packed index has no candidate for '{}'; skipping packed decode",
+                    selected.graphic_data.tex_path
+                );
             }
             warn!(
                 "texture missing for '{}' ({}) - using checker fallback",
@@ -423,6 +571,7 @@ fn main() -> Result<()> {
                 info!("attempted: {}", attempted.display());
             }
         }
+
         if let Some(path) = &sprite_asset.source_path {
             if resolved_from_packed {
                 info!("resolved texture (packed): {}", path.display());
@@ -617,18 +766,24 @@ fn resolve_texture_with_packed(
     data_dir: &Path,
     tex_path: &str,
     extra_texture_roots: &[PathBuf],
-    packed_resolver: Option<&PackedTextureResolver>,
+    packed_index: Option<&PackedTextureIndex>,
+    packed_resolver_state: &mut PackedResolverState,
 ) -> Result<SpriteAsset> {
     let mut sprite_asset = resolve_texture_path(data_dir, tex_path, extra_texture_roots)?;
     if !sprite_asset.used_fallback {
         return Ok(sprite_asset);
     }
 
-    if let Some(resolver) = packed_resolver {
-        if let Ok(Some(hit)) = resolver.resolve(tex_path) {
-            sprite_asset.image = hit.image;
-            sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
-            sprite_asset.used_fallback = false;
+    let can_try_packed = packed_index
+        .map(|index| index.maybe_contains(tex_path))
+        .unwrap_or(true);
+    if can_try_packed {
+        if let Some(resolver) = packed_resolver_state.get()? {
+            if let Ok(Some(hit)) = resolver.resolve(tex_path) {
+                sprite_asset.image = hit.image;
+                sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
+                sprite_asset.used_fallback = false;
+            }
         }
     }
     Ok(sprite_asset)
@@ -638,7 +793,8 @@ fn run_terrain_probe(
     data_dir: &Path,
     terrain_defs: &std::collections::HashMap<String, TerrainDef>,
     texture_roots: &[PathBuf],
-    packed_resolver: Option<&PackedTextureResolver>,
+    packed_index: Option<&PackedTextureIndex>,
+    packed_resolver_state: &mut PackedResolverState,
     limit: usize,
 ) -> Result<()> {
     let mut rows: Vec<_> = terrain_defs.values().collect();
@@ -651,7 +807,8 @@ fn run_terrain_probe(
             data_dir,
             terrain.texture_path.as_str(),
             texture_roots,
-            packed_resolver,
+            packed_index,
+            packed_resolver_state,
         )?;
         if sprite.used_fallback {
             failed += 1;
@@ -679,12 +836,14 @@ fn run_terrain_probe(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_v1_fixture_scene(
     data_dir: &Path,
     thing_defs: &std::collections::HashMap<String, ThingDef>,
     terrain_defs: &std::collections::HashMap<String, TerrainDef>,
     texture_roots: &[PathBuf],
-    packed_resolver: Option<&PackedTextureResolver>,
+    packed_index: Option<&PackedTextureIndex>,
+    packed_resolver_state: &mut PackedResolverState,
     width: usize,
     height: usize,
 ) -> Result<Vec<RenderSprite>> {
@@ -697,7 +856,8 @@ fn build_v1_fixture_scene(
             data_dir,
             terrain.texture_path.as_str(),
             texture_roots,
-            packed_resolver,
+            packed_index,
+            packed_resolver_state,
         )?;
         if sprite.used_fallback {
             continue;
@@ -727,7 +887,8 @@ fn build_v1_fixture_scene(
                     data_dir,
                     def.graphic_data.tex_path.as_str(),
                     texture_roots,
-                    packed_resolver,
+                    packed_index,
+                    packed_resolver_state,
                 )?;
             }
             if sprite_asset.used_fallback {
@@ -748,8 +909,13 @@ fn build_v1_fixture_scene(
     ];
     let mut pawn_choices: Vec<(String, image::RgbaImage)> = Vec::new();
     for tex_path in pawn_candidates {
-        let sprite =
-            resolve_texture_with_packed(data_dir, tex_path, texture_roots, packed_resolver)?;
+        let sprite = resolve_texture_with_packed(
+            data_dir,
+            tex_path,
+            texture_roots,
+            packed_index,
+            packed_resolver_state,
+        )?;
         if sprite.used_fallback {
             continue;
         }

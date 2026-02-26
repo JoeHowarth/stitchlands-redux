@@ -81,6 +81,24 @@ Launch the v1 fixture scene (terrain tilemap + things + pawns):
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --typetree-registry /path/to/typetree.tpk --scene-v1-fixture
 ```
 
+`--packed-decode-probe` is now opt-in (default `0`) for faster startup.  
+Use it only when debugging decode health:
+
+```bash
+cargo run -- --scene-v1-fixture --packed-decode-probe 24
+```
+
+Packed texture metadata index (names/container paths) is cached on disk to speed repeated runs.
+Defaults to `$HOME/.cache/stitchlands-redux/packed_texture_index_v1.txt`.
+
+```bash
+# force a rebuild
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --rebuild-packed-index --search-packed-textures steel
+
+# custom cache location
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --packed-index-path /tmp/stitchlands-index.txt --scene-v1-fixture
+```
+
 Check whether this install has loose texture PNGs:
 
 ```bash

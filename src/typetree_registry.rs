@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -94,7 +94,7 @@ fn auto_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-fn is_registry_file(path: &PathBuf) -> bool {
+fn is_registry_file(path: &Path) -> bool {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())

@@ -20,9 +20,20 @@ pub fn resolve_sprite(
     thing_def: &ThingDef,
     extra_texture_roots: &[PathBuf],
 ) -> Result<SpriteAsset> {
+    resolve_texture_path(
+        core_data_dir,
+        thing_def.graphic_data.tex_path.as_str(),
+        extra_texture_roots,
+    )
+}
+
+pub fn resolve_texture_path(
+    core_data_dir: &Path,
+    tex_path: &str,
+    extra_texture_roots: &[PathBuf],
+) -> Result<SpriteAsset> {
     let texture_roots = texture_roots(core_data_dir, extra_texture_roots);
 
-    let tex_path = thing_def.graphic_data.tex_path.as_str();
     let mut attempted_paths = Vec::new();
 
     for root in &texture_roots {
