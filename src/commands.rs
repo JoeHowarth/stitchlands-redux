@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use walkdir::WalkDir;
 
-use crate::asset_resolver::AssetResolver;
+use crate::assets::AssetResolver;
+use crate::assets::extract_all_packed_textures;
 use crate::defs::{TerrainDef, ThingDef};
-use crate::packed_textures::extract_all_packed_textures;
 
 pub fn run_extract_packed_textures(
     packed_roots: &[PathBuf],

@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use log::info;
 
+use crate::assets::packed_index::PackedTextureIndex;
+use crate::assets::packed_textures::{PackedProbeSummary, PackedTextureResolver};
 use crate::assets::{SpriteAsset, resolve_sprite, resolve_texture_path};
 use crate::defs::ThingDef;
-use crate::packed_index::PackedTextureIndex;
-use crate::packed_textures::{PackedProbeSummary, PackedTextureResolver};
 
 pub struct AssetResolver {
     texture_roots: Vec<PathBuf>,

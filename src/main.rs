@@ -1,15 +1,9 @@
-mod asset_resolver;
 mod assets;
 mod commands;
-mod default_config;
 mod defs;
-mod packed_index;
-mod packed_textures;
 mod pawn;
 mod renderer;
-mod rimworld_paths;
 mod scene;
-mod typetree_registry;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,31 +18,26 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
-use crate::asset_resolver::AssetResolver;
+use crate::assets::{AssetResolver, AssetSetupOptions, prepare_asset_setup};
 use crate::commands::{
     diagnose_textures, list_defs, print_packed_texture_search, run_extract_packed_textures,
     run_terrain_probe,
 };
-use crate::default_config::{default_packed_index_path, merge_path_list, resolve_rimworld_input};
 use crate::defs::{
     ApparelDef, ApparelLayerDef, ApparelSkipFlagDef, BeardDefRender, BodyTypeDefRender,
     HairDefRender, HeadTypeDefRender, HumanlikeRenderTreeLayers, TerrainDef, ThingDef,
     load_apparel_defs, load_beard_defs, load_body_type_defs, load_hair_defs, load_head_type_defs,
     load_humanlike_render_tree_layers, load_terrain_defs, load_thing_defs,
 };
-use crate::packed_index::PackedTextureIndex;
-use crate::packed_textures::infer_packed_data_roots;
 use crate::pawn::{
     ApparelLayer as ComposeApparelLayer, ApparelRenderInput, BeardTypeRenderData,
     BodyTypeRenderData, HeadTypeRenderData, HediffOverlayInput, OverlayAnchor, PawnComposeConfig,
     PawnDrawFlags, PawnFacing as ComposeFacing, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::{Renderer, RendererOptions, SpriteInput, SpriteParams};
-use crate::rimworld_paths::resolve_data_dir;
 use crate::scene::{
     count_terrain_families, generate_fixture_map, sorted_pawns, sorted_things_by_altitude,
 };
-use crate::typetree_registry::resolve_typetree_registry_paths;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -249,21 +238,19 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
 
-    let rimworld_input = resolve_rimworld_input(cli.data.rimworld_data.clone()).context(
-        "could not resolve RimWorld path; set --rimworld-data or STITCHLANDS_RIMWORLD_DATA",
-    )?;
-
-    let data_dir = resolve_data_dir(&rimworld_input).with_context(|| {
-        format!(
-            "resolving rimworld data dir from {}",
-            rimworld_input.display()
-        )
+    let setup = prepare_asset_setup(AssetSetupOptions {
+        rimworld_data: cli.data.rimworld_data.clone(),
+        texture_roots: cli.data.texture_root.clone(),
+        packed_roots: cli.data.packed_data_root.clone(),
+        typetree_registry: cli.data.typetree_registry.clone(),
+        auto_typetree: cli.data.auto_typetree,
+        packed_index_path: cli.data.packed_index_path.clone(),
+        rebuild_packed_index: cli.data.rebuild_packed_index,
+        disable_packed_index: cli.data.no_packed_index,
     })?;
-    info!("using RimWorld data dir: {}", data_dir.display());
 
-    let texture_roots = merge_path_list(&cli.data.texture_root, "STITCHLANDS_TEXTURE_ROOT");
-    let packed_root_overrides =
-        merge_path_list(&cli.data.packed_data_root, "STITCHLANDS_PACKED_DATA_ROOT");
+    let data_dir = setup.data_dir;
+    info!("using RimWorld data dir: {}", data_dir.display());
 
     let defs = load_thing_defs(&data_dir)
         .with_context(|| format!("loading defs from {}", data_dir.display()))?;
@@ -305,23 +292,7 @@ fn main() -> Result<()> {
     );
     let compose_config = compose_config_from_humanlike_layers(humanlike_layers);
 
-    let mut packed_roots = infer_packed_data_roots(&rimworld_input, &data_dir);
-    for extra in &packed_root_overrides {
-        packed_roots.push(extra.clone());
-    }
-    packed_roots.sort();
-    packed_roots.dedup();
-
-    for explicit in &cli.data.typetree_registry {
-        if !explicit.exists() {
-            warn!(
-                "typetree registry path does not exist and will be skipped: {}",
-                explicit.display()
-            );
-        }
-    }
-    let typetree_registries =
-        resolve_typetree_registry_paths(&cli.data.typetree_registry, cli.data.auto_typetree);
+    let typetree_registries = setup.typetree_registries.clone();
     // RimWorld 2022 macOS assets in this project are typetree-stripped; without an external
     // registry packed Texture2D parsing often falls back to invalid dimensions/format metadata.
     if typetree_registries.is_empty() {
@@ -334,34 +305,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let packed_index = if cli.data.no_packed_index {
-        None
-    } else {
-        let index_path = cli
-            .data
-            .packed_index_path
-            .clone()
-            .unwrap_or_else(default_packed_index_path);
-        let index = PackedTextureIndex::load_or_build(
-            &packed_roots,
-            &typetree_registries,
-            &index_path,
-            cli.data.rebuild_packed_index,
-        )?;
-        if index.is_empty() {
-            warn!(
-                "packed texture metadata index is empty; packed lookup gating disabled for this run"
-            );
-        }
-        Some(index)
-    };
-
-    let mut asset_resolver = AssetResolver::new(
-        texture_roots,
-        packed_roots,
-        typetree_registries,
-        packed_index,
-    );
+    let mut asset_resolver = setup.resolver;
 
     match cli.command {
         Command::Debug(debug) => match debug.command {

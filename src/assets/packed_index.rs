@@ -9,7 +9,7 @@ use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
 use unity_asset_decode::unity_version::UnityVersion;
 
-use crate::typetree_registry::load_typetree_registry;
+use crate::assets::typetree_registry::load_typetree_registry;
 
 pub struct PackedTextureIndex {
     signature: String,
