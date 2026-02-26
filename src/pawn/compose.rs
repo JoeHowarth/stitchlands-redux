@@ -34,7 +34,21 @@ pub fn compose_pawn(input: &PawnRenderInput, config: &PawnComposeConfig) -> Pawn
     });
     order += 1;
 
-    if !input.draw_flags.hide_head && !input.draw_flags.head_stump {
+    if input.draw_flags.head_stump {
+        if let Some(tex_path) = &input.stump_tex_path {
+            nodes.push(PawnNode {
+                id: format!("{}::Stump", input.label),
+                kind: PawnNodeKind::Stump,
+                tex_path: tex_path.clone(),
+                world_pos: Vec3::new(base_pos.x, base_pos.y, config.layering.head_z),
+                size: input.stump_size,
+                tint: input.tint,
+                z: config.layering.head_z,
+                order,
+            });
+            order += 1;
+        }
+    } else if !input.draw_flags.hide_head {
         if let Some(tex_path) = &input.head_tex_path {
             nodes.push(PawnNode {
                 id: format!("{}::Head", input.label),
@@ -82,7 +96,14 @@ pub fn compose_pawn(input: &PawnRenderInput, config: &PawnComposeConfig) -> Pawn
         }
     }
 
-    for (stack_index, apparel) in input.apparel.iter().enumerate() {
+    let mut ordered_apparel: Vec<_> = input.apparel.iter().enumerate().collect();
+    ordered_apparel.sort_by(|(a_idx, a), (b_idx, b)| {
+        a.layer
+            .draw_order()
+            .cmp(&b.layer.draw_order())
+            .then(a_idx.cmp(b_idx))
+    });
+    for (stack_index, (_source_index, apparel)) in ordered_apparel.into_iter().enumerate() {
         debug_assert!(ApparelLayer::ALL.contains(&apparel.layer));
         let z = apparel_z(config.layering, apparel.layer, stack_index);
         nodes.push(PawnNode {
@@ -119,10 +140,12 @@ mod tests {
             world_pos: Vec3::new(2.5, 3.5, 0.0),
             body_tex_path: "Things/Pawn/Humanlike/Bodies/Naked_Male".to_string(),
             head_tex_path: Some("Things/Pawn/Humanlike/Heads/Male/Average_Normal".to_string()),
+            stump_tex_path: Some("Things/Pawn/Humanlike/Heads/Stumps/Stump".to_string()),
             hair_tex_path: Some("Things/Pawn/Humanlike/Hairs/Shaved".to_string()),
             beard_tex_path: Some("Things/Pawn/Humanlike/Beards/Beard_Full".to_string()),
             body_size: Vec2::new(1.4, 1.4),
             head_size: Vec2::new(1.1, 1.1),
+            stump_size: Vec2::new(0.8, 0.8),
             hair_size: Vec2::new(1.1, 1.1),
             beard_size: Vec2::new(1.0, 1.0),
             tint: [1.0, 1.0, 1.0, 1.0],
@@ -184,5 +207,56 @@ mod tests {
         assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Head")));
         assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Hair")));
         assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Beard")));
+    }
+
+    #[test]
+    fn stump_flag_swaps_head_stack_for_stump() {
+        let mut input = fixture_input();
+        input.draw_flags = PawnDrawFlags {
+            hide_hair: false,
+            hide_beard: false,
+            hide_head: false,
+            head_stump: true,
+        };
+        let result = compose_pawn(&input, &PawnComposeConfig::default());
+        assert!(result.nodes.iter().any(|n| n.id.ends_with("::Stump")));
+        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Head")));
+        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Hair")));
+        assert!(result.nodes.iter().all(|n| !n.id.ends_with("::Beard")));
+    }
+
+    #[test]
+    fn apparel_sorted_by_layer_draw_order() {
+        let mut input = fixture_input();
+        input.apparel = vec![
+            ApparelRenderInput {
+                label: "Helmet".to_string(),
+                tex_path: "Things/Apparel/Headgear/SimpleHelmet".to_string(),
+                layer: ApparelLayer::Overhead,
+                covers_upper_head: true,
+                covers_full_head: false,
+                draw_size: Vec2::new(1.1, 1.1),
+                tint: [1.0, 1.0, 1.0, 1.0],
+            },
+            ApparelRenderInput {
+                label: "Shirt".to_string(),
+                tex_path: "Things/Apparel/Body/Shirt".to_string(),
+                layer: ApparelLayer::OnSkin,
+                covers_upper_head: false,
+                covers_full_head: false,
+                draw_size: Vec2::new(1.3, 1.3),
+                tint: [1.0, 1.0, 1.0, 1.0],
+            },
+        ];
+
+        let result = compose_pawn(&input, &PawnComposeConfig::default());
+        let mut apparel = result
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Apparel));
+        let first = apparel.next().expect("at least one apparel node");
+        let second = apparel.next().expect("two apparel nodes");
+        assert!(first.id.contains("Shirt"));
+        assert!(second.id.contains("Helmet"));
     }
 }

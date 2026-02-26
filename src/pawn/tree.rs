@@ -4,6 +4,7 @@ use glam::{Vec2, Vec3};
 pub enum PawnNodeKind {
     Body,
     Head,
+    Stump,
     Hair,
     Beard,
     Apparel,
