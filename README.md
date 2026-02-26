@@ -26,6 +26,12 @@ Show multiple defs side-by-side:
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --extra-thingdef ChunkSlagSteel --extra-thingdef Plasteel
 ```
 
+Render a known loose game image directly (useful sanity check):
+
+```bash
+cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --image-path "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld/RimWorldMac.app/Data/Core/About/Preview.png"
+```
+
 ## Controls
 
 - Pan: `WASD` or arrow keys

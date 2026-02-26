@@ -35,6 +35,9 @@ struct Cli {
     thingdef: Option<String>,
 
     #[arg(long)]
+    image_path: Option<PathBuf>,
+
+    #[arg(long)]
     extra_thingdef: Vec<String>,
 
     #[arg(long, default_value_t = false)]
@@ -169,10 +172,47 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(image_path) = &cli.image_path {
+        let image = image::open(image_path)
+            .with_context(|| format!("loading image {}", image_path.display()))?
+            .to_rgba8();
+        info!("loaded direct image asset: {}", image_path.display());
+
+        let sprite = RenderSprite {
+            def_name: format!("image:{}", image_path.display()),
+            image,
+            params: SpriteParams {
+                world_pos: Vec3::new(cli.cell_x + 0.5, cli.cell_z + 0.5, 0.0),
+                size: Vec3::new(cli.scale, cli.scale, 0.0).truncate(),
+                tint: cli.tint,
+            },
+            used_fallback: false,
+        };
+
+        if let Some(screenshot) = &cli.screenshot {
+            info!("screenshot output: {}", screenshot.display());
+        }
+        if cli.no_window {
+            if let Some(export_path) = &cli.export_resolved {
+                sprite
+                    .image
+                    .save(export_path)
+                    .with_context(|| format!("saving image to {}", export_path.display()))?;
+                info!("wrote image export: {}", export_path.display());
+            }
+            return Ok(());
+        }
+
+        let mut app = App::new(vec![sprite], cli.screenshot);
+        let event_loop = EventLoop::new()?;
+        event_loop.run_app(&mut app)?;
+        return Ok(());
+    }
+
     let thingdef = cli
         .thingdef
         .as_deref()
-        .context("--thingdef is required unless --list-defs is used")?;
+        .context("--thingdef or --image-path is required unless --list-defs is used")?;
     let thing = defs
         .get(thingdef)
         .cloned()
@@ -225,6 +265,24 @@ fn main() -> Result<()> {
         }
 
         if sprite_asset.used_fallback {
+            if let Some(resolver) = packed_resolver.as_ref() {
+                let probe = resolver.probe_decode_candidates(&selected.graphic_data.tex_path, 8);
+                if probe.attempted > 0 {
+                    warn!(
+                        "packed texture probe for '{}' attempted {} candidates, {} decodable",
+                        selected.def_name, probe.attempted, probe.succeeded
+                    );
+                    for (name, err) in probe.sample_errors {
+                        info!("packed candidate '{}' failed decode: {}", name, err);
+                    }
+                    if probe.succeeded == 0 {
+                        warn!(
+                            "no decodable packed candidates for '{}'; this usually means stripped/missing TypeTree metadata for this Unity build",
+                            selected.def_name
+                        );
+                    }
+                }
+            }
             warn!(
                 "texture missing for '{}' ({}) - using checker fallback",
                 selected.def_name, selected.graphic_data.tex_path

@@ -27,6 +27,12 @@ pub struct PackedTextureHit {
     pub matched_name: String,
 }
 
+pub struct PackedProbeSummary {
+    pub attempted: usize,
+    pub succeeded: usize,
+    pub sample_errors: Vec<(String, String)>,
+}
+
 pub struct PackedTextureExtractionSummary {
     pub scanned_textures: usize,
     pub exported_textures: usize,
@@ -136,6 +142,46 @@ impl PackedTextureResolver {
             .collect();
         matches.sort();
         matches
+    }
+
+    pub fn probe_decode_candidates(&self, tex_path: &str, limit: usize) -> PackedProbeSummary {
+        let mut candidates: Vec<(String, BinaryObjectKey)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for wanted in wanted_texture_names(tex_path) {
+            if let Some(key) = self.keys_by_name.get(&wanted) {
+                if seen.insert((key.source.describe(), key.path_id)) {
+                    candidates.push((wanted, key.clone()));
+                }
+            }
+        }
+        for (name, key) in self.find_fuzzy_name_matches(tex_path) {
+            if seen.insert((key.source.describe(), key.path_id)) {
+                candidates.push((name, key));
+            }
+            if candidates.len() >= limit {
+                break;
+            }
+        }
+
+        let mut succeeded = 0usize;
+        let mut sample_errors = Vec::new();
+        for (name, key) in candidates.iter().take(limit) {
+            match self.decode_texture_for_key(key) {
+                Ok(_) => succeeded += 1,
+                Err(err) => {
+                    if sample_errors.len() < 5 {
+                        sample_errors.push((name.clone(), err.to_string()));
+                    }
+                }
+            }
+        }
+
+        PackedProbeSummary {
+            attempted: candidates.len().min(limit),
+            succeeded,
+            sample_errors,
+        }
     }
 
     pub fn resolve(&self, tex_path: &str) -> Result<Option<PackedTextureHit>> {
