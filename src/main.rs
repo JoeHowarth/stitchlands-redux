@@ -868,6 +868,11 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
     let mut beard_rows: Vec<_> = beard_defs
         .values()
         .filter(|b| !b.no_graphic && !b.tex_path.is_empty())
+        .filter(|b| {
+            let key = b.def_name.to_ascii_lowercase();
+            let tex = b.tex_path.to_ascii_lowercase();
+            !key.contains("anchor") && !tex.contains("beardanchor")
+        })
         .collect();
     beard_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
     let mut pawn_beard_choices: Vec<(BeardDefRender, image::RgbaImage)> = Vec::new();
@@ -1103,15 +1108,10 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             .iter()
             .filter(|path| body_head_compatible(&pawn.tex_path, path))
             .collect();
-        let head_pool: Vec<&String> = if compatible_heads.is_empty() {
+        let base_head_pool: Vec<&String> = if compatible_heads.is_empty() {
             head_tex_paths.iter().collect()
         } else {
             compatible_heads
-        };
-        let head_tex = if head_pool.is_empty() {
-            None
-        } else {
-            Some(head_pool[pawn_fixture_variant % head_pool.len()].to_string())
         };
         let hair_tex = if hair_tex_paths.is_empty() {
             None
@@ -1122,6 +1122,25 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             None
         } else {
             Some(beard_tex_paths[(pawn_fixture_variant / 7) % beard_tex_paths.len()].clone())
+        };
+        let head_pool: Vec<&String> = if beard_tex.is_some() {
+            let male_heads: Vec<&String> = base_head_pool
+                .iter()
+                .copied()
+                .filter(|path| path.to_ascii_lowercase().contains("/male/"))
+                .collect();
+            if male_heads.is_empty() {
+                base_head_pool
+            } else {
+                male_heads
+            }
+        } else {
+            base_head_pool
+        };
+        let head_tex = if head_pool.is_empty() {
+            None
+        } else {
+            Some(head_pool[pawn_fixture_variant % head_pool.len()].to_string())
         };
         let body_render = body_by_tex.get(&pawn.tex_path);
         let body_directional =
