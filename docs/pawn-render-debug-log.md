@@ -177,3 +177,25 @@
 ### Conclusions
 - We now have a fast, scientific non-screenshot guardrail for upside-down-head failures.
 - Visual screenshots remain useful for nuanced alignment, but no longer needed to detect basic orientation regressions.
+
+## 2026-02-26 - Iteration 10
+
+### Learnings
+- Basic orientation checks alone are not enough; bad z-order can also make heads look wrong even when y-offset is positive.
+
+### Hypotheses
+- Fast structural invariants for z-order should catch another class of “obviously wrong” renders without requiring screenshot inspection.
+
+### Actions
+- Added fixture-time layering validation:
+  - `head_z > body_z`
+  - `hair_z > head_z` (when hair exists)
+  - `beard_z > body_z` (when beard exists)
+- Kept validation fail-fast in pawn fixture mode.
+- Re-ran fmt/test/clippy and 10-variant fixture loop.
+
+### Conclusions
+- We now have two non-visual guardrails:
+  - orientation (`head_body_delta_y > 0`)
+  - baseline layer ordering (head/hair/beard vs body)
+- This gives a faster scientific loop before screenshot review.

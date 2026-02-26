@@ -1246,6 +1246,14 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                 );
             }
         }
+        if let Some(violations) = validate_basic_pawn_layering(&composed.nodes)
+            && pawn_focus_only
+        {
+            anyhow::bail!(
+                "invalid pawn layering for variant {pawn_fixture_variant}: {}",
+                violations.join("; ")
+            );
+        }
 
         let body_path = &compose_input.body_tex_path;
         if !pawn_layer_by_tex.contains_key(body_path)
@@ -1345,6 +1353,52 @@ fn measure_head_body_delta_y(nodes: &[crate::pawn::tree::PawnNode]) -> Option<f3
                 .map(|n| n.world_pos.y)
         })?;
     Some(head_y - body_y)
+}
+
+fn validate_basic_pawn_layering(nodes: &[crate::pawn::tree::PawnNode]) -> Option<Vec<String>> {
+    let body_z = nodes
+        .iter()
+        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Body))
+        .map(|n| n.z)?;
+    let head_z = nodes
+        .iter()
+        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Head))
+        .map(|n| n.z)
+        .or_else(|| {
+            nodes
+                .iter()
+                .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Stump))
+                .map(|n| n.z)
+        })?;
+
+    let mut violations = Vec::new();
+    if head_z <= body_z {
+        violations.push(format!("head_z({head_z:.6}) <= body_z({body_z:.6})"));
+    }
+
+    if let Some(hair_z) = nodes
+        .iter()
+        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Hair))
+        .map(|n| n.z)
+        && hair_z <= head_z
+    {
+        violations.push(format!("hair_z({hair_z:.6}) <= head_z({head_z:.6})"));
+    }
+
+    if let Some(beard_z) = nodes
+        .iter()
+        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Beard))
+        .map(|n| n.z)
+        && beard_z <= body_z
+    {
+        violations.push(format!("beard_z({beard_z:.6}) <= body_z({body_z:.6})"));
+    }
+
+    if violations.is_empty() {
+        None
+    } else {
+        Some(violations)
+    }
 }
 
 fn map_apparel_layer(layer: ApparelLayerDef) -> ComposeApparelLayer {
