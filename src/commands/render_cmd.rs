@@ -16,7 +16,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             .to_rgba8();
         info!("loaded direct image asset: {}", image_path.display());
 
-        let sprite = crate::RenderSprite {
+        let sprite = crate::viewer::RenderSprite {
             def_name: format!("image:{}", image_path.display()),
             image,
             params: SpriteParams {
@@ -183,7 +183,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             index, selected.def_name, size.x, size.y, draw_offset.x, draw_offset.y, draw_offset.z
         );
 
-        render_sprites.push(crate::RenderSprite {
+        render_sprites.push(crate::viewer::RenderSprite {
             def_name: selected.def_name.clone(),
             image: resolved.sprite.image,
             params: SpriteParams {
