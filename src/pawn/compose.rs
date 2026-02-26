@@ -137,7 +137,8 @@ fn evaluate_graph(
         input.world_pos.y,
     );
 
-    let mut apparel_index = 0usize;
+    let mut apparel_body_index = 0usize;
+    let mut apparel_head_index = 0usize;
     let mut hediff_index = 0usize;
 
     let mut out = Vec::with_capacity(graph.len());
@@ -185,19 +186,24 @@ fn evaluate_graph(
                 config.layering.beard_z,
             ),
             NodePayload::Apparel(apparel) => {
-                let mut z = workers::apparel_z(config.layering, apparel.layer, apparel_index);
-                if let Some(layer) = apparel.layer_override {
-                    z = config.layering.body_z + workers::layer_to_z_delta(layer);
-                } else if apparel.render_as_pack {
-                    z = match input.facing {
-                        super::model::PawnFacing::South => config.layering.body_z - 0.03,
-                        super::model::PawnFacing::North => config.layering.body_z + 0.03,
-                        super::model::PawnFacing::East | super::model::PawnFacing::West => {
-                            config.layering.body_z + 0.01
-                        }
-                    };
-                }
-                apparel_index += 1;
+                let is_head_apparel = matches!(
+                    apparel.layer,
+                    ApparelLayer::Overhead | ApparelLayer::EyeCover
+                );
+                let stack_index = if is_head_apparel {
+                    let i = apparel_head_index;
+                    apparel_head_index += 1;
+                    i
+                } else {
+                    let i = apparel_body_index;
+                    apparel_body_index += 1;
+                    i
+                };
+                let z = if let Some(layer) = apparel.layer_override {
+                    config.layering.body_z + workers::layer_to_z_delta(layer)
+                } else {
+                    workers::apparel_z(config.layering, apparel.layer, stack_index)
+                };
                 (
                     apparel.tex_path.clone(),
                     Vec2::new(
@@ -300,7 +306,6 @@ mod tests {
             label: "MarineHelmet".to_string(),
             tex_path: "Things/Apparel/Headgear/MarineHelmet".to_string(),
             layer: ApparelLayer::Overhead,
-            render_as_pack: false,
             explicit_skip_hair: false,
             explicit_skip_beard: false,
             has_explicit_skip_flags: false,
@@ -339,7 +344,6 @@ mod tests {
                 label: "Helmet".to_string(),
                 tex_path: "Things/Apparel/Headgear/SimpleHelmet".to_string(),
                 layer: ApparelLayer::Overhead,
-                render_as_pack: false,
                 explicit_skip_hair: false,
                 explicit_skip_beard: false,
                 has_explicit_skip_flags: false,
@@ -355,7 +359,6 @@ mod tests {
                 label: "Shirt".to_string(),
                 tex_path: "Things/Apparel/Body/Shirt".to_string(),
                 layer: ApparelLayer::OnSkin,
-                render_as_pack: false,
                 explicit_skip_hair: false,
                 explicit_skip_beard: false,
                 has_explicit_skip_flags: false,

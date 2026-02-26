@@ -97,7 +97,7 @@ pub fn apparel_z(profile: LayeringProfile, layer: ApparelLayer, stack_index: usi
     } else {
         profile.apparel_body_base_z
     };
-    base + layer.draw_order() as f32 * profile.apparel_step_z + stack_index as f32 * 0.0001
+    base + stack_index as f32 * profile.apparel_step_z
 }
 
 pub fn hediff_z(

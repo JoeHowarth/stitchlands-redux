@@ -59,3 +59,23 @@
 ### Conclusions
 - Silhouette and proportion look closer to RimWorld baselines in south/east/west facings.
 - Remaining fidelity work is primarily in exact node base-layer hierarchy and advanced render-tree node parenting.
+
+## 2026-02-26 - Iteration 4
+
+### Learnings
+- `DynamicPawnRenderNodeSetup_Apparel` stacks layers per parent apparel root (`ApparelBody` vs `ApparelHead`), not with one global apparel index.
+- Decompiled `PawnRenderNodeWorker.ScaleFor` multiplies node draw size with graphic draw size; for most apparel this effectively keeps baseline scale near `1.0` unless worn graphic data overrides it.
+- Real fixture screenshots with `1.5` body/head/apparel basis were consistently oversized and less RimWorld-like.
+
+### Hypotheses
+- Parent-scoped apparel stacking plus `1.0` body/head/apparel basis will improve composition fidelity more than further y-offset tweaking.
+
+### Actions
+- Changed apparel stacking to maintain independent body/head stack indices.
+- Set fixture body/head/apparel base sizes to `1.0`.
+- Kept hair/beard sizing data-driven from head type defs (with `1.0` fallback).
+- Re-ran deterministic 10-variant screenshot loop and regenerated cropped montage.
+
+### Conclusions
+- Silhouettes now track expected pawn proportions better, especially in mixed body+head gear combinations.
+- Remaining mismatch appears concentrated in deeper render-tree parity details (node-parent behavior and some per-item drawData edge cases), not raw size multipliers.

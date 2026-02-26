@@ -45,7 +45,6 @@ pub struct ApparelRenderInput {
     pub label: String,
     pub tex_path: String,
     pub layer: ApparelLayer,
-    pub render_as_pack: bool,
     pub explicit_skip_hair: bool,
     pub explicit_skip_beard: bool,
     pub has_explicit_skip_flags: bool,
@@ -189,19 +188,19 @@ impl Default for LayeringProfile {
     fn default() -> Self {
         Self {
             body_z: -0.60,
-            head_z: -0.58,
-            hair_z: -0.565,
-            beard_z: -0.562,
+            head_z: -0.581_707_3,
+            hair_z: -0.577_317_06,
+            beard_z: -0.578_048_77,
             hair_y_offset: 0.0,
             stump_y_offset: 0.0,
-            apparel_body_base_z: -0.59,
-            apparel_head_base_z: -0.553,
+            apparel_body_base_z: -0.592_682_9,
+            apparel_head_base_z: -0.574_390_3,
             apparel_head_y_offset: 0.0,
-            apparel_step_z: 0.0008,
-            hediff_body_base_z: -0.585,
-            hediff_head_base_z: -0.557,
+            apparel_step_z: 0.000_365_853_7,
+            hediff_body_base_z: -0.597_073_2,
+            hediff_head_base_z: -0.576_219_5,
             hediff_head_y_offset: 0.0,
-            hediff_step_z: 0.0008,
+            hediff_step_z: 0.000_365_853_7,
         }
     }
 }

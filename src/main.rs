@@ -1008,11 +1008,26 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                 let worn_data = apparel_worn_data_for_facing(apparel, facing);
                 let (explicit_skip_hair, explicit_skip_beard, has_explicit_skip_flags) =
                     map_explicit_skip_flags(&apparel.render_skip_flags);
+                let layer_override = apparel_draw_layer_for_facing(apparel, facing).or_else(|| {
+                    if apparel.layer == ApparelLayerDef::Shell
+                        && facing == ComposeFacing::North
+                        && !apparel.shell_rendered_behind_head
+                    {
+                        Some(88.0)
+                    } else if render_as_pack {
+                        match facing {
+                            ComposeFacing::North => Some(93.0),
+                            ComposeFacing::South => Some(-3.0),
+                            ComposeFacing::East | ComposeFacing::West => None,
+                        }
+                    } else {
+                        None
+                    }
+                });
                 ApparelRenderInput {
                     label: apparel.def_name.clone(),
                     tex_path,
                     layer,
-                    render_as_pack,
                     explicit_skip_hair,
                     explicit_skip_beard,
                     has_explicit_skip_flags,
@@ -1020,8 +1035,8 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                     covers_full_head: apparel.covers_full_head,
                     draw_offset: worn_data.offset,
                     draw_scale: worn_data.scale,
-                    layer_override: apparel_draw_layer_for_facing(apparel, facing),
-                    draw_size: apparel.draw_size * 1.5,
+                    layer_override,
+                    draw_size: apparel.draw_size,
                     tint: [
                         apparel.color.r,
                         apparel.color.g,
@@ -1069,20 +1084,20 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             stump_tex_path: None,
             hair_tex_path: hair_tex.map(|p| directional_tex_path(&p, facing)),
             beard_tex_path: beard_tex.map(|p| directional_tex_path(&p, facing)),
-            body_size: Vec2::new(1.5, 1.5),
+            body_size: Vec2::new(1.0, 1.0),
             head_size: head_render
                 .as_ref()
-                .map(|_| Vec2::new(1.5, 1.5))
-                .unwrap_or(Vec2::new(1.5, 1.5)),
+                .map(|_| Vec2::new(1.0, 1.0))
+                .unwrap_or(Vec2::new(1.0, 1.0)),
             stump_size: Vec2::new(0.8, 0.8),
             hair_size: head_render
                 .as_ref()
                 .map(|h| h.hair_mesh_size)
-                .unwrap_or(Vec2::new(1.5, 1.5)),
+                .unwrap_or(Vec2::new(1.0, 1.0)),
             beard_size: head_render
                 .as_ref()
                 .map(|h| h.beard_mesh_size)
-                .unwrap_or(Vec2::new(1.5, 1.5)),
+                .unwrap_or(Vec2::new(1.0, 1.0)),
             body_type: BodyTypeRenderData {
                 head_offset: body_render
                     .map(|b| b.head_offset)

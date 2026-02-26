@@ -123,6 +123,7 @@ pub struct ApparelDef {
     pub render_skip_flags: Option<Vec<ApparelSkipFlagDef>>,
     pub draw_data: ApparelDrawDataDef,
     pub worn_graphic: ApparelWornGraphicDef,
+    pub shell_rendered_behind_head: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -621,6 +622,9 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
     let worn_graphic = child_node(apparel_node, "wornGraphicData")
         .map(parse_apparel_worn_graphic)
         .unwrap_or_default();
+    let shell_rendered_behind_head = child_text(apparel_node, "shellRenderedBehindHead")
+        .and_then(parse_bool)
+        .unwrap_or(false);
 
     Some(ApparelDef {
         def_name,
@@ -633,6 +637,7 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
         render_skip_flags,
         draw_data,
         worn_graphic,
+        shell_rendered_behind_head,
     })
 }
 
