@@ -4,12 +4,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use glam::Vec2;
+use image::RgbaImage;
 use log::info;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
+use crate::interaction::InteractionState;
 use crate::renderer::{Renderer, RendererOptions, SpriteInput, SpriteParams};
 
 pub(crate) struct RenderSprite {
@@ -53,7 +55,9 @@ struct App {
     renderer_options: RendererOptions,
     hidden_window: bool,
     fixed_step: bool,
-    dynamic_inputs: Vec<SpriteInput>,
+    base_dynamic_inputs: Vec<SpriteInput>,
+    interaction: InteractionState,
+    overlay_image: RgbaImage,
     frame_count: u64,
     tick_count: u64,
     step_accumulator: Duration,
@@ -81,7 +85,10 @@ impl App {
             renderer_options,
             hidden_window,
             fixed_step,
-            dynamic_inputs: Vec::new(),
+            base_dynamic_inputs: Vec::new(),
+            interaction: InteractionState::default(),
+            overlay_image: RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255])
+                .expect("1x1 overlay texture"),
             frame_count: 0,
             tick_count: 0,
             step_accumulator: Duration::ZERO,
@@ -100,6 +107,33 @@ impl App {
             self.step_accumulator -= fixed_dt;
             self.tick_count += 1;
         }
+    }
+
+    fn dynamic_with_overlays(&self) -> Vec<SpriteInput> {
+        let mut out = self.base_dynamic_inputs.clone();
+
+        if let Some((x, z)) = self.interaction.hovered_cell {
+            out.push(SpriteInput {
+                image: self.overlay_image.clone(),
+                params: SpriteParams {
+                    world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, 4.0),
+                    size: Vec2::new(1.0, 1.0),
+                    tint: [0.20, 0.90, 1.00, 0.28],
+                },
+            });
+        }
+        if let Some((x, z)) = self.interaction.selected_cell {
+            out.push(SpriteInput {
+                image: self.overlay_image.clone(),
+                params: SpriteParams {
+                    world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, 4.2),
+                    size: Vec2::new(1.0, 1.0),
+                    tint: [1.00, 0.90, 0.20, 0.30],
+                },
+            });
+        }
+
+        out
     }
 }
 
@@ -136,7 +170,7 @@ impl ApplicationHandler for App {
                 params: sprite.params,
             })
             .collect();
-        self.dynamic_inputs = self
+        self.base_dynamic_inputs = self
             .dynamic_sprites
             .drain(..)
             .map(|sprite| SpriteInput {
@@ -153,7 +187,7 @@ impl ApplicationHandler for App {
         .expect("create renderer");
         let mut renderer = renderer;
         renderer
-            .set_dynamic_sprites(self.dynamic_inputs.clone())
+            .set_dynamic_sprites(self.dynamic_with_overlays())
             .expect("set initial dynamic sprites");
 
         self.renderer = Some(renderer);
@@ -184,12 +218,11 @@ impl ApplicationHandler for App {
                 if self.fixed_step {
                     self.run_fixed_step();
                 }
+                let frame_dynamic = self.dynamic_with_overlays();
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;
                 };
-                if !self.dynamic_inputs.is_empty()
-                    && let Err(err) = renderer.set_dynamic_sprites(self.dynamic_inputs.clone())
-                {
+                if let Err(err) = renderer.set_dynamic_sprites(frame_dynamic) {
                     eprintln!("dynamic sprite update error: {err:#}");
                     event_loop.exit();
                     return;
@@ -224,6 +257,29 @@ impl ApplicationHandler for App {
                             event_loop.exit();
                         }
                     }
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if self.fixed_step {
+                    let Some(renderer) = self.renderer.as_ref() else {
+                        return;
+                    };
+                    let world = renderer.screen_to_world(position.x as f32, position.y as f32);
+                    let cell = crate::interaction::world_to_cell(world);
+                    if self.interaction.hovered_cell != Some(cell) {
+                        self.interaction.hovered_cell = Some(cell);
+                        window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                if self.fixed_step {
+                    self.interaction.selected_cell = self.interaction.hovered_cell;
+                    window.request_redraw();
                 }
             }
             _ => {

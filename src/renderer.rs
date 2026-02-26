@@ -403,6 +403,21 @@ impl Renderer {
         self.update_camera_uniform();
     }
 
+    pub fn screen_to_world(&self, screen_x: f32, screen_y: f32) -> Vec2 {
+        let width = self.size.width.max(1) as f32;
+        let height = self.size.height.max(1) as f32;
+        let aspect = width / height;
+        let half_h = self.camera.zoom;
+        let half_w = half_h * aspect;
+
+        let nx = (screen_x / width).clamp(0.0, 1.0);
+        let ny = (screen_y / height).clamp(0.0, 1.0);
+
+        let world_x = self.camera.center.x - half_w + nx * (half_w * 2.0);
+        let world_y = self.camera.center.y + half_h - ny * (half_h * 2.0);
+        Vec2::new(world_x, world_y)
+    }
+
     pub fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
