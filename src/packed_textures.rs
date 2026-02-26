@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::Result;
 use image::RgbaImage;
@@ -8,10 +7,9 @@ use log::{info, warn};
 use unity_asset::environment::{BinaryObjectKey, Environment, EnvironmentObjectRef};
 use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
-use unity_asset_decode::typetree::{
-    CompositeTypeTreeRegistry, JsonTypeTreeRegistry, TpkTypeTreeRegistry, TypeTreeRegistry,
-};
 use unity_asset_decode::unity_version::UnityVersion;
+
+use crate::typetree_registry::load_typetree_registry;
 
 pub struct PackedTextureResolver {
     env: Environment,
@@ -439,34 +437,6 @@ pub fn extract_all_packed_textures(
         exported_textures: exported,
         failed_textures: failed,
     })
-}
-
-fn load_typetree_registry(paths: &[PathBuf]) -> Result<Option<Arc<dyn TypeTreeRegistry>>> {
-    if paths.is_empty() {
-        return Ok(None);
-    }
-
-    let mut registries: Vec<Arc<dyn TypeTreeRegistry>> = Vec::new();
-    for path in paths {
-        let ext = path
-            .extension()
-            .and_then(|v| v.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if ext == "tpk" {
-            let registry = TpkTypeTreeRegistry::from_path(path)?;
-            registries.push(Arc::new(registry));
-        } else {
-            let registry = JsonTypeTreeRegistry::from_path(path)?;
-            registries.push(Arc::new(registry));
-        }
-    }
-
-    if registries.len() == 1 {
-        Ok(Some(registries.remove(0)))
-    } else {
-        Ok(Some(Arc::new(CompositeTypeTreeRegistry::new(registries))))
-    }
 }
 
 pub fn infer_packed_data_roots(input_path: &Path, data_dir: &Path) -> Vec<PathBuf> {

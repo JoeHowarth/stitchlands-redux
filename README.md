@@ -81,6 +81,9 @@ If you have a Unity TypeTree registry (`.json` or `.tpk`), pass it for better pa
 cargo run -- --rimworld-data "$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" --thingdef Steel --typetree-registry /path/to/typetree.tpk
 ```
 
+`--typetree-registry` also accepts a directory (it will recursively load `*.tpk` and `*.json`).
+You can set a path list via `STITCHLANDS_TYPETREE_REGISTRY` as an alternative.
+
 Search packed Texture2D names:
 
 ```bash
