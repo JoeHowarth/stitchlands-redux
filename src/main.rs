@@ -918,22 +918,12 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             head_layer_apparel.push((apparel.clone(), resolved.sprite.image));
         }
     }
-    let mut chosen_apparel: Vec<(ApparelDef, image::RgbaImage)> = Vec::new();
-    if !body_layer_apparel.is_empty() {
-        let idx = pawn_fixture_variant % body_layer_apparel.len();
-        chosen_apparel.push(body_layer_apparel[idx].clone());
-    }
-    if !shell_layer_apparel.is_empty() {
-        let idx = (pawn_fixture_variant / 2) % shell_layer_apparel.len();
-        chosen_apparel.push(shell_layer_apparel[idx].clone());
-    }
-    if !head_layer_apparel.is_empty() {
-        let idx = (pawn_fixture_variant / 3) % head_layer_apparel.len();
-        chosen_apparel.push(head_layer_apparel[idx].clone());
-    }
-    if chosen_apparel.is_empty() {
+    let decodable_apparel_layers = usize::from(!body_layer_apparel.is_empty())
+        + usize::from(!shell_layer_apparel.is_empty())
+        + usize::from(!head_layer_apparel.is_empty());
+    if decodable_apparel_layers == 0 {
         warn!("v1 fixture found no decodable apparel layers; pawns will be unclothed");
-    } else if pawn_focus_only && chosen_apparel.len() < 2 {
+    } else if pawn_focus_only && decodable_apparel_layers < 2 {
         anyhow::bail!(
             "pawn fixture requires at least two decodable apparel layers (body + shell/head)"
         );
@@ -1015,7 +1005,17 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                 .map(|(beard, image)| (beard.tex_path, image)),
         )
         .chain(
-            chosen_apparel
+            body_layer_apparel
+                .iter()
+                .map(|(apparel, image)| (apparel.tex_path.clone(), image.clone())),
+        )
+        .chain(
+            shell_layer_apparel
+                .iter()
+                .map(|(apparel, image)| (apparel.tex_path.clone(), image.clone())),
+        )
+        .chain(
+            head_layer_apparel
                 .iter()
                 .map(|(apparel, image)| (apparel.tex_path.clone(), image.clone())),
         )
@@ -1098,7 +1098,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         });
     }
 
-    for pawn in sorted_pawns(&map.pawns) {
+    for (pawn_index, pawn) in sorted_pawns(&map.pawns).into_iter().enumerate() {
         let facing = if pawn_focus_only {
             ComposeFacing::South
         } else {
@@ -1153,8 +1153,16 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             .as_ref()
             .and_then(|tex| beard_by_tex.get(tex))
             .cloned();
-        let apparel_inputs: Vec<ApparelRenderInput> = chosen_apparel
-            .iter()
+        let selected_apparel_defs = select_fixture_apparel_for_pawn(
+            pawn_index,
+            pawn_fixture_variant,
+            pawn_focus_only,
+            &body_layer_apparel,
+            &shell_layer_apparel,
+            &head_layer_apparel,
+        );
+        let apparel_inputs: Vec<ApparelRenderInput> = selected_apparel_defs
+            .into_iter()
             .map(|(apparel, _)| {
                 let layer = map_apparel_layer(apparel.layer);
                 let render_as_pack = matches!(apparel.layer, ApparelLayerDef::Belt)
@@ -1239,7 +1247,10 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                 }
             })
             .collect();
-        let apparel_labels: Vec<String> = apparel_inputs.iter().map(|a| a.label.clone()).collect();
+        let apparel_labels: Vec<String> = apparel_inputs
+            .iter()
+            .map(|a| format!("{}({:?}: {})", a.label, a.layer, a.tex_path))
+            .collect();
         info!(
             "pawn loadout {} facing={:?} body={} head={} hair={} beard={} apparel=[{}]",
             pawn.label,
@@ -1545,6 +1556,43 @@ fn map_apparel_layer(layer: ApparelLayerDef) -> ComposeApparelLayer {
         ApparelLayerDef::Overhead => ComposeApparelLayer::Overhead,
         ApparelLayerDef::EyeCover => ComposeApparelLayer::EyeCover,
     }
+}
+
+fn select_fixture_apparel_for_pawn<'a>(
+    pawn_index: usize,
+    pawn_fixture_variant: usize,
+    pawn_focus_only: bool,
+    body_layer_apparel: &'a [(ApparelDef, image::RgbaImage)],
+    shell_layer_apparel: &'a [(ApparelDef, image::RgbaImage)],
+    head_layer_apparel: &'a [(ApparelDef, image::RgbaImage)],
+) -> Vec<&'a (ApparelDef, image::RgbaImage)> {
+    let seed = pawn_fixture_variant + pawn_index * 17;
+    let mut out = Vec::new();
+
+    if !body_layer_apparel.is_empty() && (pawn_focus_only || !pawn_index.is_multiple_of(4)) {
+        let idx = seed % body_layer_apparel.len();
+        out.push(&body_layer_apparel[idx]);
+    }
+    if !shell_layer_apparel.is_empty() && (pawn_focus_only || pawn_index.is_multiple_of(2)) {
+        let idx = (seed / 2).max(1) % shell_layer_apparel.len();
+        out.push(&shell_layer_apparel[idx]);
+    }
+    if !head_layer_apparel.is_empty() && (pawn_focus_only || !pawn_index.is_multiple_of(3)) {
+        let idx = (seed / 3).max(1) % head_layer_apparel.len();
+        out.push(&head_layer_apparel[idx]);
+    }
+
+    if out.is_empty() {
+        if !shell_layer_apparel.is_empty() {
+            out.push(&shell_layer_apparel[seed % shell_layer_apparel.len()]);
+        } else if !body_layer_apparel.is_empty() {
+            out.push(&body_layer_apparel[seed % body_layer_apparel.len()]);
+        } else if !head_layer_apparel.is_empty() {
+            out.push(&head_layer_apparel[seed % head_layer_apparel.len()]);
+        }
+    }
+
+    out
 }
 
 fn map_explicit_skip_flags(flags: &Option<Vec<ApparelSkipFlagDef>>) -> (bool, bool, bool) {
