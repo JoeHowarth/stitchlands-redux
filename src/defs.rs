@@ -82,6 +82,40 @@ pub struct ApparelDef {
     pub covers_full_head: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BodyTypeDefRender {
+    pub def_name: String,
+    pub head_offset: Vec2,
+    pub body_graphic_scale: Vec2,
+    pub body_naked_graphic_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeadTypeDefRender {
+    pub def_name: String,
+    pub graphic_path: String,
+    pub narrow: bool,
+    pub hair_mesh_size: Vec2,
+    pub beard_mesh_size: Vec2,
+    pub beard_offset: Vec3,
+    pub beard_offset_x_east: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeardDefRender {
+    pub def_name: String,
+    pub tex_path: String,
+    pub no_graphic: bool,
+    pub offset_narrow_east: Vec3,
+    pub offset_narrow_south: Vec3,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HairDefRender {
+    pub def_name: String,
+    pub tex_path: String,
+}
+
 pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>> {
     let defs_dir = core_data_dir.join("Core").join("Defs");
     if !defs_dir.exists() {
@@ -181,6 +215,270 @@ pub fn load_apparel_defs(core_data_dir: &Path) -> Result<HashMap<String, Apparel
     }
 
     Ok(defs)
+}
+
+pub fn load_body_type_defs(core_data_dir: &Path) -> Result<HashMap<String, BodyTypeDefRender>> {
+    let defs_dir = core_data_dir.join("Core").join("Defs");
+    if !defs_dir.exists() {
+        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
+    }
+
+    let mut defs = HashMap::new();
+    for entry in WalkDir::new(&defs_dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
+            continue;
+        }
+        let xml = fs::read_to_string(entry.path())
+            .with_context(|| format!("failed reading {}", entry.path().display()))?;
+        if let Ok(doc) = Document::parse(&xml) {
+            parse_doc_body_type_defs(&doc, &mut defs);
+        }
+    }
+    Ok(defs)
+}
+
+pub fn load_head_type_defs(core_data_dir: &Path) -> Result<HashMap<String, HeadTypeDefRender>> {
+    let defs_dir = core_data_dir.join("Core").join("Defs");
+    if !defs_dir.exists() {
+        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
+    }
+
+    #[derive(Clone, Default)]
+    struct RawHeadType {
+        key: String,
+        parent_name: Option<String>,
+        def_name: Option<String>,
+        graphic_path: Option<String>,
+        narrow: Option<bool>,
+        hair_mesh_size: Option<Vec2>,
+        beard_mesh_size: Option<Vec2>,
+        beard_offset: Option<Vec3>,
+        beard_offset_x_east: Option<f32>,
+    }
+
+    let mut raw = HashMap::<String, RawHeadType>::new();
+    for entry in WalkDir::new(&defs_dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
+            continue;
+        }
+        let xml = fs::read_to_string(entry.path())
+            .with_context(|| format!("failed reading {}", entry.path().display()))?;
+        let Ok(doc) = Document::parse(&xml) else {
+            continue;
+        };
+        for node in doc.descendants().filter(|n| n.has_tag_name("HeadTypeDef")) {
+            let mut record = RawHeadType::default();
+            let name_attr = node.attribute("Name").map(str::to_string);
+            record.parent_name = node.attribute("ParentName").map(str::to_string);
+            record.def_name = child_text(node, "defName").map(str::to_string);
+            record.graphic_path = child_text(node, "graphicPath").map(str::to_string);
+            record.narrow = child_text(node, "narrow").map(|v| parse_bool(v).unwrap_or(false));
+            record.hair_mesh_size = child_text(node, "hairMeshSize").and_then(parse_vec2_inline);
+            record.beard_mesh_size = child_text(node, "beardMeshSize").and_then(parse_vec2_inline);
+            record.beard_offset = child_text(node, "beardOffset").and_then(parse_vec3_inline);
+            record.beard_offset_x_east =
+                child_text(node, "beardOffsetXEast").and_then(|v| v.parse::<f32>().ok());
+            let Some(key) = record.def_name.clone().or(name_attr) else {
+                continue;
+            };
+            record.key = key.clone();
+            raw.insert(key, record);
+        }
+    }
+
+    fn resolve(
+        key: &str,
+        all: &HashMap<String, RawHeadType>,
+        cache: &mut HashMap<String, HeadTypeDefRender>,
+        stack: &mut Vec<String>,
+    ) -> Option<HeadTypeDefRender> {
+        if let Some(existing) = cache.get(key) {
+            return Some(existing.clone());
+        }
+        if stack.iter().any(|k| k == key) {
+            return None;
+        }
+        let raw = all.get(key)?;
+        stack.push(key.to_string());
+        let parent = raw
+            .parent_name
+            .as_ref()
+            .and_then(|p| resolve(p, all, cache, stack));
+        let resolved = HeadTypeDefRender {
+            def_name: raw.def_name.clone().unwrap_or_else(|| key.to_string()),
+            graphic_path: raw
+                .graphic_path
+                .clone()
+                .or_else(|| parent.as_ref().map(|p| p.graphic_path.clone()))
+                .unwrap_or_default(),
+            narrow: raw
+                .narrow
+                .or_else(|| parent.as_ref().map(|p| p.narrow))
+                .unwrap_or(false),
+            hair_mesh_size: raw
+                .hair_mesh_size
+                .or_else(|| parent.as_ref().map(|p| p.hair_mesh_size))
+                .unwrap_or(Vec2::new(1.5, 1.5)),
+            beard_mesh_size: raw
+                .beard_mesh_size
+                .or_else(|| parent.as_ref().map(|p| p.beard_mesh_size))
+                .unwrap_or(Vec2::new(1.5, 1.5)),
+            beard_offset: raw
+                .beard_offset
+                .or_else(|| parent.as_ref().map(|p| p.beard_offset))
+                .unwrap_or(Vec3::ZERO),
+            beard_offset_x_east: raw
+                .beard_offset_x_east
+                .or_else(|| parent.as_ref().map(|p| p.beard_offset_x_east))
+                .unwrap_or(0.0),
+        };
+        stack.pop();
+        cache.insert(key.to_string(), resolved.clone());
+        Some(resolved)
+    }
+
+    let mut out = HashMap::new();
+    let mut resolved_cache = HashMap::new();
+    for key in raw.keys() {
+        let mut stack = Vec::new();
+        if let Some(head) = resolve(key, &raw, &mut resolved_cache, &mut stack)
+            && !head.def_name.is_empty()
+            && !head.graphic_path.is_empty()
+        {
+            out.insert(head.def_name.clone(), head);
+        }
+    }
+    Ok(out)
+}
+
+pub fn load_beard_defs(core_data_dir: &Path) -> Result<HashMap<String, BeardDefRender>> {
+    let defs_dir = core_data_dir.join("Core").join("Defs");
+    if !defs_dir.exists() {
+        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
+    }
+    let mut defs = HashMap::new();
+    for entry in WalkDir::new(&defs_dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
+            continue;
+        }
+        let xml = fs::read_to_string(entry.path())
+            .with_context(|| format!("failed reading {}", entry.path().display()))?;
+        let Ok(doc) = Document::parse(&xml) else {
+            continue;
+        };
+        for node in doc.descendants().filter(|n| n.has_tag_name("BeardDef")) {
+            let Some(def_name) = child_text(node, "defName").map(str::to_string) else {
+                continue;
+            };
+            let no_graphic = child_text(node, "noGraphic")
+                .and_then(parse_bool)
+                .unwrap_or(false);
+            let tex_path = child_text(node, "texPath")
+                .map(str::to_string)
+                .unwrap_or_default();
+            let offset_narrow_east = child_text(node, "offsetNarrowEast")
+                .and_then(parse_vec3_inline)
+                .unwrap_or(Vec3::ZERO);
+            let offset_narrow_south = child_text(node, "offsetNarrowSouth")
+                .and_then(parse_vec3_inline)
+                .unwrap_or(Vec3::ZERO);
+            defs.insert(
+                def_name.clone(),
+                BeardDefRender {
+                    def_name,
+                    tex_path,
+                    no_graphic,
+                    offset_narrow_east,
+                    offset_narrow_south,
+                },
+            );
+        }
+    }
+    Ok(defs)
+}
+
+pub fn load_hair_defs(core_data_dir: &Path) -> Result<HashMap<String, HairDefRender>> {
+    let defs_dir = core_data_dir.join("Core").join("Defs");
+    if !defs_dir.exists() {
+        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
+    }
+    let mut defs = HashMap::new();
+    for entry in WalkDir::new(&defs_dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
+            continue;
+        }
+        let xml = fs::read_to_string(entry.path())
+            .with_context(|| format!("failed reading {}", entry.path().display()))?;
+        let Ok(doc) = Document::parse(&xml) else {
+            continue;
+        };
+        for node in doc.descendants().filter(|n| n.has_tag_name("HairDef")) {
+            let Some(def_name) = child_text(node, "defName").map(str::to_string) else {
+                continue;
+            };
+            let Some(tex_path) = child_text(node, "texPath").map(str::to_string) else {
+                continue;
+            };
+            defs.insert(def_name.clone(), HairDefRender { def_name, tex_path });
+        }
+    }
+    Ok(defs)
+}
+
+fn parse_doc_body_type_defs(doc: &Document<'_>, defs: &mut HashMap<String, BodyTypeDefRender>) {
+    for node in doc.descendants().filter(|n| n.has_tag_name("BodyTypeDef")) {
+        let Some(def_name) = child_text(node, "defName").map(str::to_string) else {
+            continue;
+        };
+        let Some(head_offset) = child_text(node, "headOffset").and_then(parse_vec2_inline) else {
+            continue;
+        };
+        let body_graphic_scale = child_text(node, "bodyGraphicScale")
+            .and_then(parse_vec2_inline)
+            .unwrap_or(Vec2::ONE);
+        let Some(body_naked_graphic_path) =
+            child_text(node, "bodyNakedGraphicPath").map(str::to_string)
+        else {
+            continue;
+        };
+        defs.insert(
+            def_name.clone(),
+            BodyTypeDefRender {
+                def_name,
+                head_offset,
+                body_graphic_scale,
+                body_naked_graphic_path,
+            },
+        );
+    }
 }
 
 fn parse_doc_thing_defs(doc: &Document<'_>, defs: &mut HashMap<String, ThingDef>) {
@@ -365,6 +663,31 @@ fn parse_vec3(node: Node<'_, '_>) -> Vec3 {
     Vec3::new(x, y, z)
 }
 
+fn parse_vec2_inline(input: &str) -> Option<Vec2> {
+    let cleaned = input.trim().trim_start_matches('(').trim_end_matches(')');
+    let mut parts = cleaned.split(',').map(|p| p.trim().parse::<f32>().ok());
+    let x = parts.next().flatten()?;
+    let y = parts.next().flatten()?;
+    Some(Vec2::new(x, y))
+}
+
+fn parse_vec3_inline(input: &str) -> Option<Vec3> {
+    let cleaned = input.trim().trim_start_matches('(').trim_end_matches(')');
+    let mut parts = cleaned.split(',').map(|p| p.trim().parse::<f32>().ok());
+    let x = parts.next().flatten()?;
+    let y = parts.next().flatten()?;
+    let z = parts.next().flatten()?;
+    Some(Vec3::new(x, y, z))
+}
+
+fn parse_bool(input: &str) -> Option<bool> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,5 +796,41 @@ mod tests {
         assert!(apparel.covers_upper_head);
         assert!(apparel.covers_full_head);
         assert_eq!(apparel.tex_path, "Things/Apparel/Headgear/TestHelmet");
+    }
+
+    #[test]
+    fn resolves_head_type_inheritance() {
+        let xml = r#"
+        <Defs>
+            <HeadTypeDef Name="NarrowBase" Abstract="True">
+                <narrow>true</narrow>
+                <beardOffset>(0, 0, -0.05)</beardOffset>
+                <beardOffsetXEast>-0.05</beardOffsetXEast>
+            </HeadTypeDef>
+            <HeadTypeDef ParentName="NarrowBase">
+                <defName>Male_NarrowNormal</defName>
+                <graphicPath>Things/Pawn/Humanlike/Heads/Male/Male_Narrow_Normal</graphicPath>
+            </HeadTypeDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut raw = HashMap::<String, (Option<String>, Option<String>, Option<String>)>::new();
+        for node in doc.descendants().filter(|n| n.has_tag_name("HeadTypeDef")) {
+            let key = node
+                .attribute("Name")
+                .map(str::to_string)
+                .or_else(|| child_text(node, "defName").map(str::to_string))
+                .unwrap();
+            raw.insert(
+                key,
+                (
+                    node.attribute("ParentName").map(str::to_string),
+                    child_text(node, "defName").map(str::to_string),
+                    child_text(node, "graphicPath").map(str::to_string),
+                ),
+            );
+        }
+        assert!(raw.contains_key("NarrowBase"));
+        assert!(raw.contains_key("Male_NarrowNormal"));
     }
 }

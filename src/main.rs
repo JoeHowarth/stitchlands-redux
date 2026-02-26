@@ -30,8 +30,9 @@ use crate::commands::{
 };
 use crate::default_config::{default_packed_index_path, merge_path_list, resolve_rimworld_input};
 use crate::defs::{
-    ApparelDef, ApparelLayerDef, TerrainDef, ThingDef, load_apparel_defs, load_terrain_defs,
-    load_thing_defs,
+    ApparelDef, ApparelLayerDef, BeardDefRender, BodyTypeDefRender, HairDefRender,
+    HeadTypeDefRender, TerrainDef, ThingDef, load_apparel_defs, load_beard_defs,
+    load_body_type_defs, load_hair_defs, load_head_type_defs, load_terrain_defs, load_thing_defs,
 };
 use crate::packed_index::PackedTextureIndex;
 use crate::packed_textures::infer_packed_data_roots;
@@ -197,6 +198,18 @@ fn main() -> Result<()> {
         "loaded {} apparel defs with graphicData",
         apparel_defs.len()
     );
+    let body_type_defs = load_body_type_defs(&data_dir)
+        .with_context(|| format!("loading body type defs from {}", data_dir.display()))?;
+    info!("loaded {} body type defs", body_type_defs.len());
+    let head_type_defs = load_head_type_defs(&data_dir)
+        .with_context(|| format!("loading head type defs from {}", data_dir.display()))?;
+    info!("loaded {} head type defs", head_type_defs.len());
+    let beard_defs = load_beard_defs(&data_dir)
+        .with_context(|| format!("loading beard defs from {}", data_dir.display()))?;
+    info!("loaded {} beard defs", beard_defs.len());
+    let hair_defs = load_hair_defs(&data_dir)
+        .with_context(|| format!("loading hair defs from {}", data_dir.display()))?;
+    info!("loaded {} hair defs", hair_defs.len());
 
     let mut packed_roots = infer_packed_data_roots(&rimworld_input, &data_dir);
     for extra in &packed_root_overrides {
@@ -366,6 +379,10 @@ fn main() -> Result<()> {
             thing_defs: &defs,
             terrain_defs: &terrain_defs,
             apparel_defs: &apparel_defs,
+            body_type_defs: &body_type_defs,
+            head_type_defs: &head_type_defs,
+            beard_defs: &beard_defs,
+            hair_defs: &hair_defs,
             asset_resolver: &mut asset_resolver,
             width: cli.map_width,
             height: cli.map_height,
@@ -386,6 +403,10 @@ fn main() -> Result<()> {
             thing_defs: &defs,
             terrain_defs: &terrain_defs,
             apparel_defs: &apparel_defs,
+            body_type_defs: &body_type_defs,
+            head_type_defs: &head_type_defs,
+            beard_defs: &beard_defs,
+            hair_defs: &hair_defs,
             asset_resolver: &mut asset_resolver,
             width: cli.map_width.clamp(8, 18),
             height: cli.map_height.clamp(8, 18),
@@ -546,6 +567,10 @@ struct FixtureSceneConfig<'a> {
     thing_defs: &'a std::collections::HashMap<String, ThingDef>,
     terrain_defs: &'a std::collections::HashMap<String, TerrainDef>,
     apparel_defs: &'a std::collections::HashMap<String, ApparelDef>,
+    body_type_defs: &'a std::collections::HashMap<String, BodyTypeDefRender>,
+    head_type_defs: &'a std::collections::HashMap<String, HeadTypeDefRender>,
+    beard_defs: &'a std::collections::HashMap<String, BeardDefRender>,
+    hair_defs: &'a std::collections::HashMap<String, HairDefRender>,
     asset_resolver: &'a mut AssetResolver,
     width: usize,
     height: usize,
@@ -591,6 +616,10 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         thing_defs,
         terrain_defs,
         apparel_defs,
+        body_type_defs,
+        head_type_defs,
+        beard_defs,
+        hair_defs,
         asset_resolver,
         width,
         height,
@@ -637,61 +666,55 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         anyhow::bail!("v1 fixture needs at least one decodable ThingDef");
     }
 
-    let pawn_body_candidates = [
-        "Things/Pawn/Humanlike/Bodies/Naked_Male",
-        "Things/Pawn/Humanlike/Bodies/Naked_Female",
-    ];
-    let pawn_head_candidates = [
-        "Things/Pawn/Humanlike/Heads/Male/Average_Normal",
-        "Things/Pawn/Humanlike/Heads/Female/Average_Normal",
-    ];
-    let pawn_hair_candidates = [
-        "Things/Pawn/Humanlike/Hairs/Shaved",
-        "Things/Pawn/Humanlike/Hairs/Bob",
-        "Things/Pawn/Humanlike/Hairs/Pompadour",
-    ];
-    let pawn_beard_candidates = [
-        "Things/Pawn/Humanlike/Beards/Beard_Full",
-        "Things/Pawn/Humanlike/Beards/Beard_Short",
-    ];
-
-    let mut pawn_body_choices: Vec<(String, image::RgbaImage)> = Vec::new();
-    for tex_path in pawn_body_candidates {
-        let resolved = asset_resolver.resolve_texture_path(data_dir, tex_path)?;
+    let mut body_rows: Vec<_> = body_type_defs.values().collect();
+    body_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
+    let mut pawn_body_choices: Vec<(BodyTypeDefRender, image::RgbaImage)> = Vec::new();
+    for body in body_rows {
+        let resolved =
+            asset_resolver.resolve_texture_path(data_dir, &body.body_naked_graphic_path)?;
         if resolved.sprite.used_fallback {
             continue;
         }
-        pawn_body_choices.push((tex_path.to_string(), resolved.sprite.image));
+        pawn_body_choices.push((body.clone(), resolved.sprite.image));
     }
     if pawn_body_choices.is_empty() {
         anyhow::bail!("v1 fixture needs at least one decodable pawn body texture");
     }
 
-    let mut pawn_head_choices: Vec<(String, image::RgbaImage)> = Vec::new();
-    for tex_path in pawn_head_candidates {
-        let resolved = asset_resolver.resolve_texture_path(data_dir, tex_path)?;
+    let mut head_rows: Vec<_> = head_type_defs.values().collect();
+    head_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
+    let mut pawn_head_choices: Vec<(HeadTypeDefRender, image::RgbaImage)> = Vec::new();
+    for head in head_rows {
+        let resolved = asset_resolver.resolve_texture_path(data_dir, &head.graphic_path)?;
         if resolved.sprite.used_fallback {
             continue;
         }
-        pawn_head_choices.push((tex_path.to_string(), resolved.sprite.image));
+        pawn_head_choices.push((head.clone(), resolved.sprite.image));
     }
 
-    let mut pawn_hair_choices: Vec<(String, image::RgbaImage)> = Vec::new();
-    for tex_path in pawn_hair_candidates {
-        let resolved = asset_resolver.resolve_texture_path(data_dir, tex_path)?;
+    let mut hair_rows: Vec<_> = hair_defs.values().collect();
+    hair_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
+    let mut pawn_hair_choices: Vec<(HairDefRender, image::RgbaImage)> = Vec::new();
+    for hair in hair_rows {
+        let resolved = asset_resolver.resolve_texture_path(data_dir, &hair.tex_path)?;
         if resolved.sprite.used_fallback {
             continue;
         }
-        pawn_hair_choices.push((tex_path.to_string(), resolved.sprite.image));
+        pawn_hair_choices.push((hair.clone(), resolved.sprite.image));
     }
 
-    let mut pawn_beard_choices: Vec<(String, image::RgbaImage)> = Vec::new();
-    for tex_path in pawn_beard_candidates {
-        let resolved = asset_resolver.resolve_texture_path(data_dir, tex_path)?;
+    let mut beard_rows: Vec<_> = beard_defs
+        .values()
+        .filter(|b| !b.no_graphic && !b.tex_path.is_empty())
+        .collect();
+    beard_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
+    let mut pawn_beard_choices: Vec<(BeardDefRender, image::RgbaImage)> = Vec::new();
+    for beard in beard_rows {
+        let resolved = asset_resolver.resolve_texture_path(data_dir, &beard.tex_path)?;
         if resolved.sprite.used_fallback {
             continue;
         }
-        pawn_beard_choices.push((tex_path.to_string(), resolved.sprite.image));
+        pawn_beard_choices.push((beard.clone(), resolved.sprite.image));
     }
 
     let mut apparel_rows: Vec<_> = apparel_defs.values().collect();
@@ -760,13 +783,13 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         pawn_body_choices
             .iter()
             .take(1)
-            .map(|(name, _)| name.clone())
+            .map(|(body, _)| body.body_naked_graphic_path.clone())
             .collect()
     } else {
         pawn_body_choices
             .iter()
             .take(6)
-            .map(|(name, _)| name.clone())
+            .map(|(body, _)| body.body_naked_graphic_path.clone())
             .collect()
     };
     let map = generate_fixture_map(
@@ -785,12 +808,37 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
     for (def, image) in thing_choices {
         thing_by_name.insert(def.def_name.clone(), (def, image));
     }
+    let mut body_by_tex = std::collections::HashMap::new();
+    for (body, _) in &pawn_body_choices {
+        body_by_tex.insert(body.body_naked_graphic_path.clone(), body.clone());
+    }
+    let mut head_by_tex = std::collections::HashMap::new();
+    for (head, _) in &pawn_head_choices {
+        head_by_tex.insert(head.graphic_path.clone(), head.clone());
+    }
+    let mut beard_by_tex = std::collections::HashMap::new();
+    for (beard, _) in &pawn_beard_choices {
+        beard_by_tex.insert(beard.tex_path.clone(), beard.clone());
+    }
     let mut pawn_layer_by_tex = std::collections::HashMap::new();
     for (tex_path, image) in pawn_body_choices
         .into_iter()
-        .chain(pawn_head_choices.into_iter())
-        .chain(pawn_hair_choices.into_iter())
-        .chain(pawn_beard_choices.into_iter())
+        .map(|(body, image)| (body.body_naked_graphic_path, image))
+        .chain(
+            pawn_head_choices
+                .into_iter()
+                .map(|(head, image)| (head.graphic_path, image)),
+        )
+        .chain(
+            pawn_hair_choices
+                .into_iter()
+                .map(|(hair, image)| (hair.tex_path, image)),
+        )
+        .chain(
+            pawn_beard_choices
+                .into_iter()
+                .map(|(beard, image)| (beard.tex_path, image)),
+        )
         .chain(
             chosen_apparel
                 .iter()
@@ -878,6 +926,15 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         };
         let hair_tex = hair_tex_paths.first().cloned();
         let beard_tex = beard_tex_paths.first().cloned();
+        let body_render = body_by_tex.get(&pawn.tex_path);
+        let head_render = head_tex
+            .as_ref()
+            .and_then(|tex| head_by_tex.get(tex))
+            .cloned();
+        let beard_render = beard_tex
+            .as_ref()
+            .and_then(|tex| beard_by_tex.get(tex))
+            .cloned();
         let apparel_inputs: Vec<ApparelRenderInput> = chosen_apparel
             .iter()
             .map(|(apparel, _)| ApparelRenderInput {
@@ -926,17 +983,44 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             stump_tex_path: None,
             hair_tex_path: hair_tex,
             beard_tex_path: beard_tex,
-            body_size: Vec2::new(1.4, 1.4),
-            head_size: Vec2::new(1.05, 1.05),
+            body_size: body_render
+                .map(|b| b.body_graphic_scale)
+                .unwrap_or(Vec2::new(1.0, 1.0)),
+            head_size: head_render
+                .as_ref()
+                .map(|_| Vec2::new(1.0, 1.0))
+                .unwrap_or(Vec2::new(1.0, 1.0)),
             stump_size: Vec2::new(0.8, 0.8),
-            hair_size: Vec2::new(1.1, 1.1),
-            beard_size: Vec2::new(0.95, 0.95),
+            hair_size: head_render
+                .as_ref()
+                .map(|h| h.hair_mesh_size)
+                .unwrap_or(Vec2::new(1.5, 1.5)),
+            beard_size: head_render
+                .as_ref()
+                .map(|h| h.beard_mesh_size)
+                .unwrap_or(Vec2::new(1.5, 1.5)),
             body_type: BodyTypeRenderData {
-                head_offset: Vec2::new(0.0, 0.22),
+                head_offset: body_render
+                    .map(|b| b.head_offset)
+                    .unwrap_or(Vec2::new(0.0, 0.34)),
                 body_size_factor: 1.0,
             },
-            head_type: HeadTypeRenderData::default(),
-            beard_type: BeardTypeRenderData::default(),
+            head_type: head_render
+                .as_ref()
+                .map(|h| HeadTypeRenderData {
+                    narrow: h.narrow,
+                    narrow_crown_horizontal_offset: 0.0,
+                    beard_offset: h.beard_offset,
+                    beard_offset_x_east: h.beard_offset_x_east,
+                })
+                .unwrap_or_default(),
+            beard_type: beard_render
+                .as_ref()
+                .map(|b| BeardTypeRenderData {
+                    offset_narrow_east: b.offset_narrow_east,
+                    offset_narrow_south: b.offset_narrow_south,
+                })
+                .unwrap_or_default(),
             tint: [1.0, 1.0, 1.0, 1.0],
             apparel: apparel_inputs,
             present_body_part_groups: vec![
