@@ -28,7 +28,14 @@ impl PawnDrawParms {
             skip_flags.push(RenderSkipFlag::Beard);
         }
         for item in apparel {
-            if item.covers_full_head {
+            if item.has_explicit_skip_flags {
+                if item.explicit_skip_hair {
+                    push_unique(&mut skip_flags, RenderSkipFlag::Hair);
+                }
+                if item.explicit_skip_beard {
+                    push_unique(&mut skip_flags, RenderSkipFlag::Beard);
+                }
+            } else if item.covers_full_head {
                 push_unique(&mut skip_flags, RenderSkipFlag::Hair);
                 push_unique(&mut skip_flags, RenderSkipFlag::Beard);
                 push_unique(&mut skip_flags, RenderSkipFlag::Eyes);

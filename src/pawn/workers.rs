@@ -24,9 +24,9 @@ pub fn anchor_offset(anchor: AnchorKind, facing: PawnFacing, body: BodyTypeRende
 pub fn head_extra_offset(
     facing: PawnFacing,
     head_type: HeadTypeRenderData,
-    layering: LayeringProfile,
+    _layering: LayeringProfile,
 ) -> Vec2 {
-    let mut out = Vec2::new(0.0, layering.head_y_offset);
+    let mut out = Vec2::ZERO;
     if head_type.narrow && head_type.narrow_crown_horizontal_offset != 0.0 {
         match facing {
             PawnFacing::East => out.x -= head_type.narrow_crown_horizontal_offset,
@@ -44,9 +44,9 @@ pub fn beard_extra_offset(
     facing: PawnFacing,
     head_type: HeadTypeRenderData,
     beard_type: BeardTypeRenderData,
-    layering: LayeringProfile,
+    _layering: LayeringProfile,
 ) -> Vec2 {
-    let mut out = Vec2::new(0.0, layering.beard_y_offset);
+    let mut out = Vec2::ZERO;
     match facing {
         PawnFacing::East => out.x += head_type.beard_offset_x_east,
         PawnFacing::West => out.x -= head_type.beard_offset_x_east,
@@ -112,6 +112,10 @@ pub fn hediff_z(
         profile.hediff_body_base_z
     };
     base + layer_offset as f32 * profile.hediff_step_z + index as f32 * 0.0001
+}
+
+pub fn layer_to_z_delta(layer: f32) -> f32 {
+    layer.clamp(-10.0, 100.0) * 0.000_365_853_7
 }
 
 fn base_head_offset(facing: PawnFacing, body: BodyTypeRenderData) -> Vec2 {

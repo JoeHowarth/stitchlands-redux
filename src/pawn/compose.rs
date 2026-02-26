@@ -185,13 +185,27 @@ fn evaluate_graph(
                 config.layering.beard_z,
             ),
             NodePayload::Apparel(apparel) => {
-                let z = workers::apparel_z(config.layering, apparel.layer, apparel_index);
+                let mut z = workers::apparel_z(config.layering, apparel.layer, apparel_index);
+                if let Some(layer) = apparel.layer_override {
+                    z = config.layering.body_z + workers::layer_to_z_delta(layer);
+                } else if apparel.render_as_pack {
+                    z = match input.facing {
+                        super::model::PawnFacing::South => config.layering.body_z - 0.03,
+                        super::model::PawnFacing::North => config.layering.body_z + 0.03,
+                        super::model::PawnFacing::East | super::model::PawnFacing::West => {
+                            config.layering.body_z + 0.01
+                        }
+                    };
+                }
                 apparel_index += 1;
                 (
                     apparel.tex_path.clone(),
-                    apparel.draw_size,
+                    Vec2::new(
+                        apparel.draw_size.x * apparel.draw_scale.x,
+                        apparel.draw_size.y * apparel.draw_scale.y,
+                    ),
                     apparel.tint,
-                    workers::apparel_offset(apparel.layer, config.layering),
+                    workers::apparel_offset(apparel.layer, config.layering) + apparel.draw_offset,
                     z,
                 )
             }
@@ -286,8 +300,15 @@ mod tests {
             label: "MarineHelmet".to_string(),
             tex_path: "Things/Apparel/Headgear/MarineHelmet".to_string(),
             layer: ApparelLayer::Overhead,
+            render_as_pack: false,
+            explicit_skip_hair: false,
+            explicit_skip_beard: false,
+            has_explicit_skip_flags: false,
             covers_upper_head: false,
             covers_full_head: true,
+            draw_offset: Vec2::ZERO,
+            draw_scale: Vec2::ONE,
+            layer_override: None,
             draw_size: Vec2::new(1.1, 1.1),
             tint: [1.0, 1.0, 1.0, 1.0],
         });
@@ -307,7 +328,7 @@ mod tests {
             .iter()
             .find(|n| n.id.ends_with("::Head"))
             .expect("head node");
-        assert!(head.world_pos.y > input.world_pos.y + 0.45);
+        assert!(head.world_pos.y > input.world_pos.y + 0.25);
     }
 
     #[test]
@@ -318,8 +339,15 @@ mod tests {
                 label: "Helmet".to_string(),
                 tex_path: "Things/Apparel/Headgear/SimpleHelmet".to_string(),
                 layer: ApparelLayer::Overhead,
+                render_as_pack: false,
+                explicit_skip_hair: false,
+                explicit_skip_beard: false,
+                has_explicit_skip_flags: false,
                 covers_upper_head: true,
                 covers_full_head: false,
+                draw_offset: Vec2::ZERO,
+                draw_scale: Vec2::ONE,
+                layer_override: None,
                 draw_size: Vec2::new(1.1, 1.1),
                 tint: [1.0, 1.0, 1.0, 1.0],
             },
@@ -327,8 +355,15 @@ mod tests {
                 label: "Shirt".to_string(),
                 tex_path: "Things/Apparel/Body/Shirt".to_string(),
                 layer: ApparelLayer::OnSkin,
+                render_as_pack: false,
+                explicit_skip_hair: false,
+                explicit_skip_beard: false,
+                has_explicit_skip_flags: false,
                 covers_upper_head: false,
                 covers_full_head: false,
+                draw_offset: Vec2::ZERO,
+                draw_scale: Vec2::ONE,
+                layer_override: None,
                 draw_size: Vec2::new(1.3, 1.3),
                 tint: [1.0, 1.0, 1.0, 1.0],
             },

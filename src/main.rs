@@ -30,8 +30,8 @@ use crate::commands::{
 };
 use crate::default_config::{default_packed_index_path, merge_path_list, resolve_rimworld_input};
 use crate::defs::{
-    ApparelDef, ApparelLayerDef, BeardDefRender, BodyTypeDefRender, HairDefRender,
-    HeadTypeDefRender, TerrainDef, ThingDef, load_apparel_defs, load_beard_defs,
+    ApparelDef, ApparelLayerDef, ApparelSkipFlagDef, BeardDefRender, BodyTypeDefRender,
+    HairDefRender, HeadTypeDefRender, TerrainDef, ThingDef, load_apparel_defs, load_beard_defs,
     load_body_type_defs, load_hair_defs, load_head_type_defs, load_terrain_defs, load_thing_defs,
 };
 use crate::packed_index::PackedTextureIndex;
@@ -125,6 +125,9 @@ struct Cli {
 
     #[arg(long, default_value_t = 0)]
     pawn_fixture_variant: usize,
+
+    #[arg(long)]
+    dump_pawn_trace: Option<PathBuf>,
 
     #[arg(long, default_value_t = 40)]
     map_width: usize,
@@ -391,6 +394,7 @@ fn main() -> Result<()> {
             height: cli.map_height,
             pawn_focus_only: false,
             pawn_fixture_variant: cli.pawn_fixture_variant,
+            dump_pawn_trace: cli.dump_pawn_trace.clone(),
         })?;
         if cli.no_window {
             return Ok(());
@@ -416,6 +420,7 @@ fn main() -> Result<()> {
             height: cli.map_height.clamp(8, 18),
             pawn_focus_only: true,
             pawn_fixture_variant: cli.pawn_fixture_variant,
+            dump_pawn_trace: cli.dump_pawn_trace.clone(),
         })?;
         if cli.no_window {
             return Ok(());
@@ -581,6 +586,7 @@ struct FixtureSceneConfig<'a> {
     height: usize,
     pawn_focus_only: bool,
     pawn_fixture_variant: usize,
+    dump_pawn_trace: Option<PathBuf>,
 }
 
 fn make_missing_def_message(
@@ -631,6 +637,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         height,
         pawn_focus_only,
         pawn_fixture_variant,
+        dump_pawn_trace,
     } = config;
 
     let mut terrain_rows: Vec<_> = terrain_defs.values().collect();
@@ -883,6 +890,11 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
 
     let mut sprites =
         Vec::with_capacity(map.width * map.height + map.things.len() + map.pawns.len());
+    let mut trace_lines = Vec::new();
+    trace_lines.push(format!(
+        "variant={} map={}x{} pawn_focus_only={}",
+        pawn_fixture_variant, map.width, map.height, pawn_focus_only
+    ));
     for z in 0..map.height {
         for x in 0..map.width {
             let name = map.terrain_at(x, z);
@@ -934,6 +946,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
     }
 
     for pawn in sorted_pawns(&map.pawns) {
+        let facing = map_facing(pawn.facing);
         let head_tex = if head_tex_paths.is_empty() {
             None
         } else {
@@ -960,55 +973,103 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             .cloned();
         let apparel_inputs: Vec<ApparelRenderInput> = chosen_apparel
             .iter()
-            .map(|(apparel, _)| ApparelRenderInput {
-                label: apparel.def_name.clone(),
-                tex_path: apparel.tex_path.clone(),
-                layer: map_apparel_layer(apparel.layer),
-                covers_upper_head: apparel.covers_upper_head,
-                covers_full_head: apparel.covers_full_head,
-                draw_size: apparel.draw_size,
-                tint: [
-                    apparel.color.r,
-                    apparel.color.g,
-                    apparel.color.b,
-                    apparel.color.a,
-                ],
+            .map(|(apparel, _)| {
+                let layer = map_apparel_layer(apparel.layer);
+                let render_as_pack = matches!(apparel.layer, ApparelLayerDef::Belt)
+                    || apparel.worn_graphic.render_utility_as_pack;
+                let mut tex_path = apparel.tex_path.clone();
+                if matches!(
+                    layer,
+                    ComposeApparelLayer::OnSkin
+                        | ComposeApparelLayer::Middle
+                        | ComposeApparelLayer::Shell
+                ) && !render_as_pack
+                    && let Some(body) = body_render
+                {
+                    let suffixed = format!("{}_{}", apparel.tex_path, body.def_name);
+                    if let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, &suffixed)
+                        && !resolved.sprite.used_fallback
+                    {
+                        tex_path = suffixed;
+                        let source_label = resolved
+                            .sprite
+                            .source_path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "<unknown>".to_string());
+                        pawn_layer_by_tex.insert(tex_path.clone(), resolved.sprite.image);
+                        trace_lines.push(format!(
+                            "  apparel_path_override {} -> {} ({})",
+                            apparel.def_name, tex_path, source_label
+                        ));
+                    }
+                }
+                let tex_path = directional_tex_path(&tex_path, facing);
+                let worn_data = apparel_worn_data_for_facing(apparel, facing);
+                let (explicit_skip_hair, explicit_skip_beard, has_explicit_skip_flags) =
+                    map_explicit_skip_flags(&apparel.render_skip_flags);
+                ApparelRenderInput {
+                    label: apparel.def_name.clone(),
+                    tex_path,
+                    layer,
+                    render_as_pack,
+                    explicit_skip_hair,
+                    explicit_skip_beard,
+                    has_explicit_skip_flags,
+                    covers_upper_head: apparel.covers_upper_head,
+                    covers_full_head: apparel.covers_full_head,
+                    draw_offset: worn_data.offset,
+                    draw_scale: worn_data.scale,
+                    layer_override: apparel_draw_layer_for_facing(apparel, facing),
+                    draw_size: apparel.draw_size,
+                    tint: [
+                        apparel.color.r,
+                        apparel.color.g,
+                        apparel.color.b,
+                        apparel.color.a,
+                    ],
+                }
             })
             .collect();
-        let hediff_overlays = vec![
-            HediffOverlayInput {
-                label: "TorsoScar".to_string(),
-                tex_path: pawn.tex_path.clone(),
-                anchor: OverlayAnchor::Body,
-                layer_offset: 1,
-                draw_size: Vec2::new(0.75, 0.75),
-                tint: [1.0, 0.45, 0.45, 0.70],
-                required_body_part_group: Some("Torso".to_string()),
-                visible_facing: Some(vec![ComposeFacing::South, ComposeFacing::East]),
-            },
-            HediffOverlayInput {
-                label: "FaceBruise".to_string(),
-                tex_path: head_tex.clone().unwrap_or_else(|| pawn.tex_path.clone()),
-                anchor: OverlayAnchor::Head,
-                layer_offset: 1,
-                draw_size: Vec2::new(0.6, 0.6),
-                tint: [0.75, 0.25, 0.25, 0.60],
-                required_body_part_group: Some("UpperHead".to_string()),
-                visible_facing: None,
-            },
-        ];
+        let hediff_overlays = if std::env::var_os("STITCHLANDS_ENABLE_DEBUG_HEDIFFS").is_some() {
+            vec![
+                HediffOverlayInput {
+                    label: "TorsoScar".to_string(),
+                    tex_path: directional_tex_path(&pawn.tex_path, facing),
+                    anchor: OverlayAnchor::Body,
+                    layer_offset: 1,
+                    draw_size: Vec2::new(0.75, 0.75),
+                    tint: [1.0, 0.45, 0.45, 0.70],
+                    required_body_part_group: Some("Torso".to_string()),
+                    visible_facing: Some(vec![ComposeFacing::South, ComposeFacing::East]),
+                },
+                HediffOverlayInput {
+                    label: "FaceBruise".to_string(),
+                    tex_path: head_tex
+                        .as_ref()
+                        .map(|p| directional_tex_path(p, facing))
+                        .unwrap_or_else(|| directional_tex_path(&pawn.tex_path, facing)),
+                    anchor: OverlayAnchor::Head,
+                    layer_offset: 1,
+                    draw_size: Vec2::new(0.6, 0.6),
+                    tint: [0.75, 0.25, 0.25, 0.60],
+                    required_body_part_group: Some("UpperHead".to_string()),
+                    visible_facing: None,
+                },
+            ]
+        } else {
+            Vec::new()
+        };
         let compose_input = PawnRenderInput {
             label: pawn.label.clone(),
-            facing: map_facing(pawn.facing),
+            facing,
             world_pos: Vec3::new(pawn.cell_x as f32 + 0.5, pawn.cell_z as f32 + 0.5, 0.0),
-            body_tex_path: pawn.tex_path.clone(),
-            head_tex_path: head_tex,
+            body_tex_path: directional_tex_path(&pawn.tex_path, facing),
+            head_tex_path: head_tex.map(|p| directional_tex_path(&p, facing)),
             stump_tex_path: None,
-            hair_tex_path: hair_tex,
-            beard_tex_path: beard_tex,
-            body_size: body_render
-                .map(|b| b.body_graphic_scale)
-                .unwrap_or(Vec2::new(1.0, 1.0)),
+            hair_tex_path: hair_tex.map(|p| directional_tex_path(&p, facing)),
+            beard_tex_path: beard_tex.map(|p| directional_tex_path(&p, facing)),
+            body_size: Vec2::new(1.0, 1.0),
             head_size: head_render
                 .as_ref()
                 .map(|_| Vec2::new(1.0, 1.0))
@@ -1016,12 +1077,12 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             stump_size: Vec2::new(0.8, 0.8),
             hair_size: head_render
                 .as_ref()
-                .map(|h| h.hair_mesh_size)
-                .unwrap_or(Vec2::new(1.5, 1.5)),
+                .map(|h| h.hair_mesh_size * 0.66)
+                .unwrap_or(Vec2::new(1.0, 1.0)),
             beard_size: head_render
                 .as_ref()
-                .map(|h| h.beard_mesh_size)
-                .unwrap_or(Vec2::new(1.5, 1.5)),
+                .map(|h| h.beard_mesh_size * 0.66)
+                .unwrap_or(Vec2::new(1.0, 1.0)),
             body_type: BodyTypeRenderData {
                 head_offset: body_render
                     .map(|b| b.head_offset)
@@ -1055,14 +1116,53 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             draw_flags: PawnDrawFlags::NONE,
         };
         let composed = compose_pawn(&compose_input, &PawnComposeConfig::default());
+        trace_lines.push(format!(
+            "pawn={} body={} head={:?} hair={:?} beard={:?} apparel_count={}",
+            pawn.label,
+            compose_input.body_tex_path,
+            compose_input.head_tex_path,
+            compose_input.hair_tex_path,
+            compose_input.beard_tex_path,
+            compose_input.apparel.len()
+        ));
+        for node in &composed.nodes {
+            trace_lines.push(format!(
+                "  node kind={:?} id={} tex={} pos=({:.3},{:.3},{:.3}) size=({:.3},{:.3}) tint=({:.2},{:.2},{:.2},{:.2})",
+                node.kind,
+                node.id,
+                node.tex_path,
+                node.world_pos.x,
+                node.world_pos.y,
+                node.world_pos.z,
+                node.size.x,
+                node.size.y,
+                node.tint[0],
+                node.tint[1],
+                node.tint[2],
+                node.tint[3]
+            ));
+        }
 
         let body_path = &compose_input.body_tex_path;
+        if !pawn_layer_by_tex.contains_key(body_path)
+            && let Some(image) = resolve_pawn_texture_image(asset_resolver, data_dir, body_path)
+        {
+            pawn_layer_by_tex.insert(body_path.clone(), image);
+        }
         if !pawn_layer_by_tex.contains_key(body_path) {
+            trace_lines.push(format!("  missing_body_image {}", body_path));
             continue;
         }
 
         for node in composed.nodes {
+            if !pawn_layer_by_tex.contains_key(&node.tex_path)
+                && let Some(image) =
+                    resolve_pawn_texture_image(asset_resolver, data_dir, &node.tex_path)
+            {
+                pawn_layer_by_tex.insert(node.tex_path.clone(), image);
+            }
             let Some(image) = pawn_layer_by_tex.get(&node.tex_path) else {
+                trace_lines.push(format!("  missing_node_image {}", node.tex_path));
                 continue;
             };
             sprites.push(RenderSprite {
@@ -1108,6 +1208,11 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             sprites.len()
         );
     }
+    if let Some(path) = dump_pawn_trace {
+        std::fs::write(&path, trace_lines.join("\n"))
+            .with_context(|| format!("writing pawn trace to {}", path.display()))?;
+        info!("wrote pawn trace: {}", path.display());
+    }
     Ok((sprites, camera_focus))
 }
 
@@ -1129,6 +1234,86 @@ fn map_apparel_layer(layer: ApparelLayerDef) -> ComposeApparelLayer {
         ApparelLayerDef::Overhead => ComposeApparelLayer::Overhead,
         ApparelLayerDef::EyeCover => ComposeApparelLayer::EyeCover,
     }
+}
+
+fn map_explicit_skip_flags(flags: &Option<Vec<ApparelSkipFlagDef>>) -> (bool, bool, bool) {
+    let Some(flags) = flags else {
+        return (false, false, false);
+    };
+    let mut skip_hair = false;
+    let mut skip_beard = false;
+    for flag in flags {
+        match flag {
+            ApparelSkipFlagDef::Hair => skip_hair = true,
+            ApparelSkipFlagDef::Beard => skip_beard = true,
+            ApparelSkipFlagDef::None | ApparelSkipFlagDef::Eyes => {}
+        }
+    }
+    (skip_hair, skip_beard, true)
+}
+
+fn apparel_draw_layer_for_facing(apparel: &ApparelDef, facing: ComposeFacing) -> Option<f32> {
+    match facing {
+        ComposeFacing::North => apparel.draw_data.north_layer,
+        ComposeFacing::East => apparel.draw_data.east_layer,
+        ComposeFacing::South => apparel.draw_data.south_layer,
+        ComposeFacing::West => apparel.draw_data.west_layer,
+    }
+}
+
+fn apparel_worn_data_for_facing(
+    apparel: &ApparelDef,
+    facing: ComposeFacing,
+) -> crate::defs::ApparelWornDirectionDef {
+    match facing {
+        ComposeFacing::North => apparel.worn_graphic.north,
+        ComposeFacing::East => apparel.worn_graphic.east,
+        ComposeFacing::South => apparel.worn_graphic.south,
+        ComposeFacing::West => apparel.worn_graphic.west,
+    }
+}
+
+fn directional_tex_path(path: &str, facing: ComposeFacing) -> String {
+    if path.ends_with("_north")
+        || path.ends_with("_south")
+        || path.ends_with("_east")
+        || path.ends_with("_west")
+    {
+        return path.to_string();
+    }
+    let suffix = match facing {
+        ComposeFacing::North => "_north",
+        ComposeFacing::South => "_south",
+        ComposeFacing::East => "_east",
+        ComposeFacing::West => "_east",
+    };
+    format!("{path}{suffix}")
+}
+
+fn strip_directional_suffix(path: &str) -> Option<&str> {
+    path.strip_suffix("_north")
+        .or_else(|| path.strip_suffix("_south"))
+        .or_else(|| path.strip_suffix("_east"))
+        .or_else(|| path.strip_suffix("_west"))
+}
+
+fn resolve_pawn_texture_image(
+    asset_resolver: &mut AssetResolver,
+    data_dir: &Path,
+    path: &str,
+) -> Option<image::RgbaImage> {
+    if let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, path)
+        && !resolved.sprite.used_fallback
+    {
+        return Some(resolved.sprite.image);
+    }
+    if let Some(base_path) = strip_directional_suffix(path)
+        && let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, base_path)
+        && !resolved.sprite.used_fallback
+    {
+        return Some(resolved.sprite.image);
+    }
+    None
 }
 
 struct App {

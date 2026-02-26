@@ -58,6 +58,46 @@ pub enum ApparelLayerDef {
     EyeCover,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ApparelSkipFlagDef {
+    None,
+    Hair,
+    Beard,
+    Eyes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ApparelWornDirectionDef {
+    pub offset: Vec2,
+    pub scale: Vec2,
+}
+
+impl Default for ApparelWornDirectionDef {
+    fn default() -> Self {
+        Self {
+            offset: Vec2::ZERO,
+            scale: Vec2::ONE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ApparelWornGraphicDef {
+    pub render_utility_as_pack: bool,
+    pub north: ApparelWornDirectionDef,
+    pub east: ApparelWornDirectionDef,
+    pub south: ApparelWornDirectionDef,
+    pub west: ApparelWornDirectionDef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ApparelDrawDataDef {
+    pub north_layer: Option<f32>,
+    pub east_layer: Option<f32>,
+    pub south_layer: Option<f32>,
+    pub west_layer: Option<f32>,
+}
+
 impl ApparelLayerDef {
     pub fn draw_order(self) -> i32 {
         match self {
@@ -80,6 +120,9 @@ pub struct ApparelDef {
     pub color: RgbaColor,
     pub covers_upper_head: bool,
     pub covers_full_head: bool,
+    pub render_skip_flags: Option<Vec<ApparelSkipFlagDef>>,
+    pub draw_data: ApparelDrawDataDef,
+    pub worn_graphic: ApparelWornGraphicDef,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -537,6 +580,10 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
     let apparel_node = child_node(node, "apparel")?;
     let graphic_node = child_node(node, "graphicData")?;
     let graphic_data = parse_graphic_data(graphic_node)?;
+    let tex_path = child_text(apparel_node, "wornGraphicPath").map(str::to_string)?;
+    if !tex_path.starts_with("Things/Pawn/Humanlike/Apparel/") {
+        return None;
+    }
 
     let mut layer = ApparelLayerDef::OnSkin;
     if let Some(layers_node) = child_node(apparel_node, "layers") {
@@ -563,14 +610,29 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
         }
     }
 
+    let render_skip_flags = child_node(apparel_node, "renderSkipFlags").map(|skip_node| {
+        list_text_values(skip_node)
+            .filter_map(parse_apparel_skip_flag_def)
+            .collect::<Vec<_>>()
+    });
+    let draw_data = child_node(apparel_node, "drawData")
+        .map(parse_apparel_draw_data)
+        .unwrap_or_default();
+    let worn_graphic = child_node(apparel_node, "wornGraphicData")
+        .map(parse_apparel_worn_graphic)
+        .unwrap_or_default();
+
     Some(ApparelDef {
         def_name,
-        tex_path: graphic_data.tex_path,
+        tex_path,
         layer,
         draw_size: graphic_data.draw_size,
         color: graphic_data.color,
         covers_upper_head,
         covers_full_head,
+        render_skip_flags,
+        draw_data,
+        worn_graphic,
     })
 }
 
@@ -625,6 +687,65 @@ fn parse_apparel_layer_def(input: &str) -> Option<ApparelLayerDef> {
         "EyeCover" => Some(ApparelLayerDef::EyeCover),
         _ => None,
     }
+}
+
+fn parse_apparel_skip_flag_def(input: &str) -> Option<ApparelSkipFlagDef> {
+    let name = input.rsplit('.').next().unwrap_or(input);
+    match name {
+        "None" => Some(ApparelSkipFlagDef::None),
+        "Hair" => Some(ApparelSkipFlagDef::Hair),
+        "Beard" => Some(ApparelSkipFlagDef::Beard),
+        "Eyes" => Some(ApparelSkipFlagDef::Eyes),
+        _ => None,
+    }
+}
+
+fn parse_apparel_draw_data(node: Node<'_, '_>) -> ApparelDrawDataDef {
+    let mut out = ApparelDrawDataDef::default();
+    for child in node.children().filter(|c| c.is_element()) {
+        let key = child.tag_name().name().to_ascii_lowercase();
+        let layer = child_text(child, "layer").and_then(|t| t.parse::<f32>().ok());
+        match key.as_str() {
+            "datanorth" => out.north_layer = layer,
+            "dataeast" => out.east_layer = layer,
+            "datasouth" => out.south_layer = layer,
+            "datawest" => out.west_layer = layer,
+            _ => {}
+        }
+    }
+    out
+}
+
+fn parse_apparel_worn_graphic(node: Node<'_, '_>) -> ApparelWornGraphicDef {
+    let mut out = ApparelWornGraphicDef {
+        render_utility_as_pack: child_text(node, "renderUtilityAsPack")
+            .and_then(parse_bool)
+            .unwrap_or(false),
+        ..Default::default()
+    };
+    if let Some(north) = child_node(node, "north") {
+        out.north = parse_apparel_worn_direction(north);
+    }
+    if let Some(east) = child_node(node, "east") {
+        out.east = parse_apparel_worn_direction(east);
+    }
+    if let Some(south) = child_node(node, "south") {
+        out.south = parse_apparel_worn_direction(south);
+    }
+    if let Some(west) = child_node(node, "west") {
+        out.west = parse_apparel_worn_direction(west);
+    }
+    out
+}
+
+fn parse_apparel_worn_direction(node: Node<'_, '_>) -> ApparelWornDirectionDef {
+    let offset = child_text(node, "offset")
+        .and_then(parse_vec2_inline)
+        .unwrap_or(Vec2::ZERO);
+    let scale = child_text(node, "scale")
+        .and_then(parse_vec2_inline)
+        .unwrap_or(Vec2::ONE);
+    ApparelWornDirectionDef { offset, scale }
 }
 
 fn parse_color(input: &str) -> Option<RgbaColor> {
@@ -771,11 +892,12 @@ mod tests {
             <ThingDef>
                 <defName>Apparel_TestHelmet</defName>
                 <graphicData>
-                    <texPath>Things/Apparel/Headgear/TestHelmet</texPath>
+                    <texPath>Things/Pawn/Humanlike/Apparel/TestHelmet/TestHelmet</texPath>
                     <drawSize><x>1.1</x><y>1.1</y></drawSize>
                     <color>0.8 0.8 0.9 1.0</color>
                 </graphicData>
                 <apparel>
+                    <wornGraphicPath>Things/Pawn/Humanlike/Apparel/TestHelmet/TestHelmet</wornGraphicPath>
                     <layers>
                         <li>OnSkin</li>
                         <li>Overhead</li>
@@ -795,7 +917,10 @@ mod tests {
         assert_eq!(apparel.layer, ApparelLayerDef::Overhead);
         assert!(apparel.covers_upper_head);
         assert!(apparel.covers_full_head);
-        assert_eq!(apparel.tex_path, "Things/Apparel/Headgear/TestHelmet");
+        assert_eq!(
+            apparel.tex_path,
+            "Things/Pawn/Humanlike/Apparel/TestHelmet/TestHelmet"
+        );
     }
 
     #[test]
