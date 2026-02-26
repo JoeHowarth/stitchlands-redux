@@ -66,7 +66,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<Co
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: render_sprites,
         dynamic_sprites: Vec::new(),
-        runtime_hints: None,
+        runtime: None,
         screenshot: fixture.view.screenshot,
         camera_focus: Some(camera_focus),
         render_options,
@@ -106,7 +106,7 @@ pub fn run_audit(ctx: &mut DispatchContext<'_>, audit: AuditCmd) -> Result<Comma
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: render_sprites,
         dynamic_sprites: Vec::new(),
-        runtime_hints: None,
+        runtime: None,
         screenshot: audit.view.screenshot,
         camera_focus: Some(camera_focus),
         render_options,

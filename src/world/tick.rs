@@ -126,4 +126,38 @@ mod tests {
             .expect("pawn");
         assert_eq!((pawn.cell_x, pawn.cell_z), (5, 4));
     }
+
+    #[test]
+    fn blocked_destination_rejected() {
+        let mut world = fixture_world();
+        assert!(!issue_move_intent(&mut world, 0, (3, 2)));
+        let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
+        assert!(pawn.path_cells.is_empty());
+    }
+
+    #[test]
+    fn zero_length_move_keeps_pawn_stationary() {
+        let mut world = fixture_world();
+        assert!(issue_move_intent(&mut world, 0, (1, 1)));
+        tick_world(&mut world, 1.0 / 60.0);
+        let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
+        assert_eq!((pawn.cell_x, pawn.cell_z), (1, 1));
+        assert_eq!(pawn.path_cells, vec![(1, 1)]);
+        assert_eq!(pawn.path_index, 1);
+    }
+
+    #[test]
+    fn repeated_move_reissue_retargets_path() {
+        let mut world = fixture_world();
+        assert!(issue_move_intent(&mut world, 0, (5, 4)));
+        for _ in 0..30 {
+            tick_world(&mut world, 1.0 / 60.0);
+        }
+        assert!(issue_move_intent(&mut world, 0, (0, 4)));
+        for _ in 0..240 {
+            tick_world(&mut world, 1.0 / 60.0);
+        }
+        let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
+        assert_eq!((pawn.cell_x, pawn.cell_z), (0, 4));
+    }
 }

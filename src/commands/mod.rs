@@ -41,7 +41,7 @@ pub enum CommandAction {
 pub struct LaunchSpec {
     pub static_sprites: Vec<crate::viewer::RenderSprite>,
     pub dynamic_sprites: Vec<crate::viewer::RenderSprite>,
-    pub runtime_hints: Option<crate::viewer::RuntimeHints>,
+    pub runtime: Option<crate::runtime::v2::V2Runtime>,
     pub screenshot: Option<PathBuf>,
     pub camera_focus: Option<Vec2>,
     pub render_options: RendererOptions,

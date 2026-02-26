@@ -8,6 +8,7 @@ mod interaction;
 mod path;
 mod pawn;
 mod renderer;
+mod runtime;
 mod scene;
 mod viewer;
 mod world;
@@ -79,7 +80,7 @@ fn main() -> Result<()> {
                 renderer_options: spec.render_options,
                 hidden_window: spec.hide_window,
                 fixed_step: spec.fixed_step,
-                runtime_hints: spec.runtime_hints,
+                runtime: spec.runtime,
             })
         }
     }

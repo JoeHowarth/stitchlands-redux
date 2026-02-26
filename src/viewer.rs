@@ -1,6 +1,5 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use glam::Vec2;
@@ -12,8 +11,8 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-use crate::interaction::InteractionState;
 use crate::renderer::{Renderer, RendererOptions, SpriteInput, SpriteParams};
+use crate::runtime::v2::{InteractionOutcome, V2Runtime, render_bridge::compose_dynamic_sprites};
 
 pub(crate) struct RenderSprite {
     pub(crate) def_name: String,
@@ -21,23 +20,6 @@ pub(crate) struct RenderSprite {
     pub(crate) params: SpriteParams,
     pub(crate) used_fallback: bool,
     pub(crate) pawn_id: Option<usize>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimePawnHint {
-    pub(crate) id: usize,
-    pub(crate) cell_x: i32,
-    pub(crate) cell_z: i32,
-    pub(crate) world_pos: Vec2,
-    pub(crate) move_speed_cells_per_sec: f32,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeHints {
-    pub(crate) map_width: usize,
-    pub(crate) map_height: usize,
-    pub(crate) blocking_cells: Vec<(i32, i32)>,
-    pub(crate) pawns: Vec<RuntimePawnHint>,
 }
 
 pub(crate) struct ViewerLaunch {
@@ -48,7 +30,7 @@ pub(crate) struct ViewerLaunch {
     pub(crate) renderer_options: RendererOptions,
     pub(crate) hidden_window: bool,
     pub(crate) fixed_step: bool,
-    pub(crate) runtime_hints: Option<RuntimeHints>,
+    pub(crate) runtime: Option<V2Runtime>,
 }
 
 pub(crate) fn run_viewer(launch: ViewerLaunch) -> Result<()> {
@@ -71,59 +53,13 @@ struct App {
     fixed_step: bool,
     base_dynamic_inputs: Vec<SpriteInput>,
     base_dynamic_pawn_ids: Vec<Option<usize>>,
-    interaction: InteractionState,
     overlay_image: RgbaImage,
     map_bounds: Option<(usize, usize)>,
-    runtime_state: Option<RuntimeState>,
-    frame_count: u64,
-    tick_count: u64,
-    step_accumulator: Duration,
-    last_step_instant: Option<Instant>,
-}
-
-#[derive(Debug, Clone)]
-struct RuntimePawnState {
-    id: usize,
-    cell_x: i32,
-    cell_z: i32,
-    initial_world_pos: Vec2,
-    world_pos: Vec2,
-    move_speed_cells_per_sec: f32,
-    path_cells: Vec<(i32, i32)>,
-    path_index: usize,
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeState {
-    map_width: usize,
-    map_height: usize,
-    blocking_cells: Vec<(i32, i32)>,
-    pawns: Vec<RuntimePawnState>,
-    selected_pawn_id: Option<usize>,
+    runtime: Option<V2Runtime>,
 }
 
 impl App {
     fn new(launch: ViewerLaunch) -> Self {
-        let runtime_state = launch.runtime_hints.map(|hints| RuntimeState {
-            map_width: hints.map_width,
-            map_height: hints.map_height,
-            blocking_cells: hints.blocking_cells,
-            pawns: hints
-                .pawns
-                .into_iter()
-                .map(|pawn| RuntimePawnState {
-                    id: pawn.id,
-                    cell_x: pawn.cell_x,
-                    cell_z: pawn.cell_z,
-                    initial_world_pos: pawn.world_pos,
-                    world_pos: pawn.world_pos,
-                    move_speed_cells_per_sec: pawn.move_speed_cells_per_sec,
-                    path_cells: Vec::new(),
-                    path_index: 0,
-                })
-                .collect(),
-            selected_pawn_id: None,
-        });
         Self {
             static_sprites: launch.static_sprites,
             dynamic_sprites: launch.dynamic_sprites,
@@ -137,156 +73,25 @@ impl App {
             fixed_step: launch.fixed_step,
             base_dynamic_inputs: Vec::new(),
             base_dynamic_pawn_ids: Vec::new(),
-            interaction: InteractionState::default(),
             overlay_image: RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255])
                 .expect("1x1 overlay texture"),
             map_bounds: None,
-            runtime_state,
-            frame_count: 0,
-            tick_count: 0,
-            step_accumulator: Duration::ZERO,
-            last_step_instant: None,
+            runtime: launch.runtime,
         }
-    }
-
-    fn run_fixed_step(&mut self) {
-        let now = Instant::now();
-        let previous = self.last_step_instant.unwrap_or(now);
-        self.last_step_instant = Some(now);
-        self.step_accumulator += now.saturating_duration_since(previous);
-
-        let fixed_dt = Duration::from_secs_f32(1.0 / 60.0);
-        while self.step_accumulator >= fixed_dt {
-            self.step_accumulator -= fixed_dt;
-            self.tick_count += 1;
-            self.tick_runtime(fixed_dt.as_secs_f32());
-        }
-    }
-
-    fn tick_runtime(&mut self, dt_seconds: f32) {
-        let Some(runtime) = self.runtime_state.as_mut() else {
-            return;
-        };
-        for pawn in &mut runtime.pawns {
-            if pawn.path_index >= pawn.path_cells.len() {
-                continue;
-            }
-            let target_cell = pawn.path_cells[pawn.path_index];
-            let target = Vec2::new(target_cell.0 as f32 + 0.5, target_cell.1 as f32 + 0.5);
-            let to_target = target - pawn.world_pos;
-            let distance = to_target.length();
-            let max_step = pawn.move_speed_cells_per_sec.max(0.1) * dt_seconds.max(0.0);
-            if distance <= max_step {
-                pawn.world_pos = target;
-                pawn.cell_x = target_cell.0;
-                pawn.cell_z = target_cell.1;
-                pawn.path_index += 1;
-            } else if distance > 0.0 {
-                pawn.world_pos += to_target / distance * max_step;
-            }
-        }
-    }
-
-    fn issue_pawn_move(&mut self, pawn_id: usize, dest: (i32, i32)) -> bool {
-        let Some(runtime) = self.runtime_state.as_mut() else {
-            return false;
-        };
-        let Some(pawn_index) = runtime.pawns.iter().position(|pawn| pawn.id == pawn_id) else {
-            return false;
-        };
-        let start = (
-            runtime.pawns[pawn_index].cell_x,
-            runtime.pawns[pawn_index].cell_z,
-        );
-        let mut grid = crate::path::PathGrid::new(runtime.map_width, runtime.map_height);
-        for &(x, z) in &runtime.blocking_cells {
-            grid.set_blocked(x, z, true);
-        }
-        for pawn in &runtime.pawns {
-            grid.set_blocked(pawn.cell_x, pawn.cell_z, true);
-        }
-        grid.set_blocked(start.0, start.1, false);
-        let Some(path) = crate::path::find_path(&grid, start, dest) else {
-            return false;
-        };
-        runtime.pawns[pawn_index].path_cells = path;
-        runtime.pawns[pawn_index].path_index = 1;
-        true
     }
 
     fn dynamic_with_overlays(&self) -> Vec<SpriteInput> {
-        let mut out = self.base_dynamic_inputs.clone();
-        if let Some(runtime) = &self.runtime_state {
-            for (sprite, pawn_id) in out.iter_mut().zip(self.base_dynamic_pawn_ids.iter()) {
-                let Some(pawn_id) = pawn_id else {
-                    continue;
-                };
-                let Some(pawn) = runtime.pawns.iter().find(|p| p.id == *pawn_id) else {
-                    continue;
-                };
-                let delta = pawn.world_pos - pawn.initial_world_pos;
-                sprite.params.world_pos.x += delta.x;
-                sprite.params.world_pos.y += delta.y;
-            }
-            if let Some(selected_id) = runtime.selected_pawn_id
-                && let Some(selected) = runtime.pawns.iter().find(|pawn| pawn.id == selected_id)
-            {
-                for cell in selected.path_cells.iter().skip(selected.path_index) {
-                    out.push(SpriteInput {
-                        image: self.overlay_image.clone(),
-                        params: SpriteParams {
-                            world_pos: glam::Vec3::new(
-                                cell.0 as f32 + 0.5,
-                                cell.1 as f32 + 0.5,
-                                -0.23,
-                            ),
-                            size: Vec2::new(0.36, 0.36),
-                            tint: [0.35, 1.00, 0.45, 0.65],
-                        },
-                    });
-                }
-            }
+        if let Some(runtime) = &self.runtime {
+            let frame = runtime.frame_output();
+            compose_dynamic_sprites(
+                &self.base_dynamic_inputs,
+                &self.base_dynamic_pawn_ids,
+                &self.overlay_image,
+                &frame,
+            )
+        } else {
+            self.base_dynamic_inputs.clone()
         }
-
-        if let Some((x, z)) = self.interaction.hovered_cell {
-            out.push(SpriteInput {
-                image: self.overlay_image.clone(),
-                params: SpriteParams {
-                    world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.22),
-                    size: Vec2::new(1.04, 1.04),
-                    tint: [0.20, 0.90, 1.00, 0.28],
-                },
-            });
-        }
-        if let Some(runtime) = &self.runtime_state {
-            if let Some(selected_id) = runtime.selected_pawn_id
-                && let Some(selected) = runtime.pawns.iter().find(|pawn| pawn.id == selected_id)
-            {
-                out.push(SpriteInput {
-                    image: self.overlay_image.clone(),
-                    params: SpriteParams {
-                        world_pos: glam::Vec3::new(
-                            selected.world_pos.x,
-                            selected.world_pos.y,
-                            -0.21,
-                        ),
-                        size: Vec2::new(1.16, 1.16),
-                        tint: [1.00, 0.90, 0.20, 0.30],
-                    },
-                });
-            }
-        } else if let Some((x, z)) = self.interaction.selected_cell {
-            out.push(SpriteInput {
-                image: self.overlay_image.clone(),
-                params: SpriteParams {
-                    world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.21),
-                    size: Vec2::new(1.10, 1.10),
-                    tint: [1.00, 0.90, 0.20, 0.30],
-                },
-            });
-        }
-
-        out
     }
 }
 
@@ -370,8 +175,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if self.fixed_step {
-                    self.run_fixed_step();
+                if self.fixed_step
+                    && let Some(runtime) = self.runtime.as_mut()
+                {
+                    runtime.run_fixed_step();
                 }
                 let frame_dynamic = self.dynamic_with_overlays();
                 let Some(renderer) = self.renderer.as_mut() else {
@@ -389,12 +196,15 @@ impl ApplicationHandler for App {
                 };
                 match renderer.render(capture) {
                     Ok(captured) => {
-                        self.frame_count += 1;
-                        if self.fixed_step && self.frame_count.is_multiple_of(120) {
-                            info!(
-                                "v2 runtime counters: frames={} ticks={}",
-                                self.frame_count, self.tick_count
-                            );
+                        if let Some(runtime) = self.runtime.as_mut() {
+                            runtime.bump_frame_count();
+                            if self.fixed_step && runtime.frame_count().is_multiple_of(120) {
+                                info!(
+                                    "v2 runtime counters: frames={} ticks={}",
+                                    runtime.frame_count(),
+                                    runtime.tick_count()
+                                );
+                            }
                         }
                         if captured {
                             self.screenshot_taken = true;
@@ -421,20 +231,22 @@ impl ApplicationHandler for App {
                     };
                     let world = renderer.screen_to_world(position.x as f32, position.y as f32);
                     let bounds = self
-                        .runtime_state
+                        .runtime
                         .as_ref()
-                        .map(|r| (r.map_width, r.map_height))
+                        .map(|r| r.map_bounds())
                         .or(self.map_bounds);
                     let cell = if let Some((w, h)) = bounds {
                         crate::interaction::world_to_cell_in_bounds(world, w, h)
                     } else {
                         Some(crate::interaction::world_to_cell(world))
                     };
-                    if self.interaction.hovered_cell != cell {
-                        self.interaction.hovered_cell = cell;
-                        if let Some(window) = self.window.as_ref() {
-                            window.request_redraw();
-                        }
+                    let hovered_changed = self
+                        .runtime
+                        .as_mut()
+                        .map(|runtime| runtime.on_cursor_cell(cell))
+                        .unwrap_or(false);
+                    if hovered_changed && let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
                     }
                 }
             }
@@ -444,37 +256,28 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 if self.fixed_step {
-                    if let Some(cell) = self.interaction.hovered_cell {
-                        let mut selected_hit: Option<usize> = None;
-                        let mut move_from_selected: Option<usize> = None;
-                        if let Some(runtime) = self.runtime_state.as_ref() {
-                            selected_hit = runtime
-                                .pawns
-                                .iter()
-                                .find(|pawn| pawn.cell_x == cell.0 && pawn.cell_z == cell.1)
-                                .map(|pawn| pawn.id);
-                            if selected_hit.is_none() {
-                                move_from_selected = runtime.selected_pawn_id;
-                            }
-                        }
-                        if let Some(hit_pawn_id) = selected_hit {
-                            if let Some(runtime) = self.runtime_state.as_mut() {
-                                runtime.selected_pawn_id = Some(hit_pawn_id);
-                            }
-                            self.interaction.selected_cell = Some(cell);
-                            info!(
-                                "selected pawn id={} at cell=({}, {})",
-                                hit_pawn_id, cell.0, cell.1
-                            );
-                        } else if let Some(selected_pawn_id) = move_from_selected {
-                            if self.issue_pawn_move(selected_pawn_id, cell) {
+                    if let Some(runtime) = self.runtime.as_mut() {
+                        match runtime.on_left_click() {
+                            InteractionOutcome::SelectedPawn { pawn_id, cell } => {
                                 info!(
-                                    "issued move pawn id={} to cell=({}, {})",
-                                    selected_pawn_id, cell.0, cell.1
+                                    "selected pawn id={} at cell=({}, {})",
+                                    pawn_id, cell.0, cell.1
                                 );
                             }
-                        } else {
-                            self.interaction.selected_cell = Some(cell);
+                            InteractionOutcome::IssuedMove { pawn_id, dest } => {
+                                info!(
+                                    "issued move pawn id={} to cell=({}, {})",
+                                    pawn_id, dest.0, dest.1
+                                );
+                                if let Some(is_idle) = runtime.selected_pawn_idle()
+                                    && is_idle
+                                {
+                                    info!("selected pawn id={} remains idle", pawn_id);
+                                }
+                            }
+                            InteractionOutcome::NoOp
+                            | InteractionOutcome::SelectedCell(_)
+                            | InteractionOutcome::ClearedSelection => {}
                         }
                     }
                     if let Some(window) = self.window.as_ref() {
@@ -488,10 +291,9 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 if self.fixed_step {
-                    if let Some(runtime) = self.runtime_state.as_mut() {
-                        runtime.selected_pawn_id = None;
+                    if let Some(runtime) = self.runtime.as_mut() {
+                        let _ = runtime.clear_selection();
                     }
-                    self.interaction.selected_cell = None;
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
@@ -502,10 +304,9 @@ impl ApplicationHandler for App {
                     && event.state == ElementState::Pressed
                     && let PhysicalKey::Code(KeyCode::Escape) = event.physical_key
                 {
-                    if let Some(runtime) = self.runtime_state.as_mut() {
-                        runtime.selected_pawn_id = None;
+                    if let Some(runtime) = self.runtime.as_mut() {
+                        let _ = runtime.clear_selection();
                     }
-                    self.interaction.selected_cell = None;
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
