@@ -8,6 +8,7 @@ pub enum PawnNodeKind {
     Hair,
     Beard,
     Apparel,
+    Hediff,
 }
 
 #[derive(Debug, Clone)]

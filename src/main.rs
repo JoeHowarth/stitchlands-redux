@@ -29,10 +29,14 @@ use crate::commands::{
     run_terrain_probe,
 };
 use crate::default_config::{default_packed_index_path, merge_path_list, resolve_rimworld_input};
-use crate::defs::{TerrainDef, ThingDef, load_terrain_defs, load_thing_defs};
+use crate::defs::{
+    ApparelDef, ApparelLayerDef, TerrainDef, ThingDef, load_apparel_defs, load_terrain_defs,
+    load_thing_defs,
+};
 use crate::packed_index::PackedTextureIndex;
 use crate::packed_textures::infer_packed_data_roots;
 use crate::pawn::{
+    ApparelLayer as ComposeApparelLayer, ApparelRenderInput, HediffOverlayInput, OverlayAnchor,
     PawnComposeConfig, PawnDrawFlags, PawnFacing as ComposeFacing, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::{Renderer, SpriteInput, SpriteParams};
@@ -182,6 +186,12 @@ fn main() -> Result<()> {
     info!(
         "loaded {} terrain defs with texturePath",
         terrain_defs.len()
+    );
+    let apparel_defs = load_apparel_defs(&data_dir)
+        .with_context(|| format!("loading apparel defs from {}", data_dir.display()))?;
+    info!(
+        "loaded {} apparel defs with graphicData",
+        apparel_defs.len()
     );
 
     let mut packed_roots = infer_packed_data_roots(&rimworld_input, &data_dir);
@@ -351,6 +361,7 @@ fn main() -> Result<()> {
             data_dir: &data_dir,
             thing_defs: &defs,
             terrain_defs: &terrain_defs,
+            apparel_defs: &apparel_defs,
             asset_resolver: &mut asset_resolver,
             width: cli.map_width,
             height: cli.map_height,
@@ -509,6 +520,7 @@ struct FixtureSceneConfig<'a> {
     data_dir: &'a Path,
     thing_defs: &'a std::collections::HashMap<String, ThingDef>,
     terrain_defs: &'a std::collections::HashMap<String, TerrainDef>,
+    apparel_defs: &'a std::collections::HashMap<String, ApparelDef>,
     asset_resolver: &'a mut AssetResolver,
     width: usize,
     height: usize,
@@ -552,6 +564,7 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         data_dir,
         thing_defs,
         terrain_defs,
+        apparel_defs,
         asset_resolver,
         width,
         height,
@@ -654,6 +667,50 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         pawn_beard_choices.push((tex_path.to_string(), resolved.sprite.image));
     }
 
+    let mut apparel_rows: Vec<_> = apparel_defs.values().collect();
+    apparel_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
+    let mut chosen_apparel: Vec<(ApparelDef, image::RgbaImage)> = Vec::new();
+    let mut picked_body_layer = false;
+    let mut picked_shell_layer = false;
+    let mut picked_head_layer = false;
+    for apparel in apparel_rows {
+        let resolved = asset_resolver.resolve_texture_path(data_dir, apparel.tex_path.as_str())?;
+        if resolved.sprite.used_fallback {
+            continue;
+        }
+
+        let is_body = matches!(
+            apparel.layer,
+            ApparelLayerDef::OnSkin | ApparelLayerDef::Middle
+        );
+        let is_shellish = matches!(
+            apparel.layer,
+            ApparelLayerDef::Shell | ApparelLayerDef::Belt
+        );
+        let is_head = matches!(
+            apparel.layer,
+            ApparelLayerDef::Overhead | ApparelLayerDef::EyeCover
+        );
+
+        if is_body && !picked_body_layer {
+            picked_body_layer = true;
+            chosen_apparel.push((apparel.clone(), resolved.sprite.image));
+        } else if is_shellish && !picked_shell_layer {
+            picked_shell_layer = true;
+            chosen_apparel.push((apparel.clone(), resolved.sprite.image));
+        } else if is_head && !picked_head_layer {
+            picked_head_layer = true;
+            chosen_apparel.push((apparel.clone(), resolved.sprite.image));
+        }
+
+        if picked_body_layer && picked_shell_layer && picked_head_layer {
+            break;
+        }
+    }
+    if chosen_apparel.is_empty() {
+        warn!("v1 fixture found no decodable apparel layers; pawns will be unclothed");
+    }
+
     let terrain_names = [
         chosen_terrain[0].0.as_str(),
         chosen_terrain[1].0.as_str(),
@@ -691,6 +748,11 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         .chain(pawn_head_choices.into_iter())
         .chain(pawn_hair_choices.into_iter())
         .chain(pawn_beard_choices.into_iter())
+        .chain(
+            chosen_apparel
+                .iter()
+                .map(|(apparel, image)| (apparel.tex_path.clone(), image.clone())),
+        )
     {
         pawn_layer_by_tex.insert(tex_path, image);
     }
@@ -773,6 +835,45 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
         };
         let hair_tex = hair_tex_paths.first().cloned();
         let beard_tex = beard_tex_paths.first().cloned();
+        let apparel_inputs: Vec<ApparelRenderInput> = chosen_apparel
+            .iter()
+            .map(|(apparel, _)| ApparelRenderInput {
+                label: apparel.def_name.clone(),
+                tex_path: apparel.tex_path.clone(),
+                layer: map_apparel_layer(apparel.layer),
+                covers_upper_head: apparel.covers_upper_head,
+                covers_full_head: apparel.covers_full_head,
+                draw_size: apparel.draw_size,
+                tint: [
+                    apparel.color.r,
+                    apparel.color.g,
+                    apparel.color.b,
+                    apparel.color.a,
+                ],
+            })
+            .collect();
+        let hediff_overlays = vec![
+            HediffOverlayInput {
+                label: "TorsoScar".to_string(),
+                tex_path: pawn.tex_path.clone(),
+                anchor: OverlayAnchor::Body,
+                layer_offset: 1,
+                draw_size: Vec2::new(0.75, 0.75),
+                tint: [1.0, 0.45, 0.45, 0.70],
+                required_body_part_group: Some("Torso".to_string()),
+                visible_facing: Some(vec![ComposeFacing::South, ComposeFacing::East]),
+            },
+            HediffOverlayInput {
+                label: "FaceBruise".to_string(),
+                tex_path: head_tex.clone().unwrap_or_else(|| pawn.tex_path.clone()),
+                anchor: OverlayAnchor::Head,
+                layer_offset: 1,
+                draw_size: Vec2::new(0.6, 0.6),
+                tint: [0.75, 0.25, 0.25, 0.60],
+                required_body_part_group: Some("UpperHead".to_string()),
+                visible_facing: None,
+            },
+        ];
         let compose_input = PawnRenderInput {
             label: pawn.label.clone(),
             facing: map_facing(pawn.facing),
@@ -788,7 +889,13 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
             hair_size: Vec2::new(1.1, 1.1),
             beard_size: Vec2::new(0.95, 0.95),
             tint: [1.0, 1.0, 1.0, 1.0],
-            apparel: Vec::new(),
+            apparel: apparel_inputs,
+            present_body_part_groups: vec![
+                "Torso".to_string(),
+                "UpperHead".to_string(),
+                "Eyes".to_string(),
+            ],
+            hediff_overlays,
             draw_flags: PawnDrawFlags::NONE,
         };
         let composed = compose_pawn(&compose_input, &PawnComposeConfig::default());
@@ -842,6 +949,17 @@ fn map_facing(facing: scene::PawnFacing) -> ComposeFacing {
         scene::PawnFacing::East => ComposeFacing::East,
         scene::PawnFacing::South => ComposeFacing::South,
         scene::PawnFacing::West => ComposeFacing::West,
+    }
+}
+
+fn map_apparel_layer(layer: ApparelLayerDef) -> ComposeApparelLayer {
+    match layer {
+        ApparelLayerDef::OnSkin => ComposeApparelLayer::OnSkin,
+        ApparelLayerDef::Middle => ComposeApparelLayer::Middle,
+        ApparelLayerDef::Shell => ComposeApparelLayer::Shell,
+        ApparelLayerDef::Belt => ComposeApparelLayer::Belt,
+        ApparelLayerDef::Overhead => ComposeApparelLayer::Overhead,
+        ApparelLayerDef::EyeCover => ComposeApparelLayer::EyeCover,
     }
 }
 

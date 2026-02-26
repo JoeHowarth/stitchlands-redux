@@ -1,8 +1,8 @@
 use glam::Vec3;
 
 use super::layering::{apparel_z, facing_x_offset};
-use super::model::{ApparelLayer, PawnComposeConfig, PawnRenderInput};
-use super::rules::resolve_skip_flags;
+use super::model::{ApparelLayer, OverlayAnchor, PawnComposeConfig, PawnRenderInput};
+use super::rules::{resolve_skip_flags, should_draw_hediff_overlay};
 use super::tree::{PawnNode, PawnNodeKind};
 
 #[derive(Debug, Clone)]
@@ -119,6 +119,30 @@ pub fn compose_pawn(input: &PawnRenderInput, config: &PawnComposeConfig) -> Pawn
         order += 1;
     }
 
+    for (overlay_index, overlay) in input.hediff_overlays.iter().enumerate() {
+        if !should_draw_hediff_overlay(overlay, input.facing, &input.present_body_part_groups) {
+            continue;
+        }
+        let base = match overlay.anchor {
+            OverlayAnchor::Body => config.layering.hediff_body_base_z,
+            OverlayAnchor::Head => config.layering.hediff_head_base_z,
+        };
+        let z = base
+            + overlay.layer_offset as f32 * config.layering.hediff_step_z
+            + overlay_index as f32 * 0.0001;
+        nodes.push(PawnNode {
+            id: format!("{}::Hediff::{}", input.label, overlay.label),
+            kind: PawnNodeKind::Hediff,
+            tex_path: overlay.tex_path.clone(),
+            world_pos: Vec3::new(base_pos.x, base_pos.y, z),
+            size: overlay.draw_size,
+            tint: overlay.tint,
+            z,
+            order,
+        });
+        order += 1;
+    }
+
     nodes.sort_by(|a, b| a.z.total_cmp(&b.z).then(a.order.cmp(&b.order)));
     PawnComposition { nodes }
 }
@@ -129,8 +153,8 @@ mod tests {
 
     use super::compose_pawn;
     use crate::pawn::model::{
-        ApparelLayer, ApparelRenderInput, PawnComposeConfig, PawnDrawFlags, PawnFacing,
-        PawnRenderInput,
+        ApparelLayer, ApparelRenderInput, HediffOverlayInput, OverlayAnchor, PawnComposeConfig,
+        PawnDrawFlags, PawnFacing, PawnRenderInput,
     };
 
     fn fixture_input() -> PawnRenderInput {
@@ -150,6 +174,8 @@ mod tests {
             beard_size: Vec2::new(1.0, 1.0),
             tint: [1.0, 1.0, 1.0, 1.0],
             apparel: Vec::new(),
+            present_body_part_groups: vec!["UpperHead".to_string(), "Torso".to_string()],
+            hediff_overlays: Vec::new(),
             draw_flags: PawnDrawFlags::NONE,
         }
     }
@@ -258,5 +284,79 @@ mod tests {
         let second = apparel.next().expect("two apparel nodes");
         assert!(first.id.contains("Shirt"));
         assert!(second.id.contains("Helmet"));
+    }
+
+    #[test]
+    fn hediff_overlay_requires_body_part_group() {
+        let mut input = fixture_input();
+        input.hediff_overlays.push(HediffOverlayInput {
+            label: "EyePatch".to_string(),
+            tex_path: "Things/Pawn/Humanlike/Heads/Male/Average_Normal".to_string(),
+            anchor: OverlayAnchor::Head,
+            layer_offset: 1,
+            draw_size: Vec2::new(0.8, 0.8),
+            tint: [1.0, 0.6, 0.6, 0.85],
+            required_body_part_group: Some("Eyes".to_string()),
+            visible_facing: None,
+        });
+
+        let result = compose_pawn(&input, &PawnComposeConfig::default());
+        assert!(
+            result
+                .nodes
+                .iter()
+                .all(|n| !matches!(n.kind, crate::pawn::tree::PawnNodeKind::Hediff))
+        );
+    }
+
+    #[test]
+    fn composition_snapshot_is_stable() {
+        let mut input = fixture_input();
+        input.apparel = vec![
+            ApparelRenderInput {
+                label: "Jacket".to_string(),
+                tex_path: "Things/Apparel/Body/Jacket".to_string(),
+                layer: ApparelLayer::Shell,
+                covers_upper_head: false,
+                covers_full_head: false,
+                draw_size: Vec2::new(1.4, 1.4),
+                tint: [1.0, 1.0, 1.0, 1.0],
+            },
+            ApparelRenderInput {
+                label: "Cap".to_string(),
+                tex_path: "Things/Apparel/Headgear/Cap".to_string(),
+                layer: ApparelLayer::Overhead,
+                covers_upper_head: true,
+                covers_full_head: false,
+                draw_size: Vec2::new(1.0, 1.0),
+                tint: [1.0, 1.0, 1.0, 1.0],
+            },
+        ];
+        input.hediff_overlays.push(HediffOverlayInput {
+            label: "Scar".to_string(),
+            tex_path: "Things/Pawn/Humanlike/Bodies/Naked_Male".to_string(),
+            anchor: OverlayAnchor::Body,
+            layer_offset: 1,
+            draw_size: Vec2::new(0.7, 0.7),
+            tint: [1.0, 0.4, 0.4, 0.8],
+            required_body_part_group: Some("Torso".to_string()),
+            visible_facing: Some(vec![PawnFacing::South, PawnFacing::East]),
+        });
+
+        let result = compose_pawn(&input, &PawnComposeConfig::default());
+        let snapshot: Vec<String> = result
+            .nodes
+            .iter()
+            .map(|n| format!("{:?}|{}|{:.4}", n.kind, n.tex_path, n.z))
+            .collect();
+        let expected = vec![
+            "Body|Things/Pawn/Humanlike/Bodies/Naked_Male|-0.6000".to_string(),
+            "Hediff|Things/Pawn/Humanlike/Bodies/Naked_Male|-0.5842".to_string(),
+            "Head|Things/Pawn/Humanlike/Heads/Male/Average_Normal|-0.5800".to_string(),
+            "Apparel|Things/Apparel/Body/Jacket|-0.5660".to_string(),
+            "Beard|Things/Pawn/Humanlike/Beards/Beard_Full|-0.5620".to_string(),
+            "Apparel|Things/Apparel/Headgear/Cap|-0.5129".to_string(),
+        ];
+        assert_eq!(snapshot, expected);
     }
 }

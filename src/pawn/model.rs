@@ -52,6 +52,24 @@ pub struct ApparelRenderInput {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum OverlayAnchor {
+    Body,
+    Head,
+}
+
+#[derive(Debug, Clone)]
+pub struct HediffOverlayInput {
+    pub label: String,
+    pub tex_path: String,
+    pub anchor: OverlayAnchor,
+    pub layer_offset: i32,
+    pub draw_size: Vec2,
+    pub tint: [f32; 4],
+    pub required_body_part_group: Option<String>,
+    pub visible_facing: Option<Vec<PawnFacing>>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct PawnDrawFlags {
     pub hide_hair: bool,
     pub hide_beard: bool,
@@ -85,6 +103,8 @@ pub struct PawnRenderInput {
     pub beard_size: Vec2,
     pub tint: [f32; 4],
     pub apparel: Vec<ApparelRenderInput>,
+    pub present_body_part_groups: Vec<String>,
+    pub hediff_overlays: Vec<HediffOverlayInput>,
     pub draw_flags: PawnDrawFlags,
 }
 
@@ -97,6 +117,9 @@ pub struct LayeringProfile {
     pub apparel_body_base_z: f32,
     pub apparel_head_base_z: f32,
     pub apparel_step_z: f32,
+    pub hediff_body_base_z: f32,
+    pub hediff_head_base_z: f32,
+    pub hediff_step_z: f32,
 }
 
 impl Default for LayeringProfile {
@@ -109,6 +132,9 @@ impl Default for LayeringProfile {
             apparel_body_base_z: -0.59,
             apparel_head_base_z: -0.553,
             apparel_step_z: 0.0008,
+            hediff_body_base_z: -0.585,
+            hediff_head_base_z: -0.557,
+            hediff_step_z: 0.0008,
         }
     }
 }

@@ -48,6 +48,40 @@ pub struct TerrainDef {
     pub edge_texture_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ApparelLayerDef {
+    OnSkin,
+    Middle,
+    Shell,
+    Belt,
+    Overhead,
+    EyeCover,
+}
+
+impl ApparelLayerDef {
+    pub fn draw_order(self) -> i32 {
+        match self {
+            Self::OnSkin => 10,
+            Self::Middle => 20,
+            Self::Shell => 30,
+            Self::Belt => 40,
+            Self::Overhead => 50,
+            Self::EyeCover => 60,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApparelDef {
+    pub def_name: String,
+    pub tex_path: String,
+    pub layer: ApparelLayerDef,
+    pub draw_size: Vec2,
+    pub color: RgbaColor,
+    pub covers_upper_head: bool,
+    pub covers_full_head: bool,
+}
+
 pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>> {
     let defs_dir = core_data_dir.join("Core").join("Defs");
     if !defs_dir.exists() {
@@ -116,6 +150,39 @@ pub fn load_terrain_defs(core_data_dir: &Path) -> Result<HashMap<String, Terrain
     Ok(defs)
 }
 
+pub fn load_apparel_defs(core_data_dir: &Path) -> Result<HashMap<String, ApparelDef>> {
+    let defs_dir = core_data_dir.join("Core").join("Defs");
+    if !defs_dir.exists() {
+        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
+    }
+
+    let mut defs = HashMap::new();
+    for entry in WalkDir::new(&defs_dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let Some(ext) = entry.path().extension() else {
+            continue;
+        };
+        if ext != "xml" {
+            continue;
+        }
+
+        let xml = fs::read_to_string(entry.path())
+            .with_context(|| format!("failed reading {}", entry.path().display()))?;
+        if let Ok(doc) = Document::parse(&xml) {
+            parse_doc_apparel_defs(&doc, &mut defs);
+        }
+    }
+
+    Ok(defs)
+}
+
 fn parse_doc_thing_defs(doc: &Document<'_>, defs: &mut HashMap<String, ThingDef>) {
     for node in doc.descendants().filter(|n| n.has_tag_name("ThingDef")) {
         if let Some(thing_def) = parse_thing_def(node) {
@@ -128,6 +195,14 @@ fn parse_doc_terrain_defs(doc: &Document<'_>, defs: &mut HashMap<String, Terrain
     for node in doc.descendants().filter(|n| n.has_tag_name("TerrainDef")) {
         if let Some(terrain_def) = parse_terrain_def(node) {
             defs.insert(terrain_def.def_name.clone(), terrain_def);
+        }
+    }
+}
+
+fn parse_doc_apparel_defs(doc: &Document<'_>, defs: &mut HashMap<String, ApparelDef>) {
+    for node in doc.descendants().filter(|n| n.has_tag_name("ThingDef")) {
+        if let Some(apparel_def) = parse_apparel_def(node) {
+            defs.insert(apparel_def.def_name.clone(), apparel_def);
         }
     }
 }
@@ -156,6 +231,48 @@ fn parse_terrain_def(node: Node<'_, '_>) -> Option<TerrainDef> {
         def_name,
         texture_path,
         edge_texture_path,
+    })
+}
+
+fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
+    let def_name = child_text(node, "defName")?.to_string();
+    let apparel_node = child_node(node, "apparel")?;
+    let graphic_node = child_node(node, "graphicData")?;
+    let graphic_data = parse_graphic_data(graphic_node)?;
+
+    let mut layer = ApparelLayerDef::OnSkin;
+    if let Some(layers_node) = child_node(apparel_node, "layers") {
+        for layer_name in list_text_values(layers_node) {
+            if let Some(parsed_layer) = parse_apparel_layer_def(layer_name)
+                && parsed_layer.draw_order() >= layer.draw_order()
+            {
+                layer = parsed_layer;
+            }
+        }
+    }
+
+    let mut covers_upper_head = false;
+    let mut covers_full_head = false;
+    if let Some(groups_node) = child_node(apparel_node, "bodyPartGroups") {
+        for group in list_text_values(groups_node) {
+            let lower = group.to_ascii_lowercase();
+            if lower.contains("fullhead") {
+                covers_full_head = true;
+                covers_upper_head = true;
+            } else if lower.contains("upperhead") {
+                covers_upper_head = true;
+            }
+        }
+    }
+
+    Some(ApparelDef {
+        def_name,
+        tex_path: graphic_data.tex_path,
+        layer,
+        draw_size: graphic_data.draw_size,
+        color: graphic_data.color,
+        covers_upper_head,
+        covers_full_head,
     })
 }
 
@@ -191,6 +308,25 @@ fn child_text<'a>(node: Node<'a, 'a>, tag: &str) -> Option<&'a str> {
 
 fn child_node<'a>(node: Node<'a, 'a>, tag: &str) -> Option<Node<'a, 'a>> {
     node.children().find(|n| n.has_tag_name(tag))
+}
+
+fn list_text_values<'a>(node: Node<'a, 'a>) -> impl Iterator<Item = &'a str> {
+    node.children()
+        .filter_map(|child| child.text())
+        .map(str::trim)
+}
+
+fn parse_apparel_layer_def(input: &str) -> Option<ApparelLayerDef> {
+    let name = input.rsplit('.').next().unwrap_or(input);
+    match name {
+        "OnSkin" => Some(ApparelLayerDef::OnSkin),
+        "Middle" => Some(ApparelLayerDef::Middle),
+        "Shell" => Some(ApparelLayerDef::Shell),
+        "Belt" => Some(ApparelLayerDef::Belt),
+        "Overhead" => Some(ApparelLayerDef::Overhead),
+        "EyeCover" => Some(ApparelLayerDef::EyeCover),
+        _ => None,
+    }
 }
 
 fn parse_color(input: &str) -> Option<RgbaColor> {
@@ -303,5 +439,39 @@ mod tests {
             terrain.edge_texture_path.as_deref(),
             Some("Terrain/Edges/Soil")
         );
+    }
+
+    #[test]
+    fn parses_apparel_layer_and_head_coverage() {
+        let xml = r#"
+        <Defs>
+            <ThingDef>
+                <defName>Apparel_TestHelmet</defName>
+                <graphicData>
+                    <texPath>Things/Apparel/Headgear/TestHelmet</texPath>
+                    <drawSize><x>1.1</x><y>1.1</y></drawSize>
+                    <color>0.8 0.8 0.9 1.0</color>
+                </graphicData>
+                <apparel>
+                    <layers>
+                        <li>OnSkin</li>
+                        <li>Overhead</li>
+                    </layers>
+                    <bodyPartGroups>
+                        <li>UpperHead</li>
+                        <li>FullHead</li>
+                    </bodyPartGroups>
+                </apparel>
+            </ThingDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut defs = HashMap::new();
+        parse_doc_apparel_defs(&doc, &mut defs);
+        let apparel = defs.get("Apparel_TestHelmet").unwrap();
+        assert_eq!(apparel.layer, ApparelLayerDef::Overhead);
+        assert!(apparel.covers_upper_head);
+        assert!(apparel.covers_full_head);
+        assert_eq!(apparel.tex_path, "Things/Apparel/Headgear/TestHelmet");
     }
 }
