@@ -158,3 +158,22 @@
 ### Conclusions
 - Removed a real east/west semantic bug without introducing new visual artifacts.
 - Remaining gaps are still in deeper render-worker parity, not coordinate sign or naive mirroring.
+
+## 2026-02-26 - Iteration 9
+
+### Learnings
+- We needed a faster loop than screenshots for “upside-down head” regressions.
+- Head orientation can be checked directly from composed node world positions.
+
+### Hypotheses
+- If `head.world_y - body.world_y <= 0` in upright humanlike standing renders, composition is fundamentally wrong regardless of visual appearance.
+
+### Actions
+- Added `measure_head_body_delta_y(...)` in fixture pipeline.
+- Emitted `head_body_delta_y` into trace output for each pawn.
+- Added hard failure for `--pawn-fixture` when `head_body_delta_y <= 0` to catch upside-down regressions immediately.
+- Ran 10-variant loop and verified all deltas remained positive (`0.340` for current fixtures).
+
+### Conclusions
+- We now have a fast, scientific non-screenshot guardrail for upside-down-head failures.
+- Visual screenshots remain useful for nuanced alignment, but no longer needed to detect basic orientation regressions.

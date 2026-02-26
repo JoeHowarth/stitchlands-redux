@@ -1238,6 +1238,14 @@ fn build_v1_fixture_scene(config: FixtureSceneConfig<'_>) -> Result<(Vec<RenderS
                 node.tint[3]
             ));
         }
+        if let Some(head_body_delta) = measure_head_body_delta_y(&composed.nodes) {
+            trace_lines.push(format!("  head_body_delta_y={head_body_delta:.3}"));
+            if pawn_focus_only && head_body_delta <= 0.0 {
+                anyhow::bail!(
+                    "upside-down pawn composition detected for variant {pawn_fixture_variant}: head_body_delta_y={head_body_delta:.3}"
+                );
+            }
+        }
 
         let body_path = &compose_input.body_tex_path;
         if !pawn_layer_by_tex.contains_key(body_path)
@@ -1319,6 +1327,24 @@ fn map_facing(facing: scene::PawnFacing) -> ComposeFacing {
         scene::PawnFacing::South => ComposeFacing::South,
         scene::PawnFacing::West => ComposeFacing::West,
     }
+}
+
+fn measure_head_body_delta_y(nodes: &[crate::pawn::tree::PawnNode]) -> Option<f32> {
+    let body_y = nodes
+        .iter()
+        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Body))
+        .map(|n| n.world_pos.y)?;
+    let head_y = nodes
+        .iter()
+        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Head))
+        .map(|n| n.world_pos.y)
+        .or_else(|| {
+            nodes
+                .iter()
+                .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Stump))
+                .map(|n| n.world_pos.y)
+        })?;
+    Some(head_y - body_y)
 }
 
 fn map_apparel_layer(layer: ApparelLayerDef) -> ComposeApparelLayer {
