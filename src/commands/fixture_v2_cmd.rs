@@ -39,7 +39,7 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         });
 
     info!(
-        "v2 fixture scene built: scene={} map={}x{} terrain={} things={} blocking_things={} pawns={} drawables={}",
+        "v2 fixture scene built: scene={} map={}x{} terrain={} things={} blocking_things={} pawns={} static={} dynamic={}",
         cmd.scene.display(),
         world.width,
         world.height,
@@ -47,7 +47,8 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         world.things.len(),
         blocking_things,
         world.pawns.len(),
-        sprites.len()
+        sprites.static_sprites.len(),
+        sprites.dynamic_sprites.len()
     );
 
     if !should_run_renderer {
@@ -55,19 +56,27 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
     }
 
     Ok(CommandAction::Launch(LaunchSpec {
-        sprites,
+        static_sprites: sprites.static_sprites,
+        dynamic_sprites: sprites.dynamic_sprites,
         screenshot: cmd.view.screenshot,
         camera_focus,
         render_options,
         hide_window,
+        fixed_step: true,
     }))
+}
+
+struct SpriteLayers {
+    static_sprites: Vec<RenderSprite>,
+    dynamic_sprites: Vec<RenderSprite>,
 }
 
 fn build_world_sprites(
     ctx: &mut DispatchContext<'_>,
     world: &crate::world::WorldState,
-) -> Result<Vec<RenderSprite>> {
-    let mut out = Vec::new();
+) -> Result<SpriteLayers> {
+    let mut static_sprites = Vec::new();
+    let mut dynamic_sprites = Vec::new();
 
     for z in 0..world.height {
         for x in 0..world.width {
@@ -85,7 +94,7 @@ fn build_world_sprites(
                         terrain_def.texture_path, terrain_def.def_name
                     )
                 })?;
-            out.push(RenderSprite {
+            static_sprites.push(RenderSprite {
                 def_name: format!("Terrain::{}", terrain_def.def_name),
                 image: resolved.sprite.image,
                 params: SpriteParams {
@@ -115,7 +124,7 @@ fn build_world_sprites(
             .resolve_thing(ctx.data_dir, thing_def)
             .with_context(|| format!("resolving ThingDef '{}'", thing_def.def_name))?;
         let draw_offset = thing_def.graphic_data.draw_offset;
-        out.push(RenderSprite {
+        static_sprites.push(RenderSprite {
             def_name: format!("Thing::{}", thing_def.def_name),
             image: resolved.sprite.image,
             params: SpriteParams {
@@ -195,7 +204,7 @@ fn build_world_sprites(
                 .asset_resolver
                 .resolve_texture_path(ctx.data_dir, &node.tex_path)
                 .with_context(|| format!("resolving pawn texture '{}'", node.tex_path))?;
-            out.push(RenderSprite {
+            dynamic_sprites.push(RenderSprite {
                 def_name: format!("PawnNode::{}", node.id),
                 image: resolved.sprite.image,
                 params: SpriteParams {
@@ -208,7 +217,10 @@ fn build_world_sprites(
         }
     }
 
-    Ok(out)
+    Ok(SpriteLayers {
+        static_sprites,
+        dynamic_sprites,
+    })
 }
 
 fn choose_body_def<'a>(

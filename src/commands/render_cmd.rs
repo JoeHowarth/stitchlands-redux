@@ -42,11 +42,13 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         }
 
         return Ok(CommandAction::Launch(LaunchSpec {
-            sprites: vec![sprite],
+            static_sprites: vec![sprite],
+            dynamic_sprites: Vec::new(),
             screenshot: render.view.screenshot,
             camera_focus: None,
             render_options,
             hide_window,
+            fixed_step: false,
         }));
     }
 
@@ -200,10 +202,12 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
     }
 
     Ok(CommandAction::Launch(LaunchSpec {
-        sprites: render_sprites,
+        static_sprites: render_sprites,
+        dynamic_sprites: Vec::new(),
         screenshot: render.view.screenshot,
         camera_focus: None,
         render_options,
         hide_window,
+        fixed_step: false,
     }))
 }

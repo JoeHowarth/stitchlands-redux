@@ -39,11 +39,13 @@ pub enum CommandAction {
 }
 
 pub struct LaunchSpec {
-    pub sprites: Vec<crate::viewer::RenderSprite>,
+    pub static_sprites: Vec<crate::viewer::RenderSprite>,
+    pub dynamic_sprites: Vec<crate::viewer::RenderSprite>,
     pub screenshot: Option<PathBuf>,
     pub camera_focus: Option<Vec2>,
     pub render_options: RendererOptions,
     pub hide_window: bool,
+    pub fixed_step: bool,
 }
 
 pub fn dispatch(ctx: &mut DispatchContext<'_>, command: Command) -> Result<CommandAction> {

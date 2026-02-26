@@ -64,11 +64,13 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<Co
         return Ok(CommandAction::Done);
     }
     Ok(CommandAction::Launch(LaunchSpec {
-        sprites: render_sprites,
+        static_sprites: render_sprites,
+        dynamic_sprites: Vec::new(),
         screenshot: fixture.view.screenshot,
         camera_focus: Some(camera_focus),
         render_options,
         hide_window,
+        fixed_step: false,
     }))
 }
 
@@ -101,10 +103,12 @@ pub fn run_audit(ctx: &mut DispatchContext<'_>, audit: AuditCmd) -> Result<Comma
         return Ok(CommandAction::Done);
     }
     Ok(CommandAction::Launch(LaunchSpec {
-        sprites: render_sprites,
+        static_sprites: render_sprites,
+        dynamic_sprites: Vec::new(),
         screenshot: audit.view.screenshot,
         camera_focus: Some(camera_focus),
         render_options,
         hide_window,
+        fixed_step: false,
     }))
 }

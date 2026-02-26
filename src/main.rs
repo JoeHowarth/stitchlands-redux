@@ -69,11 +69,13 @@ fn main() -> Result<()> {
     match crate::commands::dispatch(&mut dispatch, cli.command)? {
         crate::commands::CommandAction::Done => Ok(()),
         crate::commands::CommandAction::Launch(spec) => crate::viewer::run_viewer(
-            spec.sprites,
+            spec.static_sprites,
+            spec.dynamic_sprites,
             spec.screenshot,
             spec.camera_focus,
             spec.render_options,
             spec.hide_window,
+            spec.fixed_step,
         ),
     }
 }

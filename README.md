@@ -60,6 +60,12 @@ V1 fixture (map + terrain + things + pawns):
 cargo run -- fixture v1 --map-width 40 --map-height 40
 ```
 
+V2 fixture (RON scene):
+
+```bash
+cargo run -- fixture v2 --scene fixtures/v2/move_lane.ron
+```
+
 Pawn-focused fixture:
 
 ```bash
