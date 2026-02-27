@@ -9,6 +9,5 @@ pub mod workers;
 pub use compose::compose_pawn;
 pub use model::{
     ApparelLayer, ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
-    HediffOverlayInput, OverlayAnchor, PawnComposeConfig, PawnDrawFlags, PawnFacing,
-    PawnRenderInput,
+    PawnComposeConfig, PawnDrawFlags, PawnFacing, PawnRenderInput,
 };

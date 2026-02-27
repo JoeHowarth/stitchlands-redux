@@ -1,21 +1,28 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use glam::{Vec2, Vec3};
-use log::info;
+use log::{info, warn};
 
 use crate::cell::Cell;
 use crate::cli::FixtureV2Cmd;
 use crate::defs::{
-    ApparelDef, BeardDefRender, BodyTypeDefRender, HairDefRender, HeadTypeDefRender,
+    ApparelDef, ApparelLayerDef, BeardDefRender, BodyTypeDefRender, HairDefRender,
+    HeadTypeDefRender,
 };
 use crate::pawn::{
-    ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData, PawnDrawFlags,
-    PawnRenderInput, compose_pawn,
+    ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
+    PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::SpriteParams;
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
 use crate::viewer::RenderSprite;
 use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
 
+use super::common::{
+    apparel_worn_data_for_facing, build_apparel_tex_path, build_full_apparel_layer_override,
+    map_explicit_skip_flags, resolve_directional_tex_path,
+};
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
 pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Result<CommandAction> {
@@ -32,7 +39,7 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         let _ = issue_move_intent(&mut world, first_pawn_id, start);
         tick_world(&mut world, 0.0);
     }
-    let sprites = build_world_sprites(ctx, &world)?;
+    let sprites = build_world_sprites(ctx, &world, false)?;
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let blocking_things = world
         .things()
@@ -94,15 +101,16 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
     })))
 }
 
-struct SpriteLayers {
-    static_sprites: Vec<RenderSprite>,
-    dynamic_sprites: Vec<RenderSprite>,
-    pawn_visual_profiles: Vec<PawnVisualProfile>,
+pub(crate) struct SpriteLayers {
+    pub static_sprites: Vec<RenderSprite>,
+    pub dynamic_sprites: Vec<RenderSprite>,
+    pub pawn_visual_profiles: Vec<PawnVisualProfile>,
 }
 
-fn build_world_sprites(
+pub(crate) fn build_world_sprites(
     ctx: &mut DispatchContext<'_>,
     world: &crate::world::WorldState,
+    strict_missing: bool,
 ) -> Result<SpriteLayers> {
     let mut static_sprites = Vec::new();
     let mut dynamic_sprites = Vec::new();
@@ -125,6 +133,13 @@ fn build_world_sprites(
                         terrain_def.texture_path, terrain_def.def_name
                     )
                 })?;
+            if strict_missing && resolved.sprite.used_fallback {
+                anyhow::bail!(
+                    "missing terrain texture '{}' for '{}'",
+                    terrain_def.texture_path,
+                    terrain_def.def_name
+                );
+            }
             static_sprites.push(RenderSprite {
                 def_name: format!("Terrain::{}", terrain_def.def_name),
                 image: resolved.sprite.image,
@@ -156,6 +171,13 @@ fn build_world_sprites(
             .asset_resolver
             .resolve_thing(ctx.data_dir, thing_def)
             .with_context(|| format!("resolving ThingDef '{}'", thing_def.def_name))?;
+        if strict_missing && resolved.sprite.used_fallback {
+            anyhow::bail!(
+                "missing thing texture for '{}' ({})",
+                thing_def.def_name,
+                thing_def.graphic_data.tex_path
+            );
+        }
         let draw_offset = thing_def.graphic_data.draw_offset;
         static_sprites.push(RenderSprite {
             def_name: format!("Thing::{}", thing_def.def_name),
@@ -192,16 +214,39 @@ fn build_world_sprites(
         let hair = choose_hair_def(ctx.defs.hair_defs, pawn.hair.as_deref());
         let beard = choose_beard_def(ctx.defs.beard_defs, pawn.beard.as_deref());
 
-        let apparel_inputs = build_apparel_inputs(ctx.defs.apparel_defs, &pawn.apparel_defs)?;
+        let facing = pawn.facing;
+
+        // Resolve directional texture paths for body/head/hair/beard
+        let body_directional =
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &body.body_naked_graphic_path, facing);
+        let head_tex_path = head.map(|h| {
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.graphic_path, facing).path
+        });
+        let hair_tex_path = hair.map(|h| {
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.tex_path, facing).path
+        });
+        let beard_tex_path = beard.map(|b| {
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &b.tex_path, facing).path
+        });
+
+        let apparel_inputs = build_apparel_inputs(
+            ctx.defs.apparel_defs,
+            &pawn.apparel_defs,
+            Some(&body.def_name),
+            facing,
+            ctx.asset_resolver,
+            ctx.data_dir,
+        )?;
+
         let render_input = PawnRenderInput {
             label: pawn.label.clone(),
-            facing: pawn.facing,
+            facing,
             world_pos: Vec3::new(pawn.world_pos.x, pawn.world_pos.y, 0.0),
-            body_tex_path: body.body_naked_graphic_path.clone(),
-            head_tex_path: head.map(|v| v.graphic_path.clone()),
+            body_tex_path: body_directional.path,
+            head_tex_path,
             stump_tex_path: None,
-            hair_tex_path: hair.map(|v| v.tex_path.clone()),
-            beard_tex_path: beard.map(|v| v.tex_path.clone()),
+            hair_tex_path,
+            beard_tex_path,
             body_size: Vec2::ONE,
             head_size: Vec2::ONE,
             stump_size: Vec2::splat(0.8),
@@ -227,7 +272,11 @@ fn build_world_sprites(
                 .unwrap_or_default(),
             tint: [1.0, 1.0, 1.0, 1.0],
             apparel: apparel_inputs,
-            present_body_part_groups: vec!["UpperHead".to_string(), "Torso".to_string()],
+            present_body_part_groups: vec![
+                "Torso".to_string(),
+                "UpperHead".to_string(),
+                "Eyes".to_string(),
+            ],
             hediff_overlays: Vec::new(),
             draw_flags: PawnDrawFlags::NONE,
         };
@@ -242,6 +291,9 @@ fn build_world_sprites(
                 .asset_resolver
                 .resolve_texture_path(ctx.data_dir, &node.tex_path)
                 .with_context(|| format!("resolving pawn texture '{}'", node.tex_path))?;
+            if strict_missing && resolved.sprite.used_fallback {
+                anyhow::bail!("missing pawn node texture: {}", node.tex_path);
+            }
             dynamic_sprites.push(RenderSprite {
                 def_name: format!("PawnNode::{}", node.id),
                 image: resolved.sprite.image,
@@ -264,7 +316,7 @@ fn build_world_sprites(
 }
 
 fn choose_body_def<'a>(
-    defs: &'a std::collections::HashMap<String, BodyTypeDefRender>,
+    defs: &'a HashMap<String, BodyTypeDefRender>,
     preferred: Option<&str>,
 ) -> Result<&'a BodyTypeDefRender> {
     if let Some(preferred) = preferred
@@ -278,37 +330,40 @@ fn choose_body_def<'a>(
 }
 
 fn choose_head_def<'a>(
-    defs: &'a std::collections::HashMap<String, HeadTypeDefRender>,
+    defs: &'a HashMap<String, HeadTypeDefRender>,
     preferred: Option<&str>,
 ) -> Option<&'a HeadTypeDefRender> {
-    if let Some(preferred) = preferred
-        && let Some(head) = defs.get(preferred)
-    {
-        return Some(head);
+    if let Some(name) = preferred {
+        if let Some(head) = defs.get(name) {
+            return Some(head);
+        }
+        warn!("preferred head def '{name}' not found, falling back");
     }
     defs.values().min_by(|a, b| a.def_name.cmp(&b.def_name))
 }
 
 fn choose_hair_def<'a>(
-    defs: &'a std::collections::HashMap<String, HairDefRender>,
+    defs: &'a HashMap<String, HairDefRender>,
     preferred: Option<&str>,
 ) -> Option<&'a HairDefRender> {
-    if let Some(preferred) = preferred
-        && let Some(hair) = defs.get(preferred)
-    {
-        return Some(hair);
+    if let Some(name) = preferred {
+        if let Some(hair) = defs.get(name) {
+            return Some(hair);
+        }
+        warn!("preferred hair def '{name}' not found, falling back");
     }
     defs.values().min_by(|a, b| a.def_name.cmp(&b.def_name))
 }
 
 fn choose_beard_def<'a>(
-    defs: &'a std::collections::HashMap<String, BeardDefRender>,
+    defs: &'a HashMap<String, BeardDefRender>,
     preferred: Option<&str>,
 ) -> Option<&'a BeardDefRender> {
-    if let Some(preferred) = preferred
-        && let Some(beard) = defs.get(preferred)
-    {
-        return Some(beard);
+    if let Some(name) = preferred {
+        if let Some(beard) = defs.get(name) {
+            return Some(beard);
+        }
+        warn!("preferred beard def '{name}' not found, falling back");
     }
     defs.values()
         .filter(|beard| !beard.no_graphic && !beard.tex_path.is_empty())
@@ -316,27 +371,66 @@ fn choose_beard_def<'a>(
 }
 
 fn build_apparel_inputs(
-    defs: &std::collections::HashMap<String, ApparelDef>,
+    defs: &HashMap<String, ApparelDef>,
     apparel_defs: &[String],
+    body_def_name: Option<&str>,
+    facing: PawnFacing,
+    asset_resolver: &mut crate::assets::AssetResolver,
+    data_dir: &std::path::Path,
 ) -> Result<Vec<ApparelRenderInput>> {
     let mut out = Vec::new();
     for def_name in apparel_defs {
         let apparel = defs
             .get(def_name)
             .with_context(|| format!("missing ApparelDef '{}'", def_name))?;
+
+        let render_as_pack = matches!(apparel.layer, ApparelLayerDef::Belt)
+            || apparel.worn_graphic.render_utility_as_pack;
+
+        // Resolve body-type suffixed texture path
+        let tex_path = build_apparel_tex_path(
+            apparel,
+            body_def_name,
+            render_as_pack,
+            asset_resolver,
+            data_dir,
+        );
+
+        // Resolve directional texture
+        let directional = resolve_directional_tex_path(asset_resolver, data_dir, &tex_path, facing);
+        let tex_path = directional.path;
+
+        // Worn data (offset/scale) with body overrides
+        let worn_data = apparel_worn_data_for_facing(
+            apparel,
+            directional.data_facing,
+            body_def_name,
+        );
+
+        let (explicit_skip_hair, explicit_skip_beard, has_explicit_skip_flags) =
+            map_explicit_skip_flags(&apparel.render_skip_flags);
+
+        let layer_override = build_full_apparel_layer_override(apparel, facing, render_as_pack);
+
+        let anchor_to_head = match apparel.parent_tag_def.as_deref() {
+            Some("ApparelHead") => Some(true),
+            Some("ApparelBody") => Some(false),
+            _ => None,
+        };
+
         out.push(ApparelRenderInput {
             label: apparel.def_name.clone(),
-            tex_path: apparel.tex_path.clone(),
+            tex_path,
             layer: apparel.layer.into(),
-            explicit_skip_hair: false,
-            explicit_skip_beard: false,
-            has_explicit_skip_flags: false,
+            explicit_skip_hair,
+            explicit_skip_beard,
+            has_explicit_skip_flags,
             covers_upper_head: apparel.covers_upper_head,
             covers_full_head: apparel.covers_full_head,
-            anchor_to_head: None,
-            draw_offset: Vec2::ZERO,
-            draw_scale: Vec2::ONE,
-            layer_override: None,
+            anchor_to_head,
+            draw_offset: worn_data.offset,
+            draw_scale: worn_data.scale,
+            layer_override,
             draw_size: apparel.draw_size,
             tint: [
                 apparel.color.r,
@@ -348,8 +442,6 @@ fn build_apparel_inputs(
     }
     Ok(out)
 }
-
-
 
 fn validate_layer_ownership(
     static_sprites: &[RenderSprite],

@@ -13,7 +13,6 @@ mod debug_cmd;
 mod fixture_cmd;
 mod fixture_v2_cmd;
 mod render_cmd;
-pub(crate) mod v1_scene;
 
 pub use common::DefSet;
 

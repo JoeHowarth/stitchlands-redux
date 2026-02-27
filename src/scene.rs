@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::pawn::PawnFacing;
 
 #[derive(Debug, Clone)]
@@ -12,7 +10,6 @@ pub struct ThingInstance {
 #[derive(Debug, Clone)]
 pub struct PawnInstance {
     pub label: String,
-    pub tex_path: String,
     pub cell_x: i32,
     pub cell_z: i32,
     pub facing: PawnFacing,
@@ -27,18 +24,12 @@ pub struct FixtureMap {
     pub pawns: Vec<PawnInstance>,
 }
 
-impl FixtureMap {
-    pub fn terrain_at(&self, x: usize, z: usize) -> &str {
-        &self.terrain[z * self.width + x]
-    }
-}
-
 pub fn generate_fixture_map(
     width: usize,
     height: usize,
     terrain_defs: [&str; 3],
     thing_defs: &[String],
-    pawn_tex_paths: &[String],
+    pawn_count: usize,
 ) -> FixtureMap {
     let mut terrain = Vec::with_capacity(width * height);
     for z in 0..height {
@@ -74,7 +65,7 @@ pub fn generate_fixture_map(
         PawnFacing::West,
     ];
     let mut pawns = Vec::new();
-    for (index, tex_path) in pawn_tex_paths.iter().enumerate() {
+    for index in 0..pawn_count {
         let center_x = (width / 2) as i32;
         let center_z = (height / 2) as i32;
         let (x, z) = if index == 0 {
@@ -92,7 +83,6 @@ pub fn generate_fixture_map(
         };
         pawns.push(PawnInstance {
             label: format!("Pawn{}", index + 1),
-            tex_path: tex_path.clone(),
             cell_x: x,
             cell_z: z,
             facing: facings[index % facings.len()],
@@ -106,34 +96,4 @@ pub fn generate_fixture_map(
         things,
         pawns,
     }
-}
-
-pub fn sorted_things_by_altitude(things: &[ThingInstance]) -> Vec<ThingInstance> {
-    let mut out = things.to_vec();
-    out.sort_by(|a, b| {
-        a.cell_z
-            .cmp(&b.cell_z)
-            .then(a.cell_x.cmp(&b.cell_x))
-            .then(a.def_name.cmp(&b.def_name))
-    });
-    out
-}
-
-pub fn sorted_pawns(pawns: &[PawnInstance]) -> Vec<PawnInstance> {
-    let mut out = pawns.to_vec();
-    out.sort_by(|a, b| {
-        a.cell_z
-            .cmp(&b.cell_z)
-            .then(a.cell_x.cmp(&b.cell_x))
-            .then(a.label.cmp(&b.label))
-    });
-    out
-}
-
-pub fn count_terrain_families(map: &FixtureMap) -> usize {
-    let mut counts: HashMap<&str, usize> = HashMap::new();
-    for terrain in &map.terrain {
-        *counts.entry(terrain).or_default() += 1;
-    }
-    counts.len()
 }
