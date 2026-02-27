@@ -1,4 +1,5 @@
 use glam::Vec2;
+use std::collections::HashMap;
 
 use crate::path::{PathGrid, find_path};
 
@@ -37,22 +38,36 @@ pub fn issue_move_intent(world: &mut WorldState, pawn_id: usize, dest: (i32, i32
 }
 
 pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
+    let mut occupied_cells: HashMap<(i32, i32), usize> = world
+        .pawns
+        .iter()
+        .map(|pawn| ((pawn.cell_x, pawn.cell_z), pawn.id))
+        .collect();
+
     for pawn in &mut world.pawns {
         if pawn.path_index >= pawn.path_cells.len() {
             continue;
         }
 
         let target_cell = pawn.path_cells[pawn.path_index];
+        if let Some(occupant_id) = occupied_cells.get(&target_cell).copied()
+            && occupant_id != pawn.id
+        {
+            continue;
+        }
         let target = Vec2::new(target_cell.0 as f32 + 0.5, target_cell.1 as f32 + 0.5);
         let to_target = target - pawn.world_pos;
         let distance = to_target.length();
         let max_step = pawn.move_speed_cells_per_sec.max(0.1) * dt_seconds.max(0.0);
 
         if distance <= max_step {
+            let prev_cell = (pawn.cell_x, pawn.cell_z);
             pawn.world_pos = target;
             pawn.cell_x = target_cell.0;
             pawn.cell_z = target_cell.1;
             pawn.path_index += 1;
+            occupied_cells.remove(&prev_cell);
+            occupied_cells.insert((pawn.cell_x, pawn.cell_z), pawn.id);
         } else if distance > 0.0 {
             pawn.world_pos += to_target / distance * max_step;
         }
@@ -159,5 +174,71 @@ mod tests {
         }
         let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
         assert_eq!((pawn.cell_x, pawn.cell_z), (0, 4));
+    }
+
+    #[test]
+    fn later_arrival_does_not_enter_occupied_destination_cell() {
+        let mut world = world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 8,
+                height: 6,
+                terrain: vec![
+                    TerrainCell {
+                        terrain_def: "Soil".to_string(),
+                    };
+                    8 * 6
+                ],
+            },
+            things: Vec::new(),
+            pawns: vec![
+                PawnSpawn {
+                    cell_x: 0,
+                    cell_z: 0,
+                    label: Some("PawnA".to_string()),
+                    body: None,
+                    head: None,
+                    hair: None,
+                    beard: None,
+                    apparel_defs: Vec::new(),
+                    facing: crate::fixtures::PawnFacingSpec::South,
+                },
+                PawnSpawn {
+                    cell_x: 3,
+                    cell_z: 0,
+                    label: Some("PawnB".to_string()),
+                    body: None,
+                    head: None,
+                    hair: None,
+                    beard: None,
+                    apparel_defs: Vec::new(),
+                    facing: crate::fixtures::PawnFacingSpec::South,
+                },
+            ],
+            camera: None,
+        });
+
+        assert!(issue_move_intent(&mut world, 0, (4, 0)));
+        assert!(issue_move_intent(&mut world, 1, (4, 0)));
+        for _ in 0..300 {
+            tick_world(&mut world, 1.0 / 60.0);
+        }
+
+        let pawn_a = world
+            .pawns
+            .iter()
+            .find(|pawn| pawn.id == 0)
+            .expect("pawn a");
+        let pawn_b = world
+            .pawns
+            .iter()
+            .find(|pawn| pawn.id == 1)
+            .expect("pawn b");
+        assert_eq!((pawn_b.cell_x, pawn_b.cell_z), (4, 0));
+        assert_ne!((pawn_a.cell_x, pawn_a.cell_z), (4, 0));
+        assert_ne!(
+            (pawn_a.cell_x, pawn_a.cell_z),
+            (pawn_b.cell_x, pawn_b.cell_z)
+        );
     }
 }
