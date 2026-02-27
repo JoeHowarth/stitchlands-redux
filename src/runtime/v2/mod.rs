@@ -116,9 +116,13 @@ impl V2Runtime {
         let fixed_dt = Duration::from_secs_f32(self.fixed_dt_seconds);
         while self.step_accumulator >= fixed_dt {
             self.step_accumulator -= fixed_dt;
-            self.tick_count += 1;
-            tick_world(&mut self.world, self.fixed_dt_seconds);
+            self.tick_once();
         }
+    }
+
+    pub fn tick_once(&mut self) {
+        self.tick_count += 1;
+        tick_world(&mut self.world, self.fixed_dt_seconds);
     }
 
     pub fn bump_frame_count(&mut self) {

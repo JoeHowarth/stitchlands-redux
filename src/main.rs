@@ -81,6 +81,7 @@ fn main() -> Result<()> {
                 hidden_window: spec.hide_window,
                 fixed_step: spec.fixed_step,
                 runtime: spec.runtime,
+                runtime_tick_limit: spec.runtime_tick_limit,
             })
         }
     }

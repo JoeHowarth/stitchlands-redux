@@ -123,6 +123,10 @@ pub struct FixtureSceneCmd {
 pub struct FixtureV2Cmd {
     #[arg(long, default_value = "fixtures/v2/move_lane.ron")]
     pub scene: PathBuf,
+    #[arg(long)]
+    pub ticks: Option<u64>,
+    #[arg(long)]
+    pub fixed_dt: Option<f32>,
     #[command(flatten)]
     pub view: ViewArgs,
 }

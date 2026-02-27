@@ -37,6 +37,7 @@ pub(crate) struct ViewerLaunch {
     pub(crate) hidden_window: bool,
     pub(crate) fixed_step: bool,
     pub(crate) runtime: Option<V2Runtime>,
+    pub(crate) runtime_tick_limit: Option<u64>,
 }
 
 pub(crate) fn run_viewer(launch: ViewerLaunch) -> Result<()> {
@@ -63,6 +64,8 @@ struct App {
     overlay_texture_id: Option<TextureId>,
     map_bounds: Option<(usize, usize)>,
     runtime: Option<V2Runtime>,
+    runtime_tick_limit: Option<u64>,
+    runtime_finished: bool,
 }
 
 impl App {
@@ -85,6 +88,8 @@ impl App {
             overlay_texture_id: None,
             map_bounds: None,
             runtime: launch.runtime,
+            runtime_tick_limit: launch.runtime_tick_limit,
+            runtime_finished: false,
         }
     }
 
@@ -199,7 +204,13 @@ impl ApplicationHandler for App {
                 if self.fixed_step
                     && let Some(runtime) = self.runtime.as_mut()
                 {
-                    runtime.run_fixed_step();
+                    if let Some(limit) = self.runtime_tick_limit {
+                        if runtime.tick_count() < limit {
+                            runtime.tick_once();
+                        }
+                    } else {
+                        runtime.run_fixed_step();
+                    }
                 }
                 let frame_dynamic = self.dynamic_with_overlays();
                 let Some(renderer) = self.renderer.as_mut() else {
@@ -210,8 +221,22 @@ impl ApplicationHandler for App {
                     event_loop.exit();
                     return;
                 }
+                let reached_tick_limit = self
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| {
+                        self.runtime_tick_limit
+                            .map(|limit| runtime.tick_count() >= limit)
+                    })
+                    .unwrap_or(false);
                 let capture: Option<&Path> = if self.screenshot_taken {
                     None
+                } else if self.runtime_tick_limit.is_some() {
+                    if reached_tick_limit {
+                        self.screenshot_path.as_deref()
+                    } else {
+                        None
+                    }
                 } else {
                     self.screenshot_path.as_deref()
                 };
@@ -229,6 +254,22 @@ impl ApplicationHandler for App {
                         }
                         if captured {
                             self.screenshot_taken = true;
+                        }
+                        if reached_tick_limit {
+                            if let Some(runtime) = self.runtime.as_ref()
+                                && !self.runtime_finished
+                            {
+                                self.runtime_finished = true;
+                                info!(
+                                    "v2 runtime complete: frames={} ticks={}",
+                                    runtime.frame_count(),
+                                    runtime.tick_count()
+                                );
+                            }
+                            if self.screenshot_path.is_none() || self.screenshot_taken {
+                                event_loop.exit();
+                            }
+                        } else if captured {
                             event_loop.exit();
                         }
                     }

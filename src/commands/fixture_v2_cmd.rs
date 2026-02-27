@@ -75,7 +75,7 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         world,
         pawn_visual_profiles,
         V2RuntimeConfig {
-            fixed_dt_seconds: 1.0 / 60.0,
+            fixed_dt_seconds: cmd.fixed_dt.unwrap_or(1.0 / 60.0),
             compose_config: ctx.compose_config.clone(),
         },
     );
@@ -83,6 +83,7 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         static_sprites,
         dynamic_sprites,
         runtime: Some(runtime),
+        runtime_tick_limit: cmd.ticks,
         screenshot: cmd.view.screenshot,
         camera_focus,
         render_options,
