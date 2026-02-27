@@ -292,7 +292,7 @@ impl ApplicationHandler for App {
             } => {
                 if self.fixed_step {
                     if let Some(runtime) = self.runtime.as_mut() {
-                        let _ = runtime.clear_selection();
+                        let _ = runtime.on_right_click();
                     }
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
@@ -305,7 +305,7 @@ impl ApplicationHandler for App {
                     && let PhysicalKey::Code(KeyCode::Escape) = event.physical_key
                 {
                     if let Some(runtime) = self.runtime.as_mut() {
-                        let _ = runtime.clear_selection();
+                        let _ = runtime.on_escape();
                     }
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();

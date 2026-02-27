@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
-use crate::interaction::InteractionState;
+use crate::interaction::{
+    InteractionAction, InteractionState, on_cursor_moved, on_escape, on_left_click, on_right_click,
+};
 use crate::world::{
     WorldState, issue_move_intent, pawn_id_at_cell, pawn_is_idle, selected_pawn, tick_world,
 };
@@ -45,7 +47,6 @@ pub enum InteractionOutcome {
 pub struct V2Runtime {
     world: WorldState,
     interaction: InteractionState,
-    selected_pawn_id: Option<usize>,
     pawn_initial_world_pos: HashMap<usize, Vec2>,
     fixed_dt_seconds: f32,
     step_accumulator: Duration,
@@ -64,7 +65,6 @@ impl V2Runtime {
         Self {
             world,
             interaction: InteractionState::default(),
-            selected_pawn_id: None,
             pawn_initial_world_pos,
             fixed_dt_seconds: config.fixed_dt_seconds.max(0.0001),
             step_accumulator: Duration::ZERO,
@@ -105,54 +105,62 @@ impl V2Runtime {
     }
 
     pub fn on_cursor_cell(&mut self, hovered_cell: Option<(i32, i32)>) -> bool {
-        if self.interaction.hovered_cell == hovered_cell {
-            return false;
-        }
-        self.interaction.hovered_cell = hovered_cell;
-        true
+        matches!(
+            on_cursor_moved(&mut self.interaction, hovered_cell),
+            InteractionAction::HoverChanged(_)
+        )
     }
 
     pub fn on_left_click(&mut self) -> InteractionOutcome {
-        let Some(cell) = self.interaction.hovered_cell else {
-            return InteractionOutcome::NoOp;
-        };
+        let pawn_at_hover = self
+            .interaction
+            .hovered_cell
+            .and_then(|cell| pawn_id_at_cell(&self.world, cell));
 
-        if let Some(hit_pawn_id) = pawn_id_at_cell(&self.world, cell) {
-            self.selected_pawn_id = Some(hit_pawn_id);
-            self.interaction.selected_cell = Some(cell);
-            return InteractionOutcome::SelectedPawn {
-                pawn_id: hit_pawn_id,
-                cell,
-            };
+        match on_left_click(&mut self.interaction, pawn_at_hover) {
+            InteractionAction::NoOp | InteractionAction::HoverChanged(_) => {
+                InteractionOutcome::NoOp
+            }
+            InteractionAction::SelectCell(cell) => InteractionOutcome::SelectedCell(cell),
+            InteractionAction::SelectPawn { pawn_id, cell } => {
+                InteractionOutcome::SelectedPawn { pawn_id, cell }
+            }
+            InteractionAction::IssueMove { pawn_id, dest } => {
+                if issue_move_intent(&mut self.world, pawn_id, dest) {
+                    InteractionOutcome::IssuedMove { pawn_id, dest }
+                } else {
+                    InteractionOutcome::NoOp
+                }
+            }
+            InteractionAction::ClearSelection => InteractionOutcome::ClearedSelection,
         }
-
-        if let Some(selected_pawn_id) = self.selected_pawn_id
-            && issue_move_intent(&mut self.world, selected_pawn_id, cell)
-        {
-            return InteractionOutcome::IssuedMove {
-                pawn_id: selected_pawn_id,
-                dest: cell,
-            };
-        }
-
-        self.interaction.selected_cell = Some(cell);
-        InteractionOutcome::SelectedCell(cell)
     }
 
-    pub fn clear_selection(&mut self) -> InteractionOutcome {
-        let had_selection =
-            self.selected_pawn_id.is_some() || self.interaction.selected_cell.is_some();
-        self.selected_pawn_id = None;
-        self.interaction.selected_cell = None;
-        if had_selection {
-            InteractionOutcome::ClearedSelection
-        } else {
-            InteractionOutcome::NoOp
+    pub fn on_right_click(&mut self) -> InteractionOutcome {
+        match on_right_click(&mut self.interaction) {
+            InteractionAction::ClearSelection => InteractionOutcome::ClearedSelection,
+            InteractionAction::NoOp
+            | InteractionAction::HoverChanged(_)
+            | InteractionAction::SelectCell(_)
+            | InteractionAction::SelectPawn { .. }
+            | InteractionAction::IssueMove { .. } => InteractionOutcome::NoOp,
+        }
+    }
+
+    pub fn on_escape(&mut self) -> InteractionOutcome {
+        match on_escape(&mut self.interaction) {
+            InteractionAction::ClearSelection => InteractionOutcome::ClearedSelection,
+            InteractionAction::NoOp
+            | InteractionAction::HoverChanged(_)
+            | InteractionAction::SelectCell(_)
+            | InteractionAction::SelectPawn { .. }
+            | InteractionAction::IssueMove { .. } => InteractionOutcome::NoOp,
         }
     }
 
     pub fn selected_pawn_idle(&self) -> Option<bool> {
-        self.selected_pawn_id
+        self.interaction
+            .selected_pawn_id
             .and_then(|id| pawn_is_idle(&self.world, id))
     }
 
@@ -167,7 +175,7 @@ impl V2Runtime {
             pawn_offsets.insert(pawn.id, pawn.world_pos - initial);
         }
 
-        let selected = selected_pawn(&self.world, self.selected_pawn_id);
+        let selected = selected_pawn(&self.world, self.interaction.selected_pawn_id);
         V2FrameOutput {
             pawn_offsets,
             hovered_cell: self.interaction.hovered_cell,
