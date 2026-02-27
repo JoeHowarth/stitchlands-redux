@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
+use crate::cell::Cell;
 use crate::interaction::{
     InteractionAction, InteractionState, on_cursor_moved, on_escape, on_left_click, on_right_click,
 };
@@ -45,18 +46,18 @@ pub struct FramePawnNode {
 #[derive(Debug, Clone)]
 pub struct V2FrameOutput {
     pub pawn_nodes: Vec<FramePawnNode>,
-    pub hovered_cell: Option<(i32, i32)>,
-    pub selected_cell: Option<(i32, i32)>,
+    pub hovered_cell: Option<Cell>,
+    pub selected_cell: Option<Cell>,
     pub selected_world_pos: Option<Vec2>,
-    pub selected_path_cells: Vec<(i32, i32)>,
+    pub selected_path_cells: Vec<Cell>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionOutcome {
     NoOp,
-    SelectedCell((i32, i32)),
-    SelectedPawn { pawn_id: usize, cell: (i32, i32) },
-    IssuedMove { pawn_id: usize, dest: (i32, i32) },
+    SelectedCell(Cell),
+    SelectedPawn { pawn_id: usize, cell: Cell },
+    IssuedMove { pawn_id: usize, dest: Cell },
     ClearedSelection,
 }
 
@@ -129,7 +130,7 @@ impl V2Runtime {
         self.frame_count += 1;
     }
 
-    pub fn on_cursor_cell(&mut self, hovered_cell: Option<(i32, i32)>) -> bool {
+    pub fn on_cursor_cell(&mut self, hovered_cell: Option<Cell>) -> bool {
         matches!(
             on_cursor_moved(&mut self.interaction, hovered_cell),
             InteractionAction::HoverChanged(_)
@@ -253,6 +254,7 @@ fn map_facing(facing: crate::fixtures::PawnFacingSpec) -> PawnFacing {
 mod tests {
     use glam::{Vec2, Vec3};
 
+    use crate::cell::Cell;
     use crate::fixtures::{
         MapSpec, PawnFacingSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn,
     };
@@ -336,20 +338,20 @@ mod tests {
     fn select_then_move_issues_path() {
         let mut runtime = runtime_for_fixture(open_world_fixture());
 
-        assert!(runtime.on_cursor_cell(Some((1, 1))));
+        assert!(runtime.on_cursor_cell(Some(Cell::new(1, 1))));
         assert_eq!(
             runtime.on_left_click(),
             InteractionOutcome::SelectedPawn {
                 pawn_id: 0,
-                cell: (1, 1)
+                cell: Cell::new(1, 1)
             }
         );
-        assert!(runtime.on_cursor_cell(Some((5, 4))));
+        assert!(runtime.on_cursor_cell(Some(Cell::new(5, 4))));
         assert_eq!(
             runtime.on_left_click(),
             InteractionOutcome::IssuedMove {
                 pawn_id: 0,
-                dest: (5, 4)
+                dest: Cell::new(5, 4)
             }
         );
 
@@ -369,9 +371,9 @@ mod tests {
         });
         let mut runtime = runtime_for_fixture(fixture);
 
-        assert!(runtime.on_cursor_cell(Some((1, 1))));
+        assert!(runtime.on_cursor_cell(Some(Cell::new(1, 1))));
         let _ = runtime.on_left_click();
-        assert!(runtime.on_cursor_cell(Some((5, 4))));
+        assert!(runtime.on_cursor_cell(Some(Cell::new(5, 4))));
         assert_eq!(runtime.on_left_click(), InteractionOutcome::NoOp);
     }
 
@@ -379,9 +381,9 @@ mod tests {
     fn pawn_reaches_destination_within_bounded_ticks() {
         let mut runtime = runtime_for_fixture(open_world_fixture());
 
-        assert!(runtime.on_cursor_cell(Some((1, 1))));
+        assert!(runtime.on_cursor_cell(Some(Cell::new(1, 1))));
         let _ = runtime.on_left_click();
-        assert!(runtime.on_cursor_cell(Some((5, 4))));
+        assert!(runtime.on_cursor_cell(Some(Cell::new(5, 4))));
         let issued = runtime.on_left_click();
         assert!(matches!(issued, InteractionOutcome::IssuedMove { .. }));
 
@@ -401,7 +403,7 @@ mod tests {
     fn right_click_and_escape_clear_selection() {
         let mut runtime = runtime_for_fixture(open_world_fixture());
 
-        assert!(runtime.on_cursor_cell(Some((1, 1))));
+        assert!(runtime.on_cursor_cell(Some(Cell::new(1, 1))));
         let _ = runtime.on_left_click();
         assert_eq!(
             runtime.on_right_click(),
@@ -409,7 +411,7 @@ mod tests {
         );
         assert_eq!(runtime.frame_output().selected_world_pos, None);
 
-        let _ = runtime.on_cursor_cell(Some((1, 1)));
+        let _ = runtime.on_cursor_cell(Some(Cell::new(1, 1)));
         let _ = runtime.on_left_click();
         assert_eq!(runtime.on_escape(), InteractionOutcome::ClearedSelection);
         assert_eq!(runtime.frame_output().selected_world_pos, None);

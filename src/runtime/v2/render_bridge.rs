@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use glam::Vec2;
 
+use crate::cell::Cell;
 use crate::renderer::{SpriteInstance, SpriteParams, TextureId};
 
 use super::V2FrameOutput;
@@ -34,14 +35,14 @@ pub fn compose_dynamic_sprites(
         out.push(SpriteInstance {
             texture_id: overlay_texture_id,
             params: SpriteParams {
-                world_pos: glam::Vec3::new(cell.0 as f32 + 0.5, cell.1 as f32 + 0.5, -0.23),
+                world_pos: glam::Vec3::new(cell.x as f32 + 0.5, cell.z as f32 + 0.5, -0.23),
                 size: Vec2::new(0.36, 0.36),
                 tint: [0.35, 1.00, 0.45, 0.65],
             },
         });
     }
 
-    if let Some((x, z)) = frame.hovered_cell {
+    if let Some(Cell { x, z }) = frame.hovered_cell {
         out.push(SpriteInstance {
             texture_id: overlay_texture_id,
             params: SpriteParams {
@@ -61,7 +62,7 @@ pub fn compose_dynamic_sprites(
                 tint: [1.00, 0.90, 0.20, 0.30],
             },
         });
-    } else if let Some((x, z)) = frame.selected_cell {
+    } else if let Some(Cell { x, z }) = frame.selected_cell {
         out.push(SpriteInstance {
             texture_id: overlay_texture_id,
             params: SpriteParams {

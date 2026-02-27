@@ -1,5 +1,6 @@
 mod app_context;
 mod assets;
+mod cell;
 mod cli;
 mod commands;
 mod defs;

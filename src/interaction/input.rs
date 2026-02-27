@@ -1,18 +1,20 @@
+use crate::cell::Cell;
+
 use super::InteractionState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionAction {
     NoOp,
-    HoverChanged(Option<(i32, i32)>),
-    SelectCell((i32, i32)),
-    SelectPawn { pawn_id: usize, cell: (i32, i32) },
-    IssueMove { pawn_id: usize, dest: (i32, i32) },
+    HoverChanged(Option<Cell>),
+    SelectCell(Cell),
+    SelectPawn { pawn_id: usize, cell: Cell },
+    IssueMove { pawn_id: usize, dest: Cell },
     ClearSelection,
 }
 
 pub fn on_cursor_moved(
     state: &mut InteractionState,
-    hovered_cell: Option<(i32, i32)>,
+    hovered_cell: Option<Cell>,
 ) -> InteractionAction {
     if state.hovered_cell == hovered_cell {
         return InteractionAction::NoOp;
@@ -66,13 +68,15 @@ fn clear_selection(state: &mut InteractionState) -> InteractionAction {
 
 #[cfg(test)]
 mod tests {
+    use crate::cell::Cell;
+
     use super::{InteractionAction, on_cursor_moved, on_escape, on_left_click, on_right_click};
     use crate::interaction::InteractionState;
 
     #[test]
     fn left_click_selects_hovered_pawn() {
         let mut state = InteractionState {
-            hovered_cell: Some((3, 4)),
+            hovered_cell: Some(Cell::new(3, 4)),
             ..Default::default()
         };
 
@@ -81,17 +85,17 @@ mod tests {
             action,
             InteractionAction::SelectPawn {
                 pawn_id: 7,
-                cell: (3, 4)
+                cell: Cell::new(3, 4)
             }
         );
         assert_eq!(state.selected_pawn_id, Some(7));
-        assert_eq!(state.selected_cell, Some((3, 4)));
+        assert_eq!(state.selected_cell, Some(Cell::new(3, 4)));
     }
 
     #[test]
     fn left_click_issues_move_for_selected_pawn() {
         let mut state = InteractionState {
-            hovered_cell: Some((5, 2)),
+            hovered_cell: Some(Cell::new(5, 2)),
             selected_pawn_id: Some(11),
             ..Default::default()
         };
@@ -101,17 +105,17 @@ mod tests {
             action,
             InteractionAction::IssueMove {
                 pawn_id: 11,
-                dest: (5, 2)
+                dest: Cell::new(5, 2)
             }
         );
-        assert_eq!(state.last_issued_destination, Some((5, 2)));
+        assert_eq!(state.last_issued_destination, Some(Cell::new(5, 2)));
     }
 
     #[test]
     fn right_click_clears_selection() {
         let mut state = InteractionState {
             selected_pawn_id: Some(2),
-            selected_cell: Some((1, 1)),
+            selected_cell: Some(Cell::new(1, 1)),
             ..Default::default()
         };
 
@@ -137,9 +141,12 @@ mod tests {
     fn cursor_moved_updates_hover_state() {
         let mut state = InteractionState::default();
 
-        let changed = on_cursor_moved(&mut state, Some((0, 0)));
-        assert_eq!(changed, InteractionAction::HoverChanged(Some((0, 0))));
-        let unchanged = on_cursor_moved(&mut state, Some((0, 0)));
+        let changed = on_cursor_moved(&mut state, Some(Cell::new(0, 0)));
+        assert_eq!(
+            changed,
+            InteractionAction::HoverChanged(Some(Cell::new(0, 0)))
+        );
+        let unchanged = on_cursor_moved(&mut state, Some(Cell::new(0, 0)));
         assert_eq!(unchanged, InteractionAction::NoOp);
     }
 }
