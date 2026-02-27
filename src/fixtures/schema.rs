@@ -32,6 +32,16 @@ pub struct ThingSpawn {
     pub blocks_movement: bool,
 }
 
+/// Pawn definition in a fixture scene.
+///
+/// `body`, `head`, `hair`, and `beard` are XML **defNames**, not texture path
+/// segments. These are often different from what appears in the graphicPath:
+///
+///   defName: "Male_AverageNormal"   graphicPath: ".../Male_Average_Normal"
+///   defName: "Full"                 graphicPath: ".../Beard_Full"
+///   defName: "Shaved"               graphicPath: ".../Shaved"
+///
+/// Check `Core/Defs/` XML files for the correct defName when authoring fixtures.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PawnSpawn {
     pub cell_x: i32,

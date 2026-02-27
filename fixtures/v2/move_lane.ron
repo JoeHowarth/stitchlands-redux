@@ -20,7 +20,7 @@
       cell_z: 1,
       facing: south,
       body: "Male",
-      head: "Average_Normal",
+      head: "Male_AverageNormal",
       hair: "Shaved",
       beard: "Full",
       apparel_defs: ["Apparel_Parka"],
