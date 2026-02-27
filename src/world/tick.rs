@@ -50,6 +50,13 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
         }
 
         let target_cell = pawn.path_cells[pawn.path_index];
+        let blocked_by_thing = world
+            .things
+            .iter()
+            .any(|thing| thing.blocks_movement && (thing.cell_x, thing.cell_z) == target_cell);
+        if blocked_by_thing {
+            continue;
+        }
         if let Some(occupant_id) = occupied_cells.get(&target_cell).copied()
             && occupant_id != pawn.id
         {
@@ -77,7 +84,7 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
 #[cfg(test)]
 mod tests {
     use crate::fixtures::{MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn};
-    use crate::world::{WorldState, world_from_fixture};
+    use crate::world::{ThingState, WorldState, world_from_fixture};
 
     use super::{issue_move_intent, tick_world};
 
@@ -240,5 +247,25 @@ mod tests {
             (pawn_a.cell_x, pawn_a.cell_z),
             (pawn_b.cell_x, pawn_b.cell_z)
         );
+    }
+
+    #[test]
+    fn pawn_does_not_step_into_newly_blocked_thing_cell() {
+        let mut world = fixture_world();
+        assert!(issue_move_intent(&mut world, 0, (5, 4)));
+        world.things.push(ThingState {
+            id: 999,
+            def_name: "LateBlocker".to_string(),
+            cell_x: 5,
+            cell_z: 4,
+            blocks_movement: true,
+        });
+
+        for _ in 0..300 {
+            tick_world(&mut world, 1.0 / 60.0);
+        }
+
+        let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
+        assert_ne!((pawn.cell_x, pawn.cell_z), (5, 4));
     }
 }
