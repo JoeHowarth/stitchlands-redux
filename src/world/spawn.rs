@@ -1,7 +1,7 @@
 use crate::fixtures::SceneFixture;
 use glam::Vec2;
 
-use super::{PawnState, TerrainTile, ThingState, WorldState};
+use super::{PathProgress, PawnState, TerrainTile, ThingState, WorldState};
 
 pub fn world_from_fixture(fixture: &SceneFixture) -> WorldState {
     let terrain = fixture
@@ -45,8 +45,7 @@ pub fn world_from_fixture(fixture: &SceneFixture) -> WorldState {
             beard: pawn.beard.clone(),
             apparel_defs: pawn.apparel_defs.clone(),
             world_pos: Vec2::new(pawn.cell_x as f32 + 0.5, pawn.cell_z as f32 + 0.5),
-            path_cells: Vec::new(),
-            path_index: 0,
+            path: PathProgress::Idle,
             move_speed_cells_per_sec: 3.0,
         })
         .collect();

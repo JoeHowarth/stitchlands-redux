@@ -63,7 +63,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         .thing_defs
         .get(thingdef)
         .cloned()
-        .with_context(|| crate::make_missing_def_message(thingdef, ctx.thing_defs))?;
+        .with_context(|| super::v1_scene::make_missing_def_message(thingdef, ctx.thing_defs))?;
     info!("selected def: {}", thing.def_name);
 
     let mut selected_defs = vec![thing];
@@ -72,7 +72,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             .thing_defs
             .get(extra_name)
             .cloned()
-            .with_context(|| crate::make_missing_def_message(extra_name, ctx.thing_defs))?;
+            .with_context(|| super::v1_scene::make_missing_def_message(extra_name, ctx.thing_defs))?;
         info!("selected extra def: {}", extra.def_name);
         selected_defs.push(extra);
     }

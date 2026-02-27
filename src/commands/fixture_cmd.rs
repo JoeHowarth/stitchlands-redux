@@ -17,7 +17,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<Co
     let (should_run_renderer, render_options, hide_window) =
         crate::cli::render_runtime(&fixture.view);
     let (render_sprites, camera_focus) = if !is_pawn {
-        crate::build_v1_fixture_scene(crate::FixtureSceneConfig {
+        super::v1_scene::build_v1_fixture_scene(super::v1_scene::FixtureSceneConfig {
             data_dir: ctx.data_dir,
             thing_defs: ctx.thing_defs,
             terrain_defs: ctx.terrain_defs,
@@ -38,7 +38,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<Co
             strict_missing: !ctx.allow_fallback,
         })?
     } else {
-        crate::build_v1_fixture_scene(crate::FixtureSceneConfig {
+        super::v1_scene::build_v1_fixture_scene(super::v1_scene::FixtureSceneConfig {
             data_dir: ctx.data_dir,
             thing_defs: ctx.thing_defs,
             terrain_defs: ctx.terrain_defs,
@@ -80,7 +80,7 @@ pub fn run_audit(ctx: &mut DispatchContext<'_>, audit: AuditCmd) -> Result<Comma
     let (should_run_renderer, render_options, hide_window) =
         crate::cli::render_runtime(&audit.view);
     let (render_sprites, camera_focus) =
-        crate::build_v1_fixture_scene(crate::FixtureSceneConfig {
+        super::v1_scene::build_v1_fixture_scene(super::v1_scene::FixtureSceneConfig {
             data_dir: ctx.data_dir,
             thing_defs: ctx.thing_defs,
             terrain_defs: ctx.terrain_defs,

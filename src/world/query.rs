@@ -19,5 +19,5 @@ pub fn selected_pawn(world: &WorldState, pawn_id: Option<usize>) -> Option<&Pawn
 }
 
 pub fn pawn_is_idle(world: &WorldState, pawn_id: usize) -> Option<bool> {
-    pawn_by_id(world, pawn_id).map(|pawn| pawn.path_index >= pawn.path_cells.len())
+    pawn_by_id(world, pawn_id).map(|pawn| pawn.path.is_idle())
 }

@@ -229,13 +229,7 @@ impl V2Runtime {
             selected_cell: self.interaction.selected_cell,
             selected_world_pos: selected.map(|pawn| pawn.world_pos),
             selected_path_cells: selected
-                .map(|pawn| {
-                    pawn.path_cells
-                        .iter()
-                        .skip(pawn.path_index)
-                        .copied()
-                        .collect()
-                })
+                .map(|pawn| pawn.path.remaining_cells().to_vec())
                 .unwrap_or_default(),
         }
     }

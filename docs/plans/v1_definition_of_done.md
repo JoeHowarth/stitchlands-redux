@@ -35,8 +35,9 @@ RIMWORLD_TYPETREE_REGISTRY="/path/to/typetree.tpk" \
 cargo test --test v1_golden -- --nocapture
 ```
 
-## Out of Scope (v2+)
+## Out of Scope (Later Versions)
 
-- Weather and overlay passes.
+- Weather and atmospheric passes.
+- Broad non-interaction overlay stack parity.
 - Full RimWorld map section pipeline parity.
 - Full pawn apparel/hediff edge-case parity for every loadout.

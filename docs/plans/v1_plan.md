@@ -11,7 +11,7 @@
 ## Scope for v1
 
 - Include: terrain map, things, pawn baseline, camera movement, deterministic sorting.
-- Exclude: weather/overlays/designations (v2+), full pawn apparel stack, full map section system parity.
+- Exclude: weather/atmospherics and broad designation overlay stack (deferred to later versions), full pawn apparel stack, full map section system parity.
 
 ## Steps
 

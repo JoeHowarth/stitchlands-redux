@@ -18,6 +18,7 @@ mod debug_cmd;
 mod fixture_cmd;
 mod fixture_v2_cmd;
 mod render_cmd;
+pub(crate) mod v1_scene;
 
 pub struct DispatchContext<'a> {
     pub data_dir: &'a Path,

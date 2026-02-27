@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::cell::Cell;
 use crate::path::{PathGrid, find_path};
 
-use super::WorldState;
+use super::{PathProgress, WorldState};
 
 pub fn build_path_grid(world: &WorldState) -> PathGrid {
     let mut grid = PathGrid::new(world.width, world.height);
@@ -30,11 +30,10 @@ pub fn issue_move_intent(world: &mut WorldState, pawn_id: usize, dest: Cell) -> 
     let mut grid = build_path_grid(world);
     grid.set_blocked(start.x, start.z, false);
 
-    let Some(path) = find_path(&grid, start, dest) else {
+    let Some(cells) = find_path(&grid, start, dest) else {
         return false;
     };
-    world.pawns[pawn_index].path_cells = path;
-    world.pawns[pawn_index].path_index = 1;
+    world.pawns[pawn_index].path = PathProgress::Following { cells, index: 1 };
     true
 }
 
@@ -46,11 +45,14 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
         .collect();
 
     for pawn in &mut world.pawns {
-        if pawn.path_index >= pawn.path_cells.len() {
+        let PathProgress::Following { cells, index } = &mut pawn.path else {
+            continue;
+        };
+        if *index >= cells.len() {
             continue;
         }
 
-        let target_cell = pawn.path_cells[pawn.path_index];
+        let target_cell = cells[*index];
         let blocked_by_thing = world.things.iter().any(|thing| {
             thing.blocks_movement && Cell::new(thing.cell_x, thing.cell_z) == target_cell
         });
@@ -72,7 +74,7 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
             pawn.world_pos = target;
             pawn.cell_x = target_cell.x;
             pawn.cell_z = target_cell.z;
-            pawn.path_index += 1;
+            *index += 1;
             occupied_cells.remove(&prev_cell);
             occupied_cells.insert(Cell::new(pawn.cell_x, pawn.cell_z), pawn.id);
         } else if distance > 0.0 {
@@ -85,7 +87,7 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
 mod tests {
     use crate::cell::Cell;
     use crate::fixtures::{MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn};
-    use crate::world::{ThingState, WorldState, world_from_fixture};
+    use crate::world::{PathProgress, ThingState, WorldState, world_from_fixture};
 
     use super::{issue_move_intent, tick_world};
 
@@ -132,7 +134,7 @@ mod tests {
             .iter_mut()
             .find(|pawn| pawn.id == 0)
             .expect("pawn");
-        assert!(!pawn.path_cells.is_empty());
+        assert!(!pawn.path.is_idle());
     }
 
     #[test]
@@ -155,7 +157,7 @@ mod tests {
         let mut world = fixture_world();
         assert!(!issue_move_intent(&mut world, 0, Cell::new(3, 2)));
         let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
-        assert!(pawn.path_cells.is_empty());
+        assert!(pawn.path.is_idle());
     }
 
     #[test]
@@ -165,8 +167,11 @@ mod tests {
         tick_world(&mut world, 1.0 / 60.0);
         let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
         assert_eq!((pawn.cell_x, pawn.cell_z), (1, 1));
-        assert_eq!(pawn.path_cells, vec![Cell::new(1, 1)]);
-        assert_eq!(pawn.path_index, 1);
+        let PathProgress::Following { cells, index } = &pawn.path else {
+            panic!("expected Following");
+        };
+        assert_eq!(*cells, vec![Cell::new(1, 1)]);
+        assert_eq!(*index, 1);
     }
 
     #[test]

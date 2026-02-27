@@ -16,6 +16,35 @@ pub struct ThingState {
     pub blocks_movement: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+pub enum PathProgress {
+    #[default]
+    Idle,
+    Following { cells: Vec<Cell>, index: usize },
+}
+
+impl PathProgress {
+    pub fn is_idle(&self) -> bool {
+        match self {
+            Self::Idle => true,
+            Self::Following { cells, index } => *index >= cells.len(),
+        }
+    }
+
+    pub fn remaining_cells(&self) -> &[Cell] {
+        match self {
+            Self::Idle => &[],
+            Self::Following { cells, index } => {
+                if *index < cells.len() {
+                    &cells[*index..]
+                } else {
+                    &[]
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PawnState {
     pub id: usize,
@@ -29,8 +58,7 @@ pub struct PawnState {
     pub beard: Option<String>,
     pub apparel_defs: Vec<String>,
     pub world_pos: Vec2,
-    pub path_cells: Vec<Cell>,
-    pub path_index: usize,
+    pub path: PathProgress,
     pub move_speed_cells_per_sec: f32,
 }
 
