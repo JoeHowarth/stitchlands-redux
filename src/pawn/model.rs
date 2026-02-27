@@ -21,6 +21,19 @@ pub enum ApparelLayer {
     EyeCover,
 }
 
+impl From<crate::defs::ApparelLayerDef> for ApparelLayer {
+    fn from(layer: crate::defs::ApparelLayerDef) -> Self {
+        match layer {
+            crate::defs::ApparelLayerDef::OnSkin => Self::OnSkin,
+            crate::defs::ApparelLayerDef::Middle => Self::Middle,
+            crate::defs::ApparelLayerDef::Shell => Self::Shell,
+            crate::defs::ApparelLayerDef::Belt => Self::Belt,
+            crate::defs::ApparelLayerDef::Overhead => Self::Overhead,
+            crate::defs::ApparelLayerDef::EyeCover => Self::EyeCover,
+        }
+    }
+}
+
 impl ApparelLayer {
     pub const ALL: [Self; 6] = [
         Self::OnSkin,

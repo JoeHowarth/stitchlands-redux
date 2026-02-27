@@ -8,8 +8,8 @@ use crate::defs::{
     ApparelDef, BeardDefRender, BodyTypeDefRender, HairDefRender, HeadTypeDefRender,
 };
 use crate::pawn::{
-    ApparelLayer, ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
-    PawnDrawFlags, PawnRenderInput, compose_pawn,
+    ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData, PawnDrawFlags,
+    PawnRenderInput, compose_pawn,
 };
 use crate::renderer::SpriteParams;
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
@@ -325,7 +325,7 @@ fn build_apparel_inputs(
         out.push(ApparelRenderInput {
             label: apparel.def_name.clone(),
             tex_path: apparel.tex_path.clone(),
-            layer: map_apparel_layer(apparel.layer),
+            layer: apparel.layer.into(),
             explicit_skip_hair: false,
             explicit_skip_beard: false,
             has_explicit_skip_flags: false,
@@ -347,16 +347,7 @@ fn build_apparel_inputs(
     Ok(out)
 }
 
-fn map_apparel_layer(layer: crate::defs::ApparelLayerDef) -> ApparelLayer {
-    match layer {
-        crate::defs::ApparelLayerDef::OnSkin => ApparelLayer::OnSkin,
-        crate::defs::ApparelLayerDef::Middle => ApparelLayer::Middle,
-        crate::defs::ApparelLayerDef::Shell => ApparelLayer::Shell,
-        crate::defs::ApparelLayerDef::Belt => ApparelLayer::Belt,
-        crate::defs::ApparelLayerDef::Overhead => ApparelLayer::Overhead,
-        crate::defs::ApparelLayerDef::EyeCover => ApparelLayer::EyeCover,
-    }
-}
+
 
 fn validate_layer_ownership(
     static_sprites: &[RenderSprite],

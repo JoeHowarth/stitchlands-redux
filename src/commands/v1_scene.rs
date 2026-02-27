@@ -466,7 +466,7 @@ pub(crate) fn build_v1_fixture_scene(
         let apparel_inputs: Vec<ApparelRenderInput> = selected_apparel_defs
             .into_iter()
             .map(|(apparel, _)| {
-                let layer = map_apparel_layer(apparel.layer);
+                let layer = apparel.layer.into();
                 let render_as_pack = matches!(apparel.layer, ApparelLayerDef::Belt)
                     || apparel.worn_graphic.render_utility_as_pack;
                 let mut tex_path = apparel.tex_path.clone();
@@ -851,17 +851,6 @@ fn validate_basic_pawn_layering(nodes: &[crate::pawn::tree::PawnNode]) -> Option
         None
     } else {
         Some(violations)
-    }
-}
-
-fn map_apparel_layer(layer: ApparelLayerDef) -> ComposeApparelLayer {
-    match layer {
-        ApparelLayerDef::OnSkin => ComposeApparelLayer::OnSkin,
-        ApparelLayerDef::Middle => ComposeApparelLayer::Middle,
-        ApparelLayerDef::Shell => ComposeApparelLayer::Shell,
-        ApparelLayerDef::Belt => ComposeApparelLayer::Belt,
-        ApparelLayerDef::Overhead => ComposeApparelLayer::Overhead,
-        ApparelLayerDef::EyeCover => ComposeApparelLayer::EyeCover,
     }
 }
 
