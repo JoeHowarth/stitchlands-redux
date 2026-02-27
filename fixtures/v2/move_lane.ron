@@ -22,7 +22,7 @@
       body: "Male",
       head: "Average_Normal",
       hair: "Shaved",
-      beard: "Beard_Full",
+      beard: "Full",
       apparel_defs: ["Apparel_Parka"],
     ),
   ],

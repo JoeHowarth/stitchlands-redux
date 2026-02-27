@@ -14,7 +14,6 @@ use crate::assets::typetree_registry::load_typetree_registry;
 pub struct PackedTextureIndex {
     signature: String,
     names: Vec<String>,
-    names_set: HashSet<String>,
     container_paths: Vec<String>,
 }
 
@@ -70,10 +69,13 @@ impl PackedTextureIndex {
             return true;
         }
 
-        for wanted in wanted_texture_names(tex_path) {
-            if self.names_set.contains(&wanted) {
-                return true;
-            }
+        let basename = tex_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(tex_path)
+            .to_ascii_lowercase();
+        if self.has_prefix_match(&basename) {
+            return true;
         }
 
         for path in wanted_container_patterns(tex_path) {
@@ -90,7 +92,21 @@ impl PackedTextureIndex {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.names_set.is_empty() && self.container_paths.is_empty()
+        self.names.is_empty() && self.container_paths.is_empty()
+    }
+
+    fn has_prefix_match(&self, basename: &str) -> bool {
+        let start = self.names.partition_point(|name| name.as_str() < basename);
+        let prefix_underscore = format!("{basename}_");
+        for name in &self.names[start..] {
+            if name == basename || name.starts_with(&prefix_underscore) {
+                return true;
+            }
+            if !name.starts_with(basename) {
+                break;
+            }
+        }
+        false
     }
 
     fn build(
@@ -103,7 +119,6 @@ impl PackedTextureIndex {
             return Ok(Self {
                 signature,
                 names: Vec::new(),
-                names_set: HashSet::new(),
                 container_paths: Vec::new(),
             });
         }
@@ -156,13 +171,12 @@ impl PackedTextureIndex {
         container_paths.sort();
         container_paths.dedup();
 
-        let mut names: Vec<String> = names_set.iter().cloned().collect();
+        let mut names: Vec<String> = names_set.into_iter().collect();
         names.sort();
 
         Ok(Self {
             signature,
             names,
-            names_set,
             container_paths,
         })
     }
@@ -218,11 +232,9 @@ impl PackedTextureIndex {
             }
         }
 
-        let names_set: HashSet<String> = names.iter().cloned().collect();
         Ok(Self {
             signature,
             names,
-            names_set,
             container_paths,
         })
     }
@@ -254,7 +266,7 @@ fn roots_signature(roots: &[PathBuf], typetree_registries: &[PathBuf]) -> String
     parts.join(";")
 }
 
-fn wanted_texture_names(tex_path: &str) -> Vec<String> {
+pub(crate) fn wanted_texture_names(tex_path: &str) -> Vec<String> {
     let basename = tex_path
         .rsplit('/')
         .next()
@@ -269,7 +281,7 @@ fn wanted_texture_names(tex_path: &str) -> Vec<String> {
     ]
 }
 
-fn wanted_container_patterns(tex_path: &str) -> Vec<String> {
+pub(crate) fn wanted_container_patterns(tex_path: &str) -> Vec<String> {
     let base = tex_path.to_ascii_lowercase();
     vec![
         base.clone(),
@@ -285,7 +297,25 @@ fn wanted_container_patterns(tex_path: &str) -> Vec<String> {
 mod tests {
     use std::fs;
 
-    use super::PackedTextureIndex;
+    use super::{PackedTextureIndex, wanted_container_patterns, wanted_texture_names};
+
+    #[test]
+    fn wanted_names_include_directional_suffixes() {
+        let names = wanted_texture_names("Things/Item/Resource/Steel");
+        assert_eq!(names[0], "steel");
+        assert!(names.contains(&"steel_south".to_string()));
+        assert!(names.contains(&"steel_north".to_string()));
+        assert!(names.contains(&"steel_east".to_string()));
+        assert!(names.contains(&"steel_west".to_string()));
+    }
+
+    #[test]
+    fn wanted_container_patterns_include_png_and_rotations() {
+        let patterns = wanted_container_patterns("Things/Item/Resource/Steel");
+        assert!(patterns.contains(&"things/item/resource/steel".to_string()));
+        assert!(patterns.contains(&"things/item/resource/steel.png".to_string()));
+        assert!(patterns.contains(&"things/item/resource/steel_south".to_string()));
+    }
 
     #[test]
     fn persists_and_reloads_metadata_index() {
@@ -356,7 +386,7 @@ mod tests {
             "STITCHLANDS_PACKED_INDEX_V2",
             "any",
             "1",
-            "steel",
+            "steel_a",
             "1",
             "assets/resources/things/pawn/humanlike/bodies/naked_male.png",
             "",
@@ -390,5 +420,41 @@ mod tests {
         assert!(index.maybe_contains("Things/Item/Resource/DefinitelyMissing"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn index_with_names(names: &[&str]) -> PackedTextureIndex {
+        PackedTextureIndex {
+            signature: String::new(),
+            names: {
+                let mut v: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+                v.sort();
+                v
+            },
+            container_paths: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn prefix_match_finds_variant_suffix() {
+        let index = index_with_names(&["steel_a"]);
+        assert!(index.maybe_contains("Things/Item/Resource/Steel"));
+    }
+
+    #[test]
+    fn prefix_match_no_false_positive_without_underscore() {
+        let index = index_with_names(&["steelwork"]);
+        assert!(!index.maybe_contains("Things/Item/Resource/Steel"));
+    }
+
+    #[test]
+    fn prefix_match_compound_suffix() {
+        let index = index_with_names(&["agave_immature"]);
+        assert!(index.maybe_contains("Things/Plant/Agave"));
+    }
+
+    #[test]
+    fn prefix_match_clean_miss() {
+        let index = index_with_names(&["steel_a", "wood_a"]);
+        assert!(!index.maybe_contains("Things/Item/Resource/Gold"));
     }
 }
