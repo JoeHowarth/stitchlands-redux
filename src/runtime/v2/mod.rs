@@ -97,7 +97,7 @@ impl V2Runtime {
     }
 
     pub fn map_bounds(&self) -> (usize, usize) {
-        (self.world.width, self.world.height)
+        (self.world.width(), self.world.height())
     }
 
     pub fn frame_count(&self) -> u64 {
@@ -192,7 +192,7 @@ impl V2Runtime {
 
     pub fn frame_output(&self) -> V2FrameOutput {
         let mut pawn_nodes = Vec::new();
-        let mut ordered_pawns = self.world.pawns.iter().collect::<Vec<_>>();
+        let mut ordered_pawns = self.world.pawns().iter().collect::<Vec<_>>();
         ordered_pawns.sort_by(|a, b| {
             a.cell_z
                 .cmp(&b.cell_z)
@@ -298,7 +298,7 @@ mod tests {
     fn runtime_for_fixture(fixture: SceneFixture) -> V2Runtime {
         let world = world_from_fixture(&fixture);
         let profiles = world
-            .pawns
+            .pawns()
             .iter()
             .map(|pawn| profile_for(pawn.id, &pawn.label))
             .collect();

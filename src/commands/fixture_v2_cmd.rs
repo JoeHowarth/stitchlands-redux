@@ -23,9 +23,9 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
     let fixture = crate::fixtures::load_fixture(&cmd.scene)?;
     let mut world = world_from_fixture(&fixture);
     let _ = build_path_grid(&world);
-    if let Some(first_pawn_id) = world.pawns.first().map(|pawn| pawn.id) {
+    if let Some(first_pawn_id) = world.pawns().first().map(|pawn| pawn.id) {
         let start = {
-            let pawn = world.pawns.iter().find(|pawn| pawn.id == first_pawn_id);
+            let pawn = world.pawns().iter().find(|pawn| pawn.id == first_pawn_id);
             pawn.map(|pawn| Cell::new(pawn.cell_x, pawn.cell_z))
                 .unwrap_or(Cell::new(0, 0))
         };
@@ -35,7 +35,7 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
     let sprites = build_world_sprites(ctx, &world)?;
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let blocking_things = world
-        .things
+        .things()
         .iter()
         .filter(|thing| thing.blocks_movement)
         .count();
@@ -46,20 +46,20 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         .map(|camera| Vec2::new(camera.center_x, camera.center_z))
         .or_else(|| {
             Some(Vec2::new(
-                world.width as f32 * 0.5,
-                world.height as f32 * 0.5,
+                world.width() as f32 * 0.5,
+                world.height() as f32 * 0.5,
             ))
         });
 
     info!(
         "v2 fixture scene built: scene={} map={}x{} terrain={} things={} blocking_things={} pawns={} static={} dynamic={}",
         cmd.scene.display(),
-        world.width,
-        world.height,
-        world.terrain.len(),
-        world.things.len(),
+        world.width(),
+        world.height(),
+        world.terrain().len(),
+        world.things().len(),
         blocking_things,
-        world.pawns.len(),
+        world.pawns().len(),
         sprites.static_sprites.len(),
         sprites.dynamic_sprites.len()
     );
@@ -108,9 +108,9 @@ fn build_world_sprites(
     let mut dynamic_sprites = Vec::new();
     let mut pawn_visual_profiles = Vec::new();
 
-    for z in 0..world.height {
-        for x in 0..world.width {
-            let tile = &world.terrain[z * world.width + x];
+    for z in 0..world.height() {
+        for x in 0..world.width() {
+            let tile = &world.terrain()[z * world.width() + x];
             let terrain_def = ctx
                 .terrain_defs
                 .get(&tile.terrain_def)
@@ -138,7 +138,7 @@ fn build_world_sprites(
         }
     }
 
-    let mut things = world.things.clone();
+    let mut things = world.things().to_vec();
     things.sort_by(|a, b| {
         a.cell_z
             .cmp(&b.cell_z)
@@ -177,7 +177,7 @@ fn build_world_sprites(
         });
     }
 
-    let mut pawns = world.pawns.clone();
+    let mut pawns = world.pawns().to_vec();
     pawns.sort_by(|a, b| {
         a.cell_z
             .cmp(&b.cell_z)
