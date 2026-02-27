@@ -35,9 +35,27 @@ pub struct PawnState {
 
 #[derive(Debug, Clone)]
 pub struct WorldState {
-    pub width: usize,
-    pub height: usize,
-    pub terrain: Vec<TerrainTile>,
-    pub things: Vec<ThingState>,
-    pub pawns: Vec<PawnState>,
+    pub(super) width: usize,
+    pub(super) height: usize,
+    pub(super) terrain: Vec<TerrainTile>,
+    pub(super) things: Vec<ThingState>,
+    pub(super) pawns: Vec<PawnState>,
+}
+
+impl WorldState {
+    pub fn width(&self) -> usize {
+        self.width
+    }
+    pub fn height(&self) -> usize {
+        self.height
+    }
+    pub fn terrain(&self) -> &[TerrainTile] {
+        &self.terrain
+    }
+    pub fn things(&self) -> &[ThingState] {
+        &self.things
+    }
+    pub fn pawns(&self) -> &[PawnState] {
+        &self.pawns
+    }
 }
