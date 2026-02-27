@@ -9,6 +9,7 @@ use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
 use unity_asset_decode::unity_version::UnityVersion;
 
+use crate::assets::packed_index::{wanted_container_patterns, wanted_texture_names};
 use crate::assets::typetree_registry::load_typetree_registry;
 
 pub struct PackedTextureResolver {
@@ -441,33 +442,6 @@ pub fn infer_packed_data_roots(input_path: &Path, data_dir: &Path) -> Vec<PathBu
     roots
 }
 
-fn wanted_texture_names(tex_path: &str) -> Vec<String> {
-    let basename = tex_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(tex_path)
-        .to_ascii_lowercase();
-    vec![
-        basename.clone(),
-        format!("{}_south", basename),
-        format!("{}_north", basename),
-        format!("{}_east", basename),
-        format!("{}_west", basename),
-    ]
-}
-
-fn wanted_container_patterns(tex_path: &str) -> Vec<String> {
-    let base = tex_path.to_ascii_lowercase();
-    vec![
-        base.clone(),
-        format!("{base}.png"),
-        format!("{base}_south"),
-        format!("{base}_north"),
-        format!("{base}_east"),
-        format!("{base}_west"),
-    ]
-}
-
 fn container_match_score(asset_path: &str, candidate: &str) -> i32 {
     let mut score = 0;
     if asset_path.ends_with(candidate) {
@@ -517,24 +491,6 @@ fn normalize_packed_texture_orientation(image: &mut RgbaImage) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn wanted_names_include_directional_suffixes() {
-        let names = wanted_texture_names("Things/Item/Resource/Steel");
-        assert_eq!(names[0], "steel");
-        assert!(names.contains(&"steel_south".to_string()));
-        assert!(names.contains(&"steel_north".to_string()));
-        assert!(names.contains(&"steel_east".to_string()));
-        assert!(names.contains(&"steel_west".to_string()));
-    }
-
-    #[test]
-    fn wanted_container_patterns_include_png_and_rotations() {
-        let patterns = wanted_container_patterns("Things/Item/Resource/Steel");
-        assert!(patterns.contains(&"things/item/resource/steel".to_string()));
-        assert!(patterns.contains(&"things/item/resource/steel.png".to_string()));
-        assert!(patterns.contains(&"things/item/resource/steel_south".to_string()));
-    }
 
     #[test]
     fn sanitizes_filename() {

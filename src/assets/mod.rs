@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 mod default_config;
 mod loose;
-mod packed_index;
+pub(crate) mod packed_index;
 mod packed_textures;
 mod resolver;
 mod rimworld_paths;
