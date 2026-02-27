@@ -1,5 +1,5 @@
 pub mod compose;
-pub mod graph;
+mod graph;
 pub mod model;
 pub mod parms;
 pub mod rules;
