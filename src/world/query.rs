@@ -1,10 +1,12 @@
+use crate::cell::Cell;
+
 use super::{PawnState, WorldState};
 
-pub fn pawn_id_at_cell(world: &WorldState, cell: (i32, i32)) -> Option<usize> {
+pub fn pawn_id_at_cell(world: &WorldState, cell: Cell) -> Option<usize> {
     world
         .pawns
         .iter()
-        .find(|pawn| pawn.cell_x == cell.0 && pawn.cell_z == cell.1)
+        .find(|pawn| pawn.cell_x == cell.x && pawn.cell_z == cell.z)
         .map(|pawn| pawn.id)
 }
 

@@ -1,3 +1,4 @@
+use crate::cell::Cell;
 use crate::fixtures::PawnFacingSpec;
 use glam::Vec2;
 
@@ -28,7 +29,7 @@ pub struct PawnState {
     pub beard: Option<String>,
     pub apparel_defs: Vec<String>,
     pub world_pos: Vec2,
-    pub path_cells: Vec<(i32, i32)>,
+    pub path_cells: Vec<Cell>,
     pub path_index: usize,
     pub move_speed_cells_per_sec: f32,
 }

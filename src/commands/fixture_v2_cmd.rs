@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use glam::{Vec2, Vec3};
 use log::info;
 
+use crate::cell::Cell;
 use crate::cli::FixtureV2Cmd;
 use crate::defs::{
     ApparelDef, BeardDefRender, BodyTypeDefRender, HairDefRender, HeadTypeDefRender,
@@ -25,8 +26,8 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
     if let Some(first_pawn_id) = world.pawns.first().map(|pawn| pawn.id) {
         let start = {
             let pawn = world.pawns.iter().find(|pawn| pawn.id == first_pawn_id);
-            pawn.map(|pawn| (pawn.cell_x, pawn.cell_z))
-                .unwrap_or((0, 0))
+            pawn.map(|pawn| Cell::new(pawn.cell_x, pawn.cell_z))
+                .unwrap_or(Cell::new(0, 0))
         };
         let _ = issue_move_intent(&mut world, first_pawn_id, start);
         tick_world(&mut world, 0.0);

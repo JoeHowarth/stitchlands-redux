@@ -323,13 +323,13 @@ impl ApplicationHandler for App {
                             InteractionOutcome::SelectedPawn { pawn_id, cell } => {
                                 info!(
                                     "selected pawn id={} at cell=({}, {})",
-                                    pawn_id, cell.0, cell.1
+                                    pawn_id, cell.x, cell.z
                                 );
                             }
                             InteractionOutcome::IssuedMove { pawn_id, dest } => {
                                 info!(
                                     "issued move pawn id={} to cell=({}, {})",
-                                    pawn_id, dest.0, dest.1
+                                    pawn_id, dest.x, dest.z
                                 );
                                 if let Some(is_idle) = runtime.selected_pawn_idle()
                                     && is_idle

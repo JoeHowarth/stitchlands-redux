@@ -1,6 +1,7 @@
 use glam::Vec2;
 use std::collections::HashMap;
 
+use crate::cell::Cell;
 use crate::path::{PathGrid, find_path};
 
 use super::WorldState;
@@ -18,16 +19,16 @@ pub fn build_path_grid(world: &WorldState) -> PathGrid {
     grid
 }
 
-pub fn issue_move_intent(world: &mut WorldState, pawn_id: usize, dest: (i32, i32)) -> bool {
+pub fn issue_move_intent(world: &mut WorldState, pawn_id: usize, dest: Cell) -> bool {
     let Some(pawn_index) = world.pawns.iter().position(|pawn| pawn.id == pawn_id) else {
         return false;
     };
-    let start = (
+    let start = Cell::new(
         world.pawns[pawn_index].cell_x,
         world.pawns[pawn_index].cell_z,
     );
     let mut grid = build_path_grid(world);
-    grid.set_blocked(start.0, start.1, false);
+    grid.set_blocked(start.x, start.z, false);
 
     let Some(path) = find_path(&grid, start, dest) else {
         return false;
@@ -38,10 +39,10 @@ pub fn issue_move_intent(world: &mut WorldState, pawn_id: usize, dest: (i32, i32
 }
 
 pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
-    let mut occupied_cells: HashMap<(i32, i32), usize> = world
+    let mut occupied_cells: HashMap<Cell, usize> = world
         .pawns
         .iter()
-        .map(|pawn| ((pawn.cell_x, pawn.cell_z), pawn.id))
+        .map(|pawn| (Cell::new(pawn.cell_x, pawn.cell_z), pawn.id))
         .collect();
 
     for pawn in &mut world.pawns {
@@ -50,10 +51,9 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
         }
 
         let target_cell = pawn.path_cells[pawn.path_index];
-        let blocked_by_thing = world
-            .things
-            .iter()
-            .any(|thing| thing.blocks_movement && (thing.cell_x, thing.cell_z) == target_cell);
+        let blocked_by_thing = world.things.iter().any(|thing| {
+            thing.blocks_movement && Cell::new(thing.cell_x, thing.cell_z) == target_cell
+        });
         if blocked_by_thing {
             continue;
         }
@@ -62,19 +62,19 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
         {
             continue;
         }
-        let target = Vec2::new(target_cell.0 as f32 + 0.5, target_cell.1 as f32 + 0.5);
+        let target = Vec2::new(target_cell.x as f32 + 0.5, target_cell.z as f32 + 0.5);
         let to_target = target - pawn.world_pos;
         let distance = to_target.length();
         let max_step = pawn.move_speed_cells_per_sec.max(0.1) * dt_seconds.max(0.0);
 
         if distance <= max_step {
-            let prev_cell = (pawn.cell_x, pawn.cell_z);
+            let prev_cell = Cell::new(pawn.cell_x, pawn.cell_z);
             pawn.world_pos = target;
-            pawn.cell_x = target_cell.0;
-            pawn.cell_z = target_cell.1;
+            pawn.cell_x = target_cell.x;
+            pawn.cell_z = target_cell.z;
             pawn.path_index += 1;
             occupied_cells.remove(&prev_cell);
-            occupied_cells.insert((pawn.cell_x, pawn.cell_z), pawn.id);
+            occupied_cells.insert(Cell::new(pawn.cell_x, pawn.cell_z), pawn.id);
         } else if distance > 0.0 {
             pawn.world_pos += to_target / distance * max_step;
         }
@@ -83,6 +83,7 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
 
 #[cfg(test)]
 mod tests {
+    use crate::cell::Cell;
     use crate::fixtures::{MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn};
     use crate::world::{ThingState, WorldState, world_from_fixture};
 
@@ -125,7 +126,7 @@ mod tests {
     #[test]
     fn move_intent_creates_non_empty_path() {
         let mut world = fixture_world();
-        assert!(issue_move_intent(&mut world, 0, (5, 4)));
+        assert!(issue_move_intent(&mut world, 0, Cell::new(5, 4)));
         let pawn = world
             .pawns
             .iter_mut()
@@ -137,7 +138,7 @@ mod tests {
     #[test]
     fn tick_moves_pawn_along_path() {
         let mut world = fixture_world();
-        assert!(issue_move_intent(&mut world, 0, (5, 4)));
+        assert!(issue_move_intent(&mut world, 0, Cell::new(5, 4)));
         for _ in 0..180 {
             tick_world(&mut world, 1.0 / 60.0);
         }
@@ -152,7 +153,7 @@ mod tests {
     #[test]
     fn blocked_destination_rejected() {
         let mut world = fixture_world();
-        assert!(!issue_move_intent(&mut world, 0, (3, 2)));
+        assert!(!issue_move_intent(&mut world, 0, Cell::new(3, 2)));
         let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
         assert!(pawn.path_cells.is_empty());
     }
@@ -160,22 +161,22 @@ mod tests {
     #[test]
     fn zero_length_move_keeps_pawn_stationary() {
         let mut world = fixture_world();
-        assert!(issue_move_intent(&mut world, 0, (1, 1)));
+        assert!(issue_move_intent(&mut world, 0, Cell::new(1, 1)));
         tick_world(&mut world, 1.0 / 60.0);
         let pawn = world.pawns.iter().find(|pawn| pawn.id == 0).expect("pawn");
         assert_eq!((pawn.cell_x, pawn.cell_z), (1, 1));
-        assert_eq!(pawn.path_cells, vec![(1, 1)]);
+        assert_eq!(pawn.path_cells, vec![Cell::new(1, 1)]);
         assert_eq!(pawn.path_index, 1);
     }
 
     #[test]
     fn repeated_move_reissue_retargets_path() {
         let mut world = fixture_world();
-        assert!(issue_move_intent(&mut world, 0, (5, 4)));
+        assert!(issue_move_intent(&mut world, 0, Cell::new(5, 4)));
         for _ in 0..30 {
             tick_world(&mut world, 1.0 / 60.0);
         }
-        assert!(issue_move_intent(&mut world, 0, (0, 4)));
+        assert!(issue_move_intent(&mut world, 0, Cell::new(0, 4)));
         for _ in 0..240 {
             tick_world(&mut world, 1.0 / 60.0);
         }
@@ -225,8 +226,8 @@ mod tests {
             camera: None,
         });
 
-        assert!(issue_move_intent(&mut world, 0, (4, 0)));
-        assert!(issue_move_intent(&mut world, 1, (4, 0)));
+        assert!(issue_move_intent(&mut world, 0, Cell::new(4, 0)));
+        assert!(issue_move_intent(&mut world, 1, Cell::new(4, 0)));
         for _ in 0..300 {
             tick_world(&mut world, 1.0 / 60.0);
         }
@@ -252,7 +253,7 @@ mod tests {
     #[test]
     fn pawn_does_not_step_into_newly_blocked_thing_cell() {
         let mut world = fixture_world();
-        assert!(issue_move_intent(&mut world, 0, (5, 4)));
+        assert!(issue_move_intent(&mut world, 0, Cell::new(5, 4)));
         world.things.push(ThingState {
             id: 999,
             def_name: "LateBlocker".to_string(),
