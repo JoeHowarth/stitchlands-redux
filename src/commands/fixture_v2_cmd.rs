@@ -32,6 +32,7 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         tick_world(&mut world, 0.0);
     }
     let sprites = build_world_sprites(ctx, &world)?;
+    validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let blocking_things = world
         .things
         .iter()
@@ -362,5 +363,101 @@ fn map_facing(facing: crate::fixtures::PawnFacingSpec) -> PawnFacing {
         crate::fixtures::PawnFacingSpec::East => PawnFacing::East,
         crate::fixtures::PawnFacingSpec::South => PawnFacing::South,
         crate::fixtures::PawnFacingSpec::West => PawnFacing::West,
+    }
+}
+
+fn validate_layer_ownership(
+    static_sprites: &[RenderSprite],
+    dynamic_sprites: &[RenderSprite],
+) -> Result<()> {
+    let static_invalid: Vec<&str> = static_sprites
+        .iter()
+        .filter_map(|sprite| {
+            let name = sprite.def_name.as_str();
+            if name.starts_with("Terrain::") || name.starts_with("Thing::") {
+                None
+            } else {
+                Some(name)
+            }
+        })
+        .collect();
+    if !static_invalid.is_empty() {
+        anyhow::bail!(
+            "v2 layer ownership violation: static layer contains non-terrain/non-thing sprites: {}",
+            static_invalid.join(", ")
+        );
+    }
+
+    let dynamic_invalid: Vec<&str> = dynamic_sprites
+        .iter()
+        .filter_map(|sprite| {
+            let name = sprite.def_name.as_str();
+            if name.starts_with("PawnNode::") {
+                None
+            } else {
+                Some(name)
+            }
+        })
+        .collect();
+    if !dynamic_invalid.is_empty() {
+        anyhow::bail!(
+            "v2 layer ownership violation: dynamic layer contains non-pawn sprites: {}",
+            dynamic_invalid.join(", ")
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::{Vec2, Vec3};
+    use image::{Rgba, RgbaImage};
+
+    use super::{RenderSprite, validate_layer_ownership};
+    use crate::renderer::SpriteParams;
+
+    fn sprite(def_name: &str) -> RenderSprite {
+        RenderSprite {
+            def_name: def_name.to_string(),
+            image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])),
+            params: SpriteParams {
+                world_pos: Vec3::new(0.5, 0.5, 0.0),
+                size: Vec2::ONE,
+                tint: [1.0, 1.0, 1.0, 1.0],
+            },
+            used_fallback: false,
+            pawn_id: None,
+        }
+    }
+
+    #[test]
+    fn layer_ownership_accepts_expected_partition() {
+        let static_sprites = vec![sprite("Terrain::Soil"), sprite("Thing::ChunkSlagSteel")];
+        let dynamic_sprites = vec![
+            sprite("PawnNode::PawnA::Body"),
+            sprite("PawnNode::PawnA::Head"),
+        ];
+        assert!(validate_layer_ownership(&static_sprites, &dynamic_sprites).is_ok());
+    }
+
+    #[test]
+    fn layer_ownership_rejects_pawn_in_static() {
+        let static_sprites = vec![sprite("Terrain::Soil"), sprite("PawnNode::PawnA::Body")];
+        let dynamic_sprites = vec![sprite("PawnNode::PawnA::Head")];
+        let err =
+            validate_layer_ownership(&static_sprites, &dynamic_sprites).expect_err("should fail");
+        assert!(err.to_string().contains("static layer"));
+    }
+
+    #[test]
+    fn layer_ownership_rejects_thing_in_dynamic() {
+        let static_sprites = vec![sprite("Terrain::Soil")];
+        let dynamic_sprites = vec![
+            sprite("PawnNode::PawnA::Head"),
+            sprite("Thing::ChunkSlagSteel"),
+        ];
+        let err =
+            validate_layer_ownership(&static_sprites, &dynamic_sprites).expect_err("should fail");
+        assert!(err.to_string().contains("dynamic layer"));
     }
 }
