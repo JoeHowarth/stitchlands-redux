@@ -1,9 +1,12 @@
 use glam::{Vec2, Vec3};
+use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PawnFacing {
     North,
     East,
+    #[default]
     South,
     West,
 }

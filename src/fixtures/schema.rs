@@ -49,17 +49,7 @@ pub struct PawnSpawn {
     #[serde(default)]
     pub apparel_defs: Vec<String>,
     #[serde(default)]
-    pub facing: PawnFacingSpec,
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PawnFacingSpec {
-    North,
-    East,
-    #[default]
-    South,
-    West,
+    pub facing: crate::pawn::PawnFacing,
 }
 
 #[derive(Debug, Clone, Deserialize)]

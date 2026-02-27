@@ -99,10 +99,10 @@ pub fn validate_fixture(fixture: &SceneFixture) -> Result<()> {
             }
         }
         match pawn.facing {
-            super::schema::PawnFacingSpec::North
-            | super::schema::PawnFacingSpec::East
-            | super::schema::PawnFacingSpec::South
-            | super::schema::PawnFacingSpec::West => {}
+            crate::pawn::PawnFacing::North
+            | crate::pawn::PawnFacing::East
+            | crate::pawn::PawnFacing::South
+            | crate::pawn::PawnFacing::West => {}
         }
     }
 

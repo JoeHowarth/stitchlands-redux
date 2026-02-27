@@ -1,5 +1,5 @@
 use crate::cell::Cell;
-use crate::fixtures::PawnFacingSpec;
+use crate::pawn::PawnFacing;
 use glam::Vec2;
 
 #[derive(Debug, Clone)]
@@ -51,7 +51,7 @@ pub struct PawnState {
     pub label: String,
     pub cell_x: i32,
     pub cell_z: i32,
-    pub facing: PawnFacingSpec,
+    pub facing: PawnFacing,
     pub body: Option<String>,
     pub head: Option<String>,
     pub hair: Option<String>,

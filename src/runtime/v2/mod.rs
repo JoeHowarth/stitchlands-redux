@@ -7,7 +7,7 @@ use crate::cell::Cell;
 use crate::interaction::{
     InteractionAction, InteractionState, on_cursor_moved, on_escape, on_left_click, on_right_click,
 };
-use crate::pawn::{PawnComposeConfig, PawnFacing, PawnRenderInput, compose_pawn};
+use crate::pawn::{PawnComposeConfig, PawnRenderInput, compose_pawn};
 use crate::renderer::SpriteParams;
 use crate::world::{
     WorldState, issue_move_intent, pawn_id_at_cell, pawn_is_idle, selected_pawn, tick_world,
@@ -205,7 +205,7 @@ impl V2Runtime {
                 continue;
             };
             let mut render_input = profile.base_render_input.clone();
-            render_input.facing = map_facing(pawn.facing);
+            render_input.facing = pawn.facing;
             render_input.world_pos = glam::Vec3::new(pawn.world_pos.x, pawn.world_pos.y, 0.0);
 
             let composed = compose_pawn(&render_input, &self.compose_config);
@@ -235,23 +235,12 @@ impl V2Runtime {
     }
 }
 
-fn map_facing(facing: crate::fixtures::PawnFacingSpec) -> PawnFacing {
-    match facing {
-        crate::fixtures::PawnFacingSpec::North => PawnFacing::North,
-        crate::fixtures::PawnFacingSpec::East => PawnFacing::East,
-        crate::fixtures::PawnFacingSpec::South => PawnFacing::South,
-        crate::fixtures::PawnFacingSpec::West => PawnFacing::West,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::cell::Cell;
-    use crate::fixtures::{
-        MapSpec, PawnFacingSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn,
-    };
+    use crate::fixtures::{MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn};
     use crate::pawn::{
         BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData, PawnDrawFlags, PawnFacing,
         PawnRenderInput,
@@ -322,7 +311,7 @@ mod tests {
                 hair: None,
                 beard: None,
                 apparel_defs: Vec::new(),
-                facing: PawnFacingSpec::South,
+                facing: PawnFacing::South,
             }],
             camera: None,
         }

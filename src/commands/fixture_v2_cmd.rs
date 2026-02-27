@@ -9,7 +9,7 @@ use crate::defs::{
 };
 use crate::pawn::{
     ApparelLayer, ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
-    PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
+    PawnDrawFlags, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::SpriteParams;
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
@@ -193,7 +193,7 @@ fn build_world_sprites(
         let apparel_inputs = build_apparel_inputs(ctx.apparel_defs, &pawn.apparel_defs)?;
         let render_input = PawnRenderInput {
             label: pawn.label.clone(),
-            facing: map_facing(pawn.facing),
+            facing: pawn.facing,
             world_pos: Vec3::new(pawn.world_pos.x, pawn.world_pos.y, 0.0),
             body_tex_path: body.body_naked_graphic_path.clone(),
             head_tex_path: head.map(|v| v.graphic_path.clone()),
@@ -355,15 +355,6 @@ fn map_apparel_layer(layer: crate::defs::ApparelLayerDef) -> ApparelLayer {
         crate::defs::ApparelLayerDef::Belt => ApparelLayer::Belt,
         crate::defs::ApparelLayerDef::Overhead => ApparelLayer::Overhead,
         crate::defs::ApparelLayerDef::EyeCover => ApparelLayer::EyeCover,
-    }
-}
-
-fn map_facing(facing: crate::fixtures::PawnFacingSpec) -> PawnFacing {
-    match facing {
-        crate::fixtures::PawnFacingSpec::North => PawnFacing::North,
-        crate::fixtures::PawnFacingSpec::East => PawnFacing::East,
-        crate::fixtures::PawnFacingSpec::South => PawnFacing::South,
-        crate::fixtures::PawnFacingSpec::West => PawnFacing::West,
     }
 }
 

@@ -13,7 +13,7 @@ use crate::defs::{
 use crate::pawn::{
     ApparelLayer as ComposeApparelLayer, ApparelRenderInput, BeardTypeRenderData,
     BodyTypeRenderData, HeadTypeRenderData, HediffOverlayInput, OverlayAnchor, PawnComposeConfig,
-    PawnDrawFlags, PawnFacing as ComposeFacing, PawnRenderInput, compose_pawn,
+    PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::SpriteParams;
 use crate::scene::{
@@ -402,9 +402,9 @@ pub(crate) fn build_v1_fixture_scene(
 
     for (pawn_index, pawn) in sorted_pawns(&map.pawns).into_iter().enumerate() {
         let facing = if pawn_focus_only {
-            ComposeFacing::South
+            PawnFacing::South
         } else {
-            map_facing(pawn.facing)
+            pawn.facing
         };
         let compatible_heads: Vec<&String> = head_tex_paths
             .iter()
@@ -508,15 +508,15 @@ pub(crate) fn build_v1_fixture_scene(
                     map_explicit_skip_flags(&apparel.render_skip_flags);
                 let layer_override = apparel_draw_layer_for_facing(apparel, facing).or_else(|| {
                     if apparel.layer == ApparelLayerDef::Shell
-                        && facing == ComposeFacing::North
+                        && facing == PawnFacing::North
                         && !apparel.shell_rendered_behind_head
                     {
                         Some(88.0)
                     } else if render_as_pack {
                         match facing {
-                            ComposeFacing::North => Some(93.0),
-                            ComposeFacing::South => Some(-3.0),
-                            ComposeFacing::East | ComposeFacing::West => None,
+                            PawnFacing::North => Some(93.0),
+                            PawnFacing::South => Some(-3.0),
+                            PawnFacing::East | PawnFacing::West => None,
                         }
                     } else {
                         None
@@ -573,7 +573,7 @@ pub(crate) fn build_v1_fixture_scene(
                     draw_size: Vec2::new(0.75, 0.75),
                     tint: [1.0, 0.45, 0.45, 0.70],
                     required_body_part_group: Some("Torso".to_string()),
-                    visible_facing: Some(vec![ComposeFacing::South, ComposeFacing::East]),
+                    visible_facing: Some(vec![PawnFacing::South, PawnFacing::East]),
                 },
                 HediffOverlayInput {
                     label: "FaceBruise".to_string(),
@@ -790,15 +790,6 @@ pub(crate) fn build_v1_fixture_scene(
     Ok((sprites, camera_focus))
 }
 
-fn map_facing(facing: crate::scene::PawnFacing) -> ComposeFacing {
-    match facing {
-        crate::scene::PawnFacing::North => ComposeFacing::North,
-        crate::scene::PawnFacing::East => ComposeFacing::East,
-        crate::scene::PawnFacing::South => ComposeFacing::South,
-        crate::scene::PawnFacing::West => ComposeFacing::West,
-    }
-}
-
 fn measure_head_body_delta_y(nodes: &[crate::pawn::tree::PawnNode]) -> Option<f32> {
     let body_y = nodes
         .iter()
@@ -927,35 +918,35 @@ fn map_explicit_skip_flags(flags: &Option<Vec<ApparelSkipFlagDef>>) -> (bool, bo
     (skip_hair, skip_beard, true)
 }
 
-fn apparel_draw_layer_for_facing(apparel: &ApparelDef, facing: ComposeFacing) -> Option<f32> {
+fn apparel_draw_layer_for_facing(apparel: &ApparelDef, facing: PawnFacing) -> Option<f32> {
     match facing {
-        ComposeFacing::North => apparel.draw_data.north_layer,
-        ComposeFacing::East => apparel.draw_data.east_layer,
-        ComposeFacing::South => apparel.draw_data.south_layer,
-        ComposeFacing::West => apparel.draw_data.west_layer,
+        PawnFacing::North => apparel.draw_data.north_layer,
+        PawnFacing::East => apparel.draw_data.east_layer,
+        PawnFacing::South => apparel.draw_data.south_layer,
+        PawnFacing::West => apparel.draw_data.west_layer,
     }
 }
 
 fn apparel_worn_data_for_facing(
     apparel: &ApparelDef,
-    facing: ComposeFacing,
+    facing: PawnFacing,
     body_type: Option<&str>,
 ) -> crate::defs::ApparelWornDirectionDef {
     let body_key = body_type.map(|s| s.to_ascii_lowercase());
     let (mut out, directional_overrides) = match facing {
-        ComposeFacing::North => (
+        PawnFacing::North => (
             apparel.worn_graphic.north,
             &apparel.worn_graphic.north_body_overrides,
         ),
-        ComposeFacing::East => (
+        PawnFacing::East => (
             apparel.worn_graphic.east,
             &apparel.worn_graphic.east_body_overrides,
         ),
-        ComposeFacing::South => (
+        PawnFacing::South => (
             apparel.worn_graphic.south,
             &apparel.worn_graphic.south_body_overrides,
         ),
-        ComposeFacing::West => (
+        PawnFacing::West => (
             apparel.worn_graphic.west,
             &apparel.worn_graphic.west_body_overrides,
         ),
@@ -983,14 +974,14 @@ fn apparel_worn_data_for_facing(
 
 struct DirectionalTexturePath {
     path: String,
-    data_facing: ComposeFacing,
+    data_facing: PawnFacing,
 }
 
 fn resolve_directional_tex_path(
     asset_resolver: &mut AssetResolver,
     data_dir: &Path,
     path: &str,
-    facing: ComposeFacing,
+    facing: PawnFacing,
 ) -> DirectionalTexturePath {
     if path.ends_with("_north")
         || path.ends_with("_south")
@@ -1003,16 +994,16 @@ fn resolve_directional_tex_path(
         };
     }
 
-    let candidates: &[(ComposeFacing, &str)] = match facing {
-        ComposeFacing::North => &[(ComposeFacing::North, "_north")],
-        ComposeFacing::South => &[(ComposeFacing::South, "_south")],
-        ComposeFacing::East => &[
-            (ComposeFacing::East, "_east"),
-            (ComposeFacing::West, "_west"),
+    let candidates: &[(PawnFacing, &str)] = match facing {
+        PawnFacing::North => &[(PawnFacing::North, "_north")],
+        PawnFacing::South => &[(PawnFacing::South, "_south")],
+        PawnFacing::East => &[
+            (PawnFacing::East, "_east"),
+            (PawnFacing::West, "_west"),
         ],
-        ComposeFacing::West => &[
-            (ComposeFacing::West, "_west"),
-            (ComposeFacing::East, "_east"),
+        PawnFacing::West => &[
+            (PawnFacing::West, "_west"),
+            (PawnFacing::East, "_east"),
         ],
     };
 

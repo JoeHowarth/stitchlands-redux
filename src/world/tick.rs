@@ -119,7 +119,7 @@ mod tests {
                 hair: None,
                 beard: None,
                 apparel_defs: Vec::new(),
-                facing: crate::fixtures::PawnFacingSpec::South,
+                facing: crate::pawn::PawnFacing::South,
             }],
             camera: None,
         })
@@ -214,7 +214,7 @@ mod tests {
                     hair: None,
                     beard: None,
                     apparel_defs: Vec::new(),
-                    facing: crate::fixtures::PawnFacingSpec::South,
+                    facing: crate::pawn::PawnFacing::South,
                 },
                 PawnSpawn {
                     cell_x: 3,
@@ -225,7 +225,7 @@ mod tests {
                     hair: None,
                     beard: None,
                     apparel_defs: Vec::new(),
-                    facing: crate::fixtures::PawnFacingSpec::South,
+                    facing: crate::pawn::PawnFacing::South,
                 },
             ],
             camera: None,

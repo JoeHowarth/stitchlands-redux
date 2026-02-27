@@ -1,18 +1,12 @@
 use std::collections::HashMap;
 
+use crate::pawn::PawnFacing;
+
 #[derive(Debug, Clone)]
 pub struct ThingInstance {
     pub def_name: String,
     pub cell_x: i32,
     pub cell_z: i32,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum PawnFacing {
-    North,
-    East,
-    South,
-    West,
 }
 
 #[derive(Debug, Clone)]
