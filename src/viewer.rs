@@ -12,10 +12,12 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-use crate::renderer::{Renderer, RendererOptions, SpriteInput, SpriteParams};
+use crate::renderer::{
+    Renderer, RendererOptions, SpriteInput, SpriteInstance, SpriteParams, TextureId,
+};
 use crate::runtime::v2::{
     InteractionOutcome, V2Runtime,
-    render_bridge::{PawnNodeImageCache, compose_dynamic_sprites},
+    render_bridge::{PawnNodeTextureCache, compose_dynamic_sprites},
 };
 
 pub(crate) struct RenderSprite {
@@ -55,9 +57,10 @@ struct App {
     renderer_options: RendererOptions,
     hidden_window: bool,
     fixed_step: bool,
-    base_dynamic_inputs: Vec<SpriteInput>,
-    pawn_node_images: PawnNodeImageCache,
+    base_dynamic_inputs: Vec<SpriteInstance>,
+    pawn_node_textures: PawnNodeTextureCache,
     overlay_image: RgbaImage,
+    overlay_texture_id: Option<TextureId>,
     map_bounds: Option<(usize, usize)>,
     runtime: Option<V2Runtime>,
 }
@@ -76,21 +79,24 @@ impl App {
             hidden_window: launch.hidden_window,
             fixed_step: launch.fixed_step,
             base_dynamic_inputs: Vec::new(),
-            pawn_node_images: HashMap::new(),
+            pawn_node_textures: HashMap::new(),
             overlay_image: RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255])
                 .expect("1x1 overlay texture"),
+            overlay_texture_id: None,
             map_bounds: None,
             runtime: launch.runtime,
         }
     }
 
-    fn dynamic_with_overlays(&self) -> Vec<SpriteInput> {
-        if let Some(runtime) = &self.runtime {
+    fn dynamic_with_overlays(&self) -> Vec<SpriteInstance> {
+        if let Some(runtime) = &self.runtime
+            && let Some(overlay_texture_id) = self.overlay_texture_id
+        {
             let frame = runtime.frame_output();
             compose_dynamic_sprites(
                 &self.base_dynamic_inputs,
-                &self.pawn_node_images,
-                &self.overlay_image,
+                &self.pawn_node_textures,
+                overlay_texture_id,
                 &frame,
             )
         } else {
@@ -133,24 +139,6 @@ impl ApplicationHandler for App {
                 params: sprite.params,
             })
             .collect();
-        self.base_dynamic_inputs.clear();
-        self.pawn_node_images.clear();
-        for sprite in self.dynamic_sprites.drain(..) {
-            if let Some(pawn_id) = sprite.pawn_id
-                && let Some(node_id) = parse_pawn_node_id(&sprite.def_name)
-            {
-                self.pawn_node_images
-                    .entry(pawn_id)
-                    .or_default()
-                    .insert(node_id.to_string(), sprite.image);
-                continue;
-            }
-
-            self.base_dynamic_inputs.push(SpriteInput {
-                image: sprite.image,
-                params: sprite.params,
-            });
-        }
         let renderer = pollster::block_on(Renderer::new(
             window.clone(),
             static_inputs,
@@ -159,8 +147,28 @@ impl ApplicationHandler for App {
         ))
         .expect("create renderer");
         let mut renderer = renderer;
+        self.base_dynamic_inputs.clear();
+        self.pawn_node_textures.clear();
+        self.overlay_texture_id = Some(renderer.register_texture(self.overlay_image.clone()));
+        for sprite in self.dynamic_sprites.drain(..) {
+            let texture_id = renderer.register_texture(sprite.image);
+            if let Some(pawn_id) = sprite.pawn_id
+                && let Some(node_id) = parse_pawn_node_id(&sprite.def_name)
+            {
+                self.pawn_node_textures
+                    .entry(pawn_id)
+                    .or_default()
+                    .insert(node_id.to_string(), texture_id);
+                continue;
+            }
+
+            self.base_dynamic_inputs.push(SpriteInstance {
+                texture_id,
+                params: sprite.params,
+            });
+        }
         renderer
-            .set_dynamic_sprites(self.dynamic_with_overlays())
+            .set_dynamic_instances(self.dynamic_with_overlays())
             .expect("set initial dynamic sprites");
 
         self.renderer = Some(renderer);
@@ -197,7 +205,7 @@ impl ApplicationHandler for App {
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;
                 };
-                if let Err(err) = renderer.set_dynamic_sprites(frame_dynamic) {
+                if let Err(err) = renderer.set_dynamic_instances(frame_dynamic) {
                     eprintln!("dynamic sprite update error: {err:#}");
                     event_loop.exit();
                     return;

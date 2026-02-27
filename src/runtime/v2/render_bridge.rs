@@ -1,39 +1,38 @@
 use std::collections::HashMap;
 
 use glam::Vec2;
-use image::RgbaImage;
 
-use crate::renderer::{SpriteInput, SpriteParams};
+use crate::renderer::{SpriteInstance, SpriteParams, TextureId};
 
 use super::V2FrameOutput;
 
-pub type PawnNodeImageCache = HashMap<usize, HashMap<String, RgbaImage>>;
+pub type PawnNodeTextureCache = HashMap<usize, HashMap<String, TextureId>>;
 
 pub fn compose_dynamic_sprites(
-    base_dynamic_inputs: &[SpriteInput],
-    pawn_node_images: &PawnNodeImageCache,
-    overlay_image: &RgbaImage,
+    base_dynamic_inputs: &[SpriteInstance],
+    pawn_node_textures: &PawnNodeTextureCache,
+    overlay_texture_id: TextureId,
     frame: &V2FrameOutput,
-) -> Vec<SpriteInput> {
+) -> Vec<SpriteInstance> {
     let mut out = base_dynamic_inputs.to_vec();
 
     for node in &frame.pawn_nodes {
-        let Some(pawn_nodes) = pawn_node_images.get(&node.pawn_id) else {
+        let Some(pawn_nodes) = pawn_node_textures.get(&node.pawn_id) else {
             continue;
         };
-        let Some(image) = pawn_nodes.get(&node.node_id) else {
+        let Some(texture_id) = pawn_nodes.get(&node.node_id) else {
             continue;
         };
 
-        out.push(SpriteInput {
-            image: image.clone(),
+        out.push(SpriteInstance {
+            texture_id: *texture_id,
             params: node.params.clone(),
         });
     }
 
     for cell in &frame.selected_path_cells {
-        out.push(SpriteInput {
-            image: overlay_image.clone(),
+        out.push(SpriteInstance {
+            texture_id: overlay_texture_id,
             params: SpriteParams {
                 world_pos: glam::Vec3::new(cell.0 as f32 + 0.5, cell.1 as f32 + 0.5, -0.23),
                 size: Vec2::new(0.36, 0.36),
@@ -43,8 +42,8 @@ pub fn compose_dynamic_sprites(
     }
 
     if let Some((x, z)) = frame.hovered_cell {
-        out.push(SpriteInput {
-            image: overlay_image.clone(),
+        out.push(SpriteInstance {
+            texture_id: overlay_texture_id,
             params: SpriteParams {
                 world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.22),
                 size: Vec2::new(1.04, 1.04),
@@ -54,8 +53,8 @@ pub fn compose_dynamic_sprites(
     }
 
     if let Some(selected_pos) = frame.selected_world_pos {
-        out.push(SpriteInput {
-            image: overlay_image.clone(),
+        out.push(SpriteInstance {
+            texture_id: overlay_texture_id,
             params: SpriteParams {
                 world_pos: glam::Vec3::new(selected_pos.x, selected_pos.y, -0.21),
                 size: Vec2::new(1.16, 1.16),
@@ -63,8 +62,8 @@ pub fn compose_dynamic_sprites(
             },
         });
     } else if let Some((x, z)) = frame.selected_cell {
-        out.push(SpriteInput {
-            image: overlay_image.clone(),
+        out.push(SpriteInstance {
+            texture_id: overlay_texture_id,
             params: SpriteParams {
                 world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.21),
                 size: Vec2::new(1.10, 1.10),

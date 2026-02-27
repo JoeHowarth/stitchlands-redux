@@ -33,8 +33,8 @@ pub struct Renderer {
     texture_bind_groups: HashMap<TextureId, wgpu::BindGroup>,
     texture_keys: HashMap<TextureKey, TextureId>,
     texture_images: HashMap<TextureId, RgbaImage>,
-    static_sprites: Vec<SpriteInput>,
-    dynamic_sprites: Vec<SpriteInput>,
+    static_instances: Vec<SpriteInstance>,
+    dynamic_instances: Vec<SpriteInstance>,
     next_texture_id: u32,
     sprite_batches: Vec<SpriteBatch>,
     camera_speed: f32,
@@ -375,8 +375,8 @@ impl Renderer {
             texture_bind_groups: HashMap::new(),
             texture_keys: HashMap::new(),
             texture_images: HashMap::new(),
-            static_sprites: Vec::new(),
-            dynamic_sprites: Vec::new(),
+            static_instances: Vec::new(),
+            dynamic_instances: Vec::new(),
             next_texture_id: 1,
             sprite_batches: Vec::new(),
             camera_speed: 0.2,
@@ -500,39 +500,45 @@ impl Renderer {
     }
 
     pub fn set_static_sprites(&mut self, sprites: Vec<SpriteInput>) -> Result<()> {
-        for sprite in &sprites {
-            let _ = self.register_texture(sprite.image.clone());
-        }
-        self.static_sprites = sprites;
-        self.rebuild_sprite_batches()
+        let instances = self.instances_from_sprites(sprites);
+        self.set_static_instances(instances)
     }
 
     pub fn set_dynamic_sprites(&mut self, sprites: Vec<SpriteInput>) -> Result<()> {
-        for sprite in &sprites {
-            let _ = self.register_texture(sprite.image.clone());
-        }
-        self.dynamic_sprites = sprites;
+        let instances = self.instances_from_sprites(sprites);
+        self.set_dynamic_instances(instances)
+    }
+
+    pub fn set_static_instances(&mut self, sprites: Vec<SpriteInstance>) -> Result<()> {
+        self.static_instances = sprites;
         self.rebuild_sprite_batches()
+    }
+
+    pub fn set_dynamic_instances(&mut self, sprites: Vec<SpriteInstance>) -> Result<()> {
+        self.dynamic_instances = sprites;
+        self.rebuild_sprite_batches()
+    }
+
+    fn instances_from_sprites(&mut self, sprites: Vec<SpriteInput>) -> Vec<SpriteInstance> {
+        sprites
+            .into_iter()
+            .map(|sprite| SpriteInstance {
+                texture_id: self.register_texture(sprite.image),
+                params: sprite.params,
+            })
+            .collect()
     }
 
     fn rebuild_sprite_batches(&mut self) -> Result<()> {
         let mut grouped: HashMap<TextureId, Vec<(usize, InstanceData)>> = HashMap::new();
         for (index, sprite) in self
-            .static_sprites
+            .static_instances
             .iter()
-            .chain(self.dynamic_sprites.iter())
+            .chain(self.dynamic_instances.iter())
             .enumerate()
         {
-            let key = texture_key(&sprite.image);
-            let texture_id = self.texture_keys.get(&key).copied().with_context(|| {
-                format!(
-                    "missing TextureId for sprite texture {}x{}",
-                    sprite.image.width(),
-                    sprite.image.height()
-                )
-            })?;
             grouped
-                .entry(texture_id)
+                .entry(sprite.texture_id)
                 .or_default()
                 .push((index, InstanceData::from_params(&sprite.params)));
         }
@@ -804,6 +810,12 @@ struct ScreenshotReadback {
 #[derive(Debug, Clone)]
 pub struct SpriteInput {
     pub image: RgbaImage,
+    pub params: SpriteParams,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpriteInstance {
+    pub texture_id: TextureId,
     pub params: SpriteParams,
 }
 
