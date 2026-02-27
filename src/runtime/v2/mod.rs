@@ -248,3 +248,170 @@ fn map_facing(facing: crate::fixtures::PawnFacingSpec) -> PawnFacing {
         crate::fixtures::PawnFacingSpec::West => PawnFacing::West,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::{Vec2, Vec3};
+
+    use crate::fixtures::{
+        MapSpec, PawnFacingSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn,
+    };
+    use crate::pawn::{
+        BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData, PawnDrawFlags, PawnFacing,
+        PawnRenderInput,
+    };
+    use crate::world::world_from_fixture;
+
+    use super::{InteractionOutcome, PawnVisualProfile, V2Runtime, V2RuntimeConfig};
+
+    fn profile_for(pawn_id: usize, label: &str) -> PawnVisualProfile {
+        PawnVisualProfile {
+            pawn_id,
+            base_render_input: PawnRenderInput {
+                label: label.to_string(),
+                facing: PawnFacing::South,
+                world_pos: Vec3::new(0.5, 0.5, 0.0),
+                body_tex_path: "Things/Pawn/Humanlike/Bodies/Naked_Male".to_string(),
+                head_tex_path: Some("Things/Pawn/Humanlike/Heads/Male/Average_Normal".to_string()),
+                stump_tex_path: None,
+                hair_tex_path: None,
+                beard_tex_path: None,
+                body_size: Vec2::ONE,
+                head_size: Vec2::ONE,
+                stump_size: Vec2::splat(0.8),
+                hair_size: Vec2::ONE,
+                beard_size: Vec2::ONE,
+                body_type: BodyTypeRenderData::default(),
+                head_type: HeadTypeRenderData::default(),
+                beard_type: BeardTypeRenderData::default(),
+                tint: [1.0, 1.0, 1.0, 1.0],
+                apparel: Vec::new(),
+                present_body_part_groups: vec!["UpperHead".to_string(), "Torso".to_string()],
+                hediff_overlays: Vec::new(),
+                draw_flags: PawnDrawFlags::NONE,
+            },
+        }
+    }
+
+    fn runtime_for_fixture(fixture: SceneFixture) -> V2Runtime {
+        let world = world_from_fixture(&fixture);
+        let profiles = world
+            .pawns
+            .iter()
+            .map(|pawn| profile_for(pawn.id, &pawn.label))
+            .collect();
+        V2Runtime::new(world, profiles, V2RuntimeConfig::default())
+    }
+
+    fn open_world_fixture() -> SceneFixture {
+        SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 8,
+                height: 6,
+                terrain: vec![
+                    TerrainCell {
+                        terrain_def: "Soil".to_string(),
+                    };
+                    8 * 6
+                ],
+            },
+            things: Vec::new(),
+            pawns: vec![PawnSpawn {
+                cell_x: 1,
+                cell_z: 1,
+                label: Some("PawnA".to_string()),
+                body: None,
+                head: None,
+                hair: None,
+                beard: None,
+                apparel_defs: Vec::new(),
+                facing: PawnFacingSpec::South,
+            }],
+            camera: None,
+        }
+    }
+
+    #[test]
+    fn select_then_move_issues_path() {
+        let mut runtime = runtime_for_fixture(open_world_fixture());
+
+        assert!(runtime.on_cursor_cell(Some((1, 1))));
+        assert_eq!(
+            runtime.on_left_click(),
+            InteractionOutcome::SelectedPawn {
+                pawn_id: 0,
+                cell: (1, 1)
+            }
+        );
+        assert!(runtime.on_cursor_cell(Some((5, 4))));
+        assert_eq!(
+            runtime.on_left_click(),
+            InteractionOutcome::IssuedMove {
+                pawn_id: 0,
+                dest: (5, 4)
+            }
+        );
+
+        let frame = runtime.frame_output();
+        assert!(!frame.selected_path_cells.is_empty());
+        assert!(!frame.pawn_nodes.is_empty());
+    }
+
+    #[test]
+    fn blocked_destination_returns_noop() {
+        let mut fixture = open_world_fixture();
+        fixture.things.push(ThingSpawn {
+            def_name: "ChunkSlagSteel".to_string(),
+            cell_x: 5,
+            cell_z: 4,
+            blocks_movement: true,
+        });
+        let mut runtime = runtime_for_fixture(fixture);
+
+        assert!(runtime.on_cursor_cell(Some((1, 1))));
+        let _ = runtime.on_left_click();
+        assert!(runtime.on_cursor_cell(Some((5, 4))));
+        assert_eq!(runtime.on_left_click(), InteractionOutcome::NoOp);
+    }
+
+    #[test]
+    fn pawn_reaches_destination_within_bounded_ticks() {
+        let mut runtime = runtime_for_fixture(open_world_fixture());
+
+        assert!(runtime.on_cursor_cell(Some((1, 1))));
+        let _ = runtime.on_left_click();
+        assert!(runtime.on_cursor_cell(Some((5, 4))));
+        let issued = runtime.on_left_click();
+        assert!(matches!(issued, InteractionOutcome::IssuedMove { .. }));
+
+        for _ in 0..300 {
+            runtime.tick_once();
+        }
+
+        let frame = runtime.frame_output();
+        let pos = frame
+            .selected_world_pos
+            .expect("selected pawn should still be available");
+        assert!((pos.x - 5.5).abs() < 0.01);
+        assert!((pos.y - 4.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn right_click_and_escape_clear_selection() {
+        let mut runtime = runtime_for_fixture(open_world_fixture());
+
+        assert!(runtime.on_cursor_cell(Some((1, 1))));
+        let _ = runtime.on_left_click();
+        assert_eq!(
+            runtime.on_right_click(),
+            InteractionOutcome::ClearedSelection
+        );
+        assert_eq!(runtime.frame_output().selected_world_pos, None);
+
+        let _ = runtime.on_cursor_cell(Some((1, 1)));
+        let _ = runtime.on_left_click();
+        assert_eq!(runtime.on_escape(), InteractionOutcome::ClearedSelection);
+        assert_eq!(runtime.frame_output().selected_world_pos, None);
+    }
+}
