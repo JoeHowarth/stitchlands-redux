@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,7 +13,10 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::renderer::{Renderer, RendererOptions, SpriteInput, SpriteParams};
-use crate::runtime::v2::{InteractionOutcome, V2Runtime, render_bridge::compose_dynamic_sprites};
+use crate::runtime::v2::{
+    InteractionOutcome, V2Runtime,
+    render_bridge::{PawnNodeImageCache, compose_dynamic_sprites},
+};
 
 pub(crate) struct RenderSprite {
     pub(crate) def_name: String,
@@ -52,7 +56,7 @@ struct App {
     hidden_window: bool,
     fixed_step: bool,
     base_dynamic_inputs: Vec<SpriteInput>,
-    base_dynamic_pawn_ids: Vec<Option<usize>>,
+    pawn_node_images: PawnNodeImageCache,
     overlay_image: RgbaImage,
     map_bounds: Option<(usize, usize)>,
     runtime: Option<V2Runtime>,
@@ -72,7 +76,7 @@ impl App {
             hidden_window: launch.hidden_window,
             fixed_step: launch.fixed_step,
             base_dynamic_inputs: Vec::new(),
-            base_dynamic_pawn_ids: Vec::new(),
+            pawn_node_images: HashMap::new(),
             overlay_image: RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255])
                 .expect("1x1 overlay texture"),
             map_bounds: None,
@@ -85,7 +89,7 @@ impl App {
             let frame = runtime.frame_output();
             compose_dynamic_sprites(
                 &self.base_dynamic_inputs,
-                &self.base_dynamic_pawn_ids,
+                &self.pawn_node_images,
                 &self.overlay_image,
                 &frame,
             )
@@ -129,15 +133,24 @@ impl ApplicationHandler for App {
                 params: sprite.params,
             })
             .collect();
-        self.base_dynamic_pawn_ids = self.dynamic_sprites.iter().map(|s| s.pawn_id).collect();
-        self.base_dynamic_inputs = self
-            .dynamic_sprites
-            .drain(..)
-            .map(|sprite| SpriteInput {
+        self.base_dynamic_inputs.clear();
+        self.pawn_node_images.clear();
+        for sprite in self.dynamic_sprites.drain(..) {
+            if let Some(pawn_id) = sprite.pawn_id
+                && let Some(node_id) = parse_pawn_node_id(&sprite.def_name)
+            {
+                self.pawn_node_images
+                    .entry(pawn_id)
+                    .or_default()
+                    .insert(node_id.to_string(), sprite.image);
+                continue;
+            }
+
+            self.base_dynamic_inputs.push(SpriteInput {
                 image: sprite.image,
                 params: sprite.params,
-            })
-            .collect();
+            });
+        }
         let renderer = pollster::block_on(Renderer::new(
             window.clone(),
             static_inputs,
@@ -347,4 +360,8 @@ fn infer_map_bounds(static_sprites: &[RenderSprite]) -> Option<(usize, usize)> {
         return None;
     }
     Some(((max_x + 1) as usize, (max_z + 1) as usize))
+}
+
+fn parse_pawn_node_id(def_name: &str) -> Option<&str> {
+    def_name.strip_prefix("PawnNode::")
 }

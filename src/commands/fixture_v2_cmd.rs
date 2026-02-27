@@ -8,10 +8,10 @@ use crate::defs::{
 };
 use crate::pawn::{
     ApparelLayer, ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
-    PawnComposeConfig, PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
+    PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::SpriteParams;
-use crate::runtime::v2::{V2Runtime, V2RuntimeConfig};
+use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
 use crate::viewer::RenderSprite;
 use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
 
@@ -66,10 +66,22 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
         return Ok(CommandAction::Done);
     }
 
-    let runtime = V2Runtime::new(world, V2RuntimeConfig::default());
+    let SpriteLayers {
+        static_sprites,
+        dynamic_sprites,
+        pawn_visual_profiles,
+    } = sprites;
+    let runtime = V2Runtime::new(
+        world,
+        pawn_visual_profiles,
+        V2RuntimeConfig {
+            fixed_dt_seconds: 1.0 / 60.0,
+            compose_config: ctx.compose_config.clone(),
+        },
+    );
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
-        static_sprites: sprites.static_sprites,
-        dynamic_sprites: sprites.dynamic_sprites,
+        static_sprites,
+        dynamic_sprites,
         runtime: Some(runtime),
         screenshot: cmd.view.screenshot,
         camera_focus,
@@ -82,6 +94,7 @@ pub fn run_fixture_v2(ctx: &mut DispatchContext<'_>, cmd: FixtureV2Cmd) -> Resul
 struct SpriteLayers {
     static_sprites: Vec<RenderSprite>,
     dynamic_sprites: Vec<RenderSprite>,
+    pawn_visual_profiles: Vec<PawnVisualProfile>,
 }
 
 fn build_world_sprites(
@@ -90,6 +103,7 @@ fn build_world_sprites(
 ) -> Result<SpriteLayers> {
     let mut static_sprites = Vec::new();
     let mut dynamic_sprites = Vec::new();
+    let mut pawn_visual_profiles = Vec::new();
 
     for z in 0..world.height {
         for x in 0..world.width {
@@ -212,8 +226,12 @@ fn build_world_sprites(
             hediff_overlays: Vec::new(),
             draw_flags: PawnDrawFlags::NONE,
         };
+        pawn_visual_profiles.push(PawnVisualProfile {
+            pawn_id: pawn.id,
+            base_render_input: render_input.clone(),
+        });
 
-        let composed = compose_pawn(&render_input, &PawnComposeConfig::default());
+        let composed = compose_pawn(&render_input, &ctx.compose_config);
         for node in composed.nodes {
             let resolved = ctx
                 .asset_resolver
@@ -236,6 +254,7 @@ fn build_world_sprites(
     Ok(SpriteLayers {
         static_sprites,
         dynamic_sprites,
+        pawn_visual_profiles,
     })
 }
 

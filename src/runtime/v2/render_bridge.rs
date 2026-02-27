@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use glam::Vec2;
 use image::RgbaImage;
 
@@ -5,23 +7,28 @@ use crate::renderer::{SpriteInput, SpriteParams};
 
 use super::V2FrameOutput;
 
+pub type PawnNodeImageCache = HashMap<usize, HashMap<String, RgbaImage>>;
+
 pub fn compose_dynamic_sprites(
     base_dynamic_inputs: &[SpriteInput],
-    base_dynamic_pawn_ids: &[Option<usize>],
+    pawn_node_images: &PawnNodeImageCache,
     overlay_image: &RgbaImage,
     frame: &V2FrameOutput,
 ) -> Vec<SpriteInput> {
     let mut out = base_dynamic_inputs.to_vec();
 
-    for (sprite, pawn_id) in out.iter_mut().zip(base_dynamic_pawn_ids.iter()) {
-        let Some(pawn_id) = pawn_id else {
+    for node in &frame.pawn_nodes {
+        let Some(pawn_nodes) = pawn_node_images.get(&node.pawn_id) else {
             continue;
         };
-        let Some(delta) = frame.pawn_offsets.get(pawn_id) else {
+        let Some(image) = pawn_nodes.get(&node.node_id) else {
             continue;
         };
-        sprite.params.world_pos.x += delta.x;
-        sprite.params.world_pos.y += delta.y;
+
+        out.push(SpriteInput {
+            image: image.clone(),
+            params: node.params.clone(),
+        });
     }
 
     for cell in &frame.selected_path_cells {
