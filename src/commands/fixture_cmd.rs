@@ -19,13 +19,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<Co
     let (render_sprites, camera_focus) = if !is_pawn {
         super::v1_scene::build_v1_fixture_scene(super::v1_scene::FixtureSceneConfig {
             data_dir: ctx.data_dir,
-            thing_defs: ctx.thing_defs,
-            terrain_defs: ctx.terrain_defs,
-            apparel_defs: ctx.apparel_defs,
-            body_type_defs: ctx.body_type_defs,
-            head_type_defs: ctx.head_type_defs,
-            beard_defs: ctx.beard_defs,
-            hair_defs: ctx.hair_defs,
+            defs: &ctx.defs,
             asset_resolver: ctx.asset_resolver,
             width: fixture.map_width,
             height: fixture.map_height,
@@ -40,13 +34,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<Co
     } else {
         super::v1_scene::build_v1_fixture_scene(super::v1_scene::FixtureSceneConfig {
             data_dir: ctx.data_dir,
-            thing_defs: ctx.thing_defs,
-            terrain_defs: ctx.terrain_defs,
-            apparel_defs: ctx.apparel_defs,
-            body_type_defs: ctx.body_type_defs,
-            head_type_defs: ctx.head_type_defs,
-            beard_defs: ctx.beard_defs,
-            hair_defs: ctx.hair_defs,
+            defs: &ctx.defs,
             asset_resolver: ctx.asset_resolver,
             width: fixture.map_width.clamp(8, 18),
             height: fixture.map_height.clamp(8, 18),
@@ -82,13 +70,7 @@ pub fn run_audit(ctx: &mut DispatchContext<'_>, audit: AuditCmd) -> Result<Comma
     let (render_sprites, camera_focus) =
         super::v1_scene::build_v1_fixture_scene(super::v1_scene::FixtureSceneConfig {
             data_dir: ctx.data_dir,
-            thing_defs: ctx.thing_defs,
-            terrain_defs: ctx.terrain_defs,
-            apparel_defs: ctx.apparel_defs,
-            body_type_defs: ctx.body_type_defs,
-            head_type_defs: ctx.head_type_defs,
-            beard_defs: ctx.beard_defs,
-            hair_defs: ctx.hair_defs,
+            defs: &ctx.defs,
             asset_resolver: ctx.asset_resolver,
             width: audit.map_width.max(24),
             height: audit.map_height.max(24),

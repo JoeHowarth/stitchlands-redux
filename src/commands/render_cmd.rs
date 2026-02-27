@@ -60,19 +60,21 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         .as_deref()
         .context("--thingdef or --image-path is required for render")?;
     let thing = ctx
+        .defs
         .thing_defs
         .get(thingdef)
         .cloned()
-        .with_context(|| super::v1_scene::make_missing_def_message(thingdef, ctx.thing_defs))?;
+        .with_context(|| super::v1_scene::make_missing_def_message(thingdef, ctx.defs.thing_defs))?;
     info!("selected def: {}", thing.def_name);
 
     let mut selected_defs = vec![thing];
     for extra_name in &render.extra_thingdef {
         let extra = ctx
+            .defs
             .thing_defs
             .get(extra_name)
             .cloned()
-            .with_context(|| super::v1_scene::make_missing_def_message(extra_name, ctx.thing_defs))?;
+            .with_context(|| super::v1_scene::make_missing_def_message(extra_name, ctx.defs.thing_defs))?;
         info!("selected extra def: {}", extra.def_name);
         selected_defs.push(extra);
     }

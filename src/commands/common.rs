@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -5,7 +6,20 @@ use walkdir::WalkDir;
 
 use crate::assets::AssetResolver;
 use crate::assets::extract_all_packed_textures;
-use crate::defs::{TerrainDef, ThingDef};
+use crate::defs::{
+    ApparelDef, BeardDefRender, BodyTypeDefRender, HairDefRender, HeadTypeDefRender, TerrainDef,
+    ThingDef,
+};
+
+pub struct DefSet<'a> {
+    pub thing_defs: &'a HashMap<String, ThingDef>,
+    pub terrain_defs: &'a HashMap<String, TerrainDef>,
+    pub apparel_defs: &'a HashMap<String, ApparelDef>,
+    pub body_type_defs: &'a HashMap<String, BodyTypeDefRender>,
+    pub head_type_defs: &'a HashMap<String, HeadTypeDefRender>,
+    pub beard_defs: &'a HashMap<String, BeardDefRender>,
+    pub hair_defs: &'a HashMap<String, HairDefRender>,
+}
 
 pub fn run_extract_packed_textures(
     packed_roots: &[PathBuf],

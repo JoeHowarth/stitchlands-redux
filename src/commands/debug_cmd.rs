@@ -38,7 +38,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             def_filter,
             list_limit,
         } => {
-            super::common::list_defs(ctx.thing_defs, def_filter.as_deref(), list_limit);
+            super::common::list_defs(ctx.defs.thing_defs, def_filter.as_deref(), list_limit);
             Ok(CommandAction::Done)
         }
         DebugCmd::ProbeTerrain {
@@ -46,7 +46,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
         } => {
             super::common::run_terrain_probe(
                 ctx.data_dir,
-                ctx.terrain_defs,
+                ctx.defs.terrain_defs,
                 ctx.asset_resolver,
                 terrain_probe_limit,
             )?;

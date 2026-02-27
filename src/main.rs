@@ -28,26 +28,23 @@ fn main() -> Result<()> {
 
     let ctx = AppContext::load(&cli.data, compose_config_from_humanlike_layers)?;
     let data_dir = ctx.data_dir.clone();
-    let defs = &ctx.thing_defs;
-    let terrain_defs = &ctx.terrain_defs;
-    let apparel_defs = &ctx.apparel_defs;
-    let body_type_defs = &ctx.body_type_defs;
-    let head_type_defs = &ctx.head_type_defs;
-    let beard_defs = &ctx.beard_defs;
-    let hair_defs = &ctx.hair_defs;
     let compose_config = ctx.compose_config.clone();
     let allow_fallback = ctx.allow_fallback;
     let mut asset_resolver = ctx.asset_resolver;
 
+    let defs = crate::commands::DefSet {
+        thing_defs: &ctx.thing_defs,
+        terrain_defs: &ctx.terrain_defs,
+        apparel_defs: &ctx.apparel_defs,
+        body_type_defs: &ctx.body_type_defs,
+        head_type_defs: &ctx.head_type_defs,
+        beard_defs: &ctx.beard_defs,
+        hair_defs: &ctx.hair_defs,
+    };
+
     let mut dispatch = crate::commands::DispatchContext {
         data_dir: &data_dir,
-        thing_defs: defs,
-        terrain_defs,
-        apparel_defs,
-        body_type_defs,
-        head_type_defs,
-        beard_defs,
-        hair_defs,
+        defs,
         compose_config,
         allow_fallback,
         asset_resolver: &mut asset_resolver,

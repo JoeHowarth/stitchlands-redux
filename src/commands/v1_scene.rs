@@ -8,7 +8,7 @@ use log::{info, warn};
 use crate::assets::AssetResolver;
 use crate::defs::{
     ApparelDef, ApparelLayerDef, ApparelSkipFlagDef, BeardDefRender, BodyTypeDefRender,
-    HairDefRender, HeadTypeDefRender, TerrainDef, ThingDef,
+    HairDefRender, HeadTypeDefRender, ThingDef,
 };
 use crate::pawn::{
     ApparelLayer as ComposeApparelLayer, ApparelRenderInput, BeardTypeRenderData,
@@ -23,13 +23,7 @@ use crate::viewer::RenderSprite;
 
 pub(crate) struct FixtureSceneConfig<'a> {
     pub data_dir: &'a Path,
-    pub thing_defs: &'a HashMap<String, ThingDef>,
-    pub terrain_defs: &'a HashMap<String, TerrainDef>,
-    pub apparel_defs: &'a HashMap<String, ApparelDef>,
-    pub body_type_defs: &'a HashMap<String, BodyTypeDefRender>,
-    pub head_type_defs: &'a HashMap<String, HeadTypeDefRender>,
-    pub beard_defs: &'a HashMap<String, BeardDefRender>,
-    pub hair_defs: &'a HashMap<String, HairDefRender>,
+    pub defs: &'a super::DefSet<'a>,
     pub asset_resolver: &'a mut AssetResolver,
     pub width: usize,
     pub height: usize,
@@ -47,13 +41,7 @@ pub(crate) fn build_v1_fixture_scene(
 ) -> Result<(Vec<RenderSprite>, Vec2)> {
     let FixtureSceneConfig {
         data_dir,
-        thing_defs,
-        terrain_defs,
-        apparel_defs,
-        body_type_defs,
-        head_type_defs,
-        beard_defs,
-        hair_defs,
+        defs,
         asset_resolver,
         width,
         height,
@@ -65,6 +53,15 @@ pub(crate) fn build_v1_fixture_scene(
         compose_config,
         strict_missing,
     } = config;
+    let super::DefSet {
+        thing_defs,
+        terrain_defs,
+        apparel_defs,
+        body_type_defs,
+        head_type_defs,
+        beard_defs,
+        hair_defs,
+    } = defs;
 
     let mut terrain_rows: Vec<_> = terrain_defs.values().collect();
     terrain_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));

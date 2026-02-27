@@ -112,6 +112,7 @@ fn build_world_sprites(
         for x in 0..world.width() {
             let tile = &world.terrain()[z * world.width() + x];
             let terrain_def = ctx
+                .defs
                 .terrain_defs
                 .get(&tile.terrain_def)
                 .with_context(|| format!("missing TerrainDef '{}'", tile.terrain_def))?;
@@ -147,6 +148,7 @@ fn build_world_sprites(
     });
     for thing in things {
         let thing_def = ctx
+            .defs
             .thing_defs
             .get(&thing.def_name)
             .with_context(|| format!("missing ThingDef '{}'", thing.def_name))?;
@@ -185,12 +187,12 @@ fn build_world_sprites(
             .then(a.id.cmp(&b.id))
     });
     for pawn in pawns {
-        let body = choose_body_def(ctx.body_type_defs, pawn.body.as_deref())?;
-        let head = choose_head_def(ctx.head_type_defs, pawn.head.as_deref());
-        let hair = choose_hair_def(ctx.hair_defs, pawn.hair.as_deref());
-        let beard = choose_beard_def(ctx.beard_defs, pawn.beard.as_deref());
+        let body = choose_body_def(ctx.defs.body_type_defs, pawn.body.as_deref())?;
+        let head = choose_head_def(ctx.defs.head_type_defs, pawn.head.as_deref());
+        let hair = choose_hair_def(ctx.defs.hair_defs, pawn.hair.as_deref());
+        let beard = choose_beard_def(ctx.defs.beard_defs, pawn.beard.as_deref());
 
-        let apparel_inputs = build_apparel_inputs(ctx.apparel_defs, &pawn.apparel_defs)?;
+        let apparel_inputs = build_apparel_inputs(ctx.defs.apparel_defs, &pawn.apparel_defs)?;
         let render_input = PawnRenderInput {
             label: pawn.label.clone(),
             facing: pawn.facing,
