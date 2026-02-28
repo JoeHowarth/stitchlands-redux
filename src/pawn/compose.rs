@@ -204,14 +204,23 @@ fn evaluate_graph(
                 } else {
                     workers::apparel_z(config.layering, apparel.layer, stack_index)
                 };
+                let base = Vec2::splat(super::model::HUMANLIKE_MESH_BASE);
+                let size = if apparel.render_as_pack {
+                    base * apparel.pack_scale
+                } else {
+                    base
+                };
+                let extra_offset = workers::apparel_offset(apparel.layer, config.layering)
+                    + if apparel.render_as_pack {
+                        apparel.pack_offset
+                    } else {
+                        Vec2::ZERO
+                    };
                 (
                     apparel.tex_path.clone(),
-                    Vec2::new(
-                        apparel.draw_size.x * apparel.draw_scale.x,
-                        apparel.draw_size.y * apparel.draw_scale.y,
-                    ),
+                    size,
                     apparel.tint,
-                    workers::apparel_offset(apparel.layer, config.layering) + apparel.draw_offset,
+                    extra_offset,
                     z,
                 )
             }
@@ -310,10 +319,10 @@ mod tests {
             covers_upper_head: false,
             covers_full_head: true,
             anchor_to_head: None,
-            draw_offset: Vec2::ZERO,
-            draw_scale: Vec2::ONE,
+            pack_offset: Vec2::ZERO,
+            pack_scale: Vec2::ONE,
+            render_as_pack: false,
             layer_override: None,
-            draw_size: Vec2::new(1.1, 1.1),
             tint: [1.0, 1.0, 1.0, 1.0],
         });
 
@@ -398,10 +407,10 @@ mod tests {
                 covers_upper_head: true,
                 covers_full_head: false,
                 anchor_to_head: None,
-                draw_offset: Vec2::ZERO,
-                draw_scale: Vec2::ONE,
+                pack_offset: Vec2::ZERO,
+                pack_scale: Vec2::ONE,
+                render_as_pack: false,
                 layer_override: None,
-                draw_size: Vec2::new(1.1, 1.1),
                 tint: [1.0, 1.0, 1.0, 1.0],
             },
             ApparelRenderInput {
@@ -414,10 +423,10 @@ mod tests {
                 covers_upper_head: false,
                 covers_full_head: false,
                 anchor_to_head: None,
-                draw_offset: Vec2::ZERO,
-                draw_scale: Vec2::ONE,
+                pack_offset: Vec2::ZERO,
+                pack_scale: Vec2::ONE,
+                render_as_pack: false,
                 layer_override: None,
-                draw_size: Vec2::new(1.3, 1.3),
                 tint: [1.0, 1.0, 1.0, 1.0],
             },
         ];
@@ -453,6 +462,71 @@ mod tests {
                 .nodes
                 .iter()
                 .all(|n| !matches!(n.kind, crate::pawn::tree::PawnNodeKind::Hediff))
+        );
+    }
+
+    #[test]
+    fn non_pack_apparel_uses_humanlike_mesh_base_size() {
+        let mut input = fixture_input();
+        input.apparel.push(ApparelRenderInput {
+            label: "Jacket".to_string(),
+            tex_path: "Things/Apparel/Body/Jacket".to_string(),
+            layer: ApparelLayer::Shell,
+            explicit_skip_hair: false,
+            explicit_skip_beard: false,
+            has_explicit_skip_flags: false,
+            covers_upper_head: false,
+            covers_full_head: false,
+            anchor_to_head: None,
+            pack_offset: Vec2::new(0.1, 0.2), // non-zero to prove it is ignored
+            pack_scale: Vec2::new(0.8, 0.9),  // non-one to prove it is ignored
+            render_as_pack: false,
+            layer_override: None,
+            tint: [1.0, 1.0, 1.0, 1.0],
+        });
+
+        let result = compose_pawn(&input, &PawnComposeConfig::default());
+        let jacket = result
+            .nodes
+            .iter()
+            .find(|n| n.id.contains("Jacket"))
+            .expect("jacket node");
+        let expected = Vec2::splat(crate::pawn::model::HUMANLIKE_MESH_BASE);
+        assert_eq!(jacket.size, expected, "non-pack apparel should use mesh base unscaled");
+    }
+
+    #[test]
+    fn pack_apparel_applies_worn_scale_and_offset() {
+        let mut input = fixture_input();
+        input.apparel.push(ApparelRenderInput {
+            label: "PackThing".to_string(),
+            tex_path: "Things/Apparel/Belt/PackThing".to_string(),
+            layer: ApparelLayer::Belt,
+            explicit_skip_hair: false,
+            explicit_skip_beard: false,
+            has_explicit_skip_flags: false,
+            covers_upper_head: false,
+            covers_full_head: false,
+            anchor_to_head: None,
+            pack_offset: Vec2::new(0.1, 0.2),
+            pack_scale: Vec2::new(0.8, 0.9),
+            render_as_pack: true,
+            layer_override: None,
+            tint: [1.0, 1.0, 1.0, 1.0],
+        });
+
+        let result = compose_pawn(&input, &PawnComposeConfig::default());
+        let pack = result
+            .nodes
+            .iter()
+            .find(|n| n.id.contains("PackThing"))
+            .expect("pack node");
+        let base = crate::pawn::model::HUMANLIKE_MESH_BASE;
+        assert!(
+            (pack.size.x - base * 0.8).abs() < 0.001
+                && (pack.size.y - base * 0.9).abs() < 0.001,
+            "pack apparel should scale mesh base by pack_scale, got {:?}",
+            pack.size,
         );
     }
 }

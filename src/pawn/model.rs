@@ -56,6 +56,9 @@ impl ApparelLayer {
     }
 }
 
+/// Adult humanlike mesh base size used by RimWorld for body, head, and apparel quads.
+pub const HUMANLIKE_MESH_BASE: f32 = 1.5;
+
 #[derive(Debug, Clone)]
 pub struct ApparelRenderInput {
     pub label: String,
@@ -67,10 +70,10 @@ pub struct ApparelRenderInput {
     pub covers_upper_head: bool,
     pub covers_full_head: bool,
     pub anchor_to_head: Option<bool>,
-    pub draw_offset: Vec2,
-    pub draw_scale: Vec2,
+    pub pack_offset: Vec2,
+    pub pack_scale: Vec2,
+    pub render_as_pack: bool,
     pub layer_override: Option<f32>,
-    pub draw_size: Vec2,
     pub tint: [f32; 4],
 }
 

@@ -384,8 +384,13 @@ fn build_apparel_inputs(
             .get(def_name)
             .with_context(|| format!("missing ApparelDef '{}'", def_name))?;
 
-        let render_as_pack = matches!(apparel.layer, ApparelLayerDef::Belt)
-            || apparel.worn_graphic.render_utility_as_pack;
+        // Match RimWorld's RenderAsPack(): only Belt items can render as pack,
+        // gated by renderUtilityAsPack. Non-Belt items never render as pack.
+        let render_as_pack = if matches!(apparel.layer, ApparelLayerDef::Belt) {
+            apparel.worn_graphic.render_utility_as_pack
+        } else {
+            false
+        };
 
         // Resolve body-type suffixed texture path
         let tex_path = build_apparel_tex_path(
@@ -428,10 +433,10 @@ fn build_apparel_inputs(
             covers_upper_head: apparel.covers_upper_head,
             covers_full_head: apparel.covers_full_head,
             anchor_to_head,
-            draw_offset: worn_data.offset,
-            draw_scale: worn_data.scale,
+            pack_offset: worn_data.offset,
+            pack_scale: worn_data.scale,
+            render_as_pack,
             layer_override,
-            draw_size: apparel.draw_size,
             tint: [
                 apparel.color.r,
                 apparel.color.g,
