@@ -34,6 +34,19 @@ impl From<crate::defs::ApparelLayerDef> for ApparelLayer {
     }
 }
 
+impl From<ApparelLayer> for crate::defs::ApparelLayerDef {
+    fn from(layer: ApparelLayer) -> Self {
+        match layer {
+            ApparelLayer::OnSkin => Self::OnSkin,
+            ApparelLayer::Middle => Self::Middle,
+            ApparelLayer::Shell => Self::Shell,
+            ApparelLayer::Belt => Self::Belt,
+            ApparelLayer::Overhead => Self::Overhead,
+            ApparelLayer::EyeCover => Self::EyeCover,
+        }
+    }
+}
+
 impl ApparelLayer {
     pub const ALL: [Self; 6] = [
         Self::OnSkin,
@@ -45,14 +58,7 @@ impl ApparelLayer {
     ];
 
     pub fn draw_order(self) -> i32 {
-        match self {
-            Self::OnSkin => 10,
-            Self::Middle => 20,
-            Self::Shell => 30,
-            Self::Belt => 40,
-            Self::Overhead => 50,
-            Self::EyeCover => 60,
-        }
+        crate::defs::ApparelLayerDef::from(self).draw_order()
     }
 }
 
