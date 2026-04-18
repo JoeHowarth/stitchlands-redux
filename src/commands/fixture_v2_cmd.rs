@@ -7,8 +7,7 @@ use log::{info, warn};
 use crate::cell::Cell;
 use crate::cli::FixtureV2Cmd;
 use crate::defs::{
-    ApparelDef, ApparelLayerDef, BeardDefRender, BodyTypeDefRender, HairDefRender,
-    HeadTypeDefRender,
+    ApparelDef, ApparelLayerDef, BodyTypeDefRender,
 };
 use crate::pawn::{
     ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
@@ -210,9 +209,27 @@ pub(crate) fn build_world_sprites(
     });
     for pawn in pawns {
         let body = choose_body_def(ctx.defs.body_type_defs, pawn.body.as_deref())?;
-        let head = choose_head_def(ctx.defs.head_type_defs, pawn.head.as_deref());
-        let hair = choose_hair_def(ctx.defs.hair_defs, pawn.hair.as_deref());
-        let beard = choose_beard_def(ctx.defs.beard_defs, pawn.beard.as_deref());
+        let head = choose_def(
+            ctx.defs.head_type_defs,
+            pawn.head.as_deref(),
+            "head",
+            |h| &h.def_name,
+            |_| true,
+        );
+        let hair = choose_def(
+            ctx.defs.hair_defs,
+            pawn.hair.as_deref(),
+            "hair",
+            |h| &h.def_name,
+            |_| true,
+        );
+        let beard = choose_def(
+            ctx.defs.beard_defs,
+            pawn.beard.as_deref(),
+            "beard",
+            |b| &b.def_name,
+            |b| !b.no_graphic && !b.tex_path.is_empty(),
+        );
 
         let facing = pawn.facing;
 
@@ -322,45 +339,22 @@ fn choose_body_def<'a>(
         .context("no BodyTypeDefRender entries are available")
 }
 
-fn choose_head_def<'a>(
-    defs: &'a HashMap<String, HeadTypeDefRender>,
+fn choose_def<'a, T>(
+    defs: &'a HashMap<String, T>,
     preferred: Option<&str>,
-) -> Option<&'a HeadTypeDefRender> {
+    kind: &str,
+    key_of: impl Fn(&T) -> &str,
+    eligible: impl Fn(&T) -> bool,
+) -> Option<&'a T> {
     if let Some(name) = preferred {
-        if let Some(head) = defs.get(name) {
-            return Some(head);
+        if let Some(value) = defs.get(name) {
+            return Some(value);
         }
-        warn!("preferred head def '{name}' not found, falling back");
-    }
-    defs.values().min_by(|a, b| a.def_name.cmp(&b.def_name))
-}
-
-fn choose_hair_def<'a>(
-    defs: &'a HashMap<String, HairDefRender>,
-    preferred: Option<&str>,
-) -> Option<&'a HairDefRender> {
-    if let Some(name) = preferred {
-        if let Some(hair) = defs.get(name) {
-            return Some(hair);
-        }
-        warn!("preferred hair def '{name}' not found, falling back");
-    }
-    defs.values().min_by(|a, b| a.def_name.cmp(&b.def_name))
-}
-
-fn choose_beard_def<'a>(
-    defs: &'a HashMap<String, BeardDefRender>,
-    preferred: Option<&str>,
-) -> Option<&'a BeardDefRender> {
-    if let Some(name) = preferred {
-        if let Some(beard) = defs.get(name) {
-            return Some(beard);
-        }
-        warn!("preferred beard def '{name}' not found, falling back");
+        warn!("preferred {kind} def '{name}' not found, falling back");
     }
     defs.values()
-        .filter(|beard| !beard.no_graphic && !beard.tex_path.is_empty())
-        .min_by(|a, b| a.def_name.cmp(&b.def_name))
+        .filter(|v| eligible(v))
+        .min_by_key(|v| key_of(v))
 }
 
 fn build_apparel_inputs(
