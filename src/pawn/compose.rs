@@ -1,7 +1,9 @@
 use glam::{Vec2, Vec3};
 
 use super::graph::{AnchorKind, GraphNode, NodePayload};
-use super::model::{ApparelLayer, OverlayAnchor, PawnComposeConfig, PawnRenderInput};
+use super::model::{
+    ApparelLayer, HUMANLIKE_MESH_BASE, OverlayAnchor, PawnComposeConfig, PawnRenderInput,
+};
 use super::parms::{PawnDrawParms, RenderSkipFlag};
 use super::rules::should_draw_hediff_overlay;
 use super::tree::{PawnNode, PawnNodeKind};
@@ -141,41 +143,42 @@ fn evaluate_graph(
     let mut apparel_head_index = 0usize;
     let mut hediff_index = 0usize;
 
+    let pawn_quad = Vec2::splat(HUMANLIKE_MESH_BASE);
     let mut out = Vec::with_capacity(graph.len());
     for g in graph {
         let anchor = workers::anchor_offset(g.anchor, input.facing, input.body_type);
         let (tex_path, size, tint, extra_offset, z) = match &g.payload {
             NodePayload::Body => (
                 input.body_tex_path.clone(),
-                input.body_size,
+                pawn_quad,
                 input.tint,
                 Vec2::ZERO,
                 config.layering.body_z,
             ),
             NodePayload::Head => (
                 input.head_tex_path.clone().unwrap_or_default(),
-                input.head_size,
+                pawn_quad,
                 input.tint,
                 workers::head_extra_offset(input.facing, input.head_type, config.layering),
                 config.layering.head_z,
             ),
             NodePayload::Stump => (
                 input.stump_tex_path.clone().unwrap_or_default(),
-                input.stump_size,
+                pawn_quad,
                 input.tint,
                 Vec2::new(0.0, config.layering.stump_y_offset),
                 config.layering.head_z,
             ),
             NodePayload::Hair => (
                 input.hair_tex_path.clone().unwrap_or_default(),
-                input.hair_size,
+                pawn_quad,
                 input.tint,
                 Vec2::new(0.0, config.layering.hair_y_offset),
                 config.layering.hair_z,
             ),
             NodePayload::Beard => (
                 input.beard_tex_path.clone().unwrap_or_default(),
-                input.beard_size,
+                pawn_quad,
                 input.tint,
                 workers::beard_extra_offset(
                     input.facing,
@@ -204,11 +207,10 @@ fn evaluate_graph(
                 } else {
                     workers::apparel_z(config.layering, apparel.layer, stack_index)
                 };
-                let base = Vec2::splat(super::model::HUMANLIKE_MESH_BASE);
                 let size = if apparel.render_as_pack {
-                    base * apparel.pack_scale
+                    pawn_quad * apparel.pack_scale
                 } else {
-                    base
+                    pawn_quad
                 };
                 let extra_offset = workers::apparel_offset(apparel.layer, config.layering)
                     + if apparel.render_as_pack {
@@ -287,14 +289,8 @@ mod tests {
             stump_tex_path: Some("Things/Pawn/Humanlike/Heads/Stumps/Stump".to_string()),
             hair_tex_path: Some("Things/Pawn/Humanlike/Hairs/Shaved".to_string()),
             beard_tex_path: Some("Things/Pawn/Humanlike/Beards/Beard_Full".to_string()),
-            body_size: Vec2::new(1.4, 1.4),
-            head_size: Vec2::new(1.1, 1.1),
-            stump_size: Vec2::new(0.8, 0.8),
-            hair_size: Vec2::new(1.1, 1.1),
-            beard_size: Vec2::new(1.0, 1.0),
             body_type: BodyTypeRenderData {
                 head_offset: Vec2::new(0.0, 0.22),
-                body_size_factor: 1.0,
             },
             head_type: HeadTypeRenderData::default(),
             beard_type: BeardTypeRenderData::default(),

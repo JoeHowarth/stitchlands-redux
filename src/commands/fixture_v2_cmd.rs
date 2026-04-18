@@ -247,14 +247,8 @@ pub(crate) fn build_world_sprites(
             stump_tex_path: None,
             hair_tex_path,
             beard_tex_path,
-            body_size: Vec2::ONE,
-            head_size: Vec2::ONE,
-            stump_size: Vec2::splat(0.8),
-            hair_size: head.map(|v| v.hair_mesh_size).unwrap_or(Vec2::ONE),
-            beard_size: head.map(|v| v.beard_mesh_size).unwrap_or(Vec2::ONE),
             body_type: BodyTypeRenderData {
                 head_offset: body.head_offset,
-                body_size_factor: 1.0,
             },
             head_type: head
                 .map(|v| HeadTypeRenderData {

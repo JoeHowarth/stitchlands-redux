@@ -56,7 +56,8 @@ impl ApparelLayer {
     }
 }
 
-/// Adult humanlike mesh base size used by RimWorld for body, head, and apparel quads.
+/// Adult humanlike mesh base size used by RimWorld for body, head, hair, beard,
+/// and apparel quads. Every pawn-render quad is built at this size.
 pub const HUMANLIKE_MESH_BASE: f32 = 1.5;
 
 #[derive(Debug, Clone)]
@@ -80,14 +81,12 @@ pub struct ApparelRenderInput {
 #[derive(Debug, Clone, Copy)]
 pub struct BodyTypeRenderData {
     pub head_offset: Vec2,
-    pub body_size_factor: f32,
 }
 
 impl Default for BodyTypeRenderData {
     fn default() -> Self {
         Self {
             head_offset: Vec2::new(0.0, 0.22),
-            body_size_factor: 1.0,
         }
     }
 }
@@ -171,11 +170,6 @@ pub struct PawnRenderInput {
     pub stump_tex_path: Option<String>,
     pub hair_tex_path: Option<String>,
     pub beard_tex_path: Option<String>,
-    pub body_size: Vec2,
-    pub head_size: Vec2,
-    pub stump_size: Vec2,
-    pub hair_size: Vec2,
-    pub beard_size: Vec2,
     pub body_type: BodyTypeRenderData,
     pub head_type: HeadTypeRenderData,
     pub beard_type: BeardTypeRenderData,

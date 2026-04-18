@@ -142,7 +142,6 @@ pub struct ApparelDef {
 pub struct BodyTypeDefRender {
     pub def_name: String,
     pub head_offset: Vec2,
-    pub body_graphic_scale: Vec2,
     pub body_naked_graphic_path: String,
 }
 
@@ -151,8 +150,6 @@ pub struct HeadTypeDefRender {
     pub def_name: String,
     pub graphic_path: String,
     pub narrow: bool,
-    pub hair_mesh_size: Vec2,
-    pub beard_mesh_size: Vec2,
     pub beard_offset: Vec3,
     pub beard_offset_x_east: f32,
 }
@@ -323,8 +320,6 @@ pub fn load_head_type_defs(core_data_dir: &Path) -> Result<HashMap<String, HeadT
         def_name: Option<String>,
         graphic_path: Option<String>,
         narrow: Option<bool>,
-        hair_mesh_size: Option<Vec2>,
-        beard_mesh_size: Option<Vec2>,
         beard_offset: Option<Vec3>,
         beard_offset_x_east: Option<f32>,
     }
@@ -353,8 +348,6 @@ pub fn load_head_type_defs(core_data_dir: &Path) -> Result<HashMap<String, HeadT
             record.def_name = child_text(node, "defName").map(str::to_string);
             record.graphic_path = child_text(node, "graphicPath").map(str::to_string);
             record.narrow = child_text(node, "narrow").map(|v| parse_bool(v).unwrap_or(false));
-            record.hair_mesh_size = child_text(node, "hairMeshSize").and_then(parse_vec2_inline);
-            record.beard_mesh_size = child_text(node, "beardMeshSize").and_then(parse_vec2_inline);
             record.beard_offset = child_text(node, "beardOffset").and_then(parse_vec3_inline);
             record.beard_offset_x_east =
                 child_text(node, "beardOffsetXEast").and_then(|v| v.parse::<f32>().ok());
@@ -395,14 +388,6 @@ pub fn load_head_type_defs(core_data_dir: &Path) -> Result<HashMap<String, HeadT
                 .narrow
                 .or_else(|| parent.as_ref().map(|p| p.narrow))
                 .unwrap_or(false),
-            hair_mesh_size: raw
-                .hair_mesh_size
-                .or_else(|| parent.as_ref().map(|p| p.hair_mesh_size))
-                .unwrap_or(Vec2::new(1.5, 1.5)),
-            beard_mesh_size: raw
-                .beard_mesh_size
-                .or_else(|| parent.as_ref().map(|p| p.beard_mesh_size))
-                .unwrap_or(Vec2::new(1.5, 1.5)),
             beard_offset: raw
                 .beard_offset
                 .or_else(|| parent.as_ref().map(|p| p.beard_offset))
@@ -543,9 +528,6 @@ fn parse_doc_body_type_defs(doc: &Document<'_>, defs: &mut HashMap<String, BodyT
         let Some(head_offset) = child_text(node, "headOffset").and_then(parse_vec2_inline) else {
             continue;
         };
-        let body_graphic_scale = child_text(node, "bodyGraphicScale")
-            .and_then(parse_vec2_inline)
-            .unwrap_or(Vec2::ONE);
         let Some(body_naked_graphic_path) =
             child_text(node, "bodyNakedGraphicPath").map(str::to_string)
         else {
@@ -556,7 +538,6 @@ fn parse_doc_body_type_defs(doc: &Document<'_>, defs: &mut HashMap<String, BodyT
             BodyTypeDefRender {
                 def_name,
                 head_offset,
-                body_graphic_scale,
                 body_naked_graphic_path,
             },
         );

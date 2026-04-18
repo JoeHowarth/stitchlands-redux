@@ -119,10 +119,10 @@ pub fn layer_to_z_delta(layer: f32) -> f32 {
 }
 
 fn base_head_offset(facing: PawnFacing, body: BodyTypeRenderData) -> Vec2 {
-    let scaled = body.head_offset * body.body_size_factor.sqrt();
+    let offset = body.head_offset;
     match facing {
-        PawnFacing::North | PawnFacing::South => Vec2::new(0.0, scaled.y),
-        PawnFacing::East => Vec2::new(scaled.x, scaled.y),
-        PawnFacing::West => Vec2::new(-scaled.x, scaled.y),
+        PawnFacing::North | PawnFacing::South => Vec2::new(0.0, offset.y),
+        PawnFacing::East => Vec2::new(offset.x, offset.y),
+        PawnFacing::West => Vec2::new(-offset.x, offset.y),
     }
 }
