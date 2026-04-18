@@ -179,28 +179,28 @@ pub enum DebugCmd {
     },
 }
 
-pub fn parse_tint(input: &str) -> Result<[f32; 4], String> {
+fn parse_rgba<T>(input: &str, default_alpha: T) -> Result<[T; 4], String>
+where
+    T: std::str::FromStr + Copy,
+    T::Err: std::fmt::Display,
+{
     let cleaned = input.replace(',', " ");
     let mut nums = cleaned
         .split_whitespace()
-        .map(|v| v.parse::<f32>().map_err(|e| e.to_string()));
+        .map(|v| v.parse::<T>().map_err(|e| e.to_string()));
     let r = nums.next().ok_or_else(|| "missing r".to_string())??;
     let g = nums.next().ok_or_else(|| "missing g".to_string())??;
     let b = nums.next().ok_or_else(|| "missing b".to_string())??;
-    let a = nums.next().transpose()?.unwrap_or(1.0);
+    let a = nums.next().transpose()?.unwrap_or(default_alpha);
     Ok([r, g, b, a])
 }
 
+pub fn parse_tint(input: &str) -> Result<[f32; 4], String> {
+    parse_rgba(input, 1.0_f32)
+}
+
 pub fn parse_clear_color(input: &str) -> Result<[f64; 4], String> {
-    let cleaned = input.replace(',', " ");
-    let mut nums = cleaned
-        .split_whitespace()
-        .map(|v| v.parse::<f64>().map_err(|e| e.to_string()));
-    let r = nums.next().ok_or_else(|| "missing r".to_string())??;
-    let g = nums.next().ok_or_else(|| "missing g".to_string())??;
-    let b = nums.next().ok_or_else(|| "missing b".to_string())??;
-    let a = nums.next().transpose()?.unwrap_or(1.0);
-    Ok([r, g, b, a])
+    parse_rgba(input, 1.0_f64)
 }
 
 pub fn render_runtime(view: &ViewArgs) -> (bool, RendererOptions, bool) {
