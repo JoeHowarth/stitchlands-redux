@@ -27,6 +27,5 @@
   camera: (
     center_x: 6.0,
     center_z: 4.0,
-    zoom: 8.0,
   ),
 )

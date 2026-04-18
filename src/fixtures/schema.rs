@@ -66,7 +66,6 @@ pub struct PawnSpawn {
 pub struct CameraSpec {
     pub center_x: f32,
     pub center_z: f32,
-    pub zoom: f32,
 }
 
 const fn default_true() -> bool {

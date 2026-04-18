@@ -474,25 +474,21 @@ fn generate_v1_scene_fixture(
         Some(CameraSpec {
             center_x: map.width as f32 * 0.5,
             center_z: map.height as f32 * 0.5,
-            zoom: 1.0,
         })
     } else if let Some(thing) = map.things.first() {
         Some(CameraSpec {
             center_x: thing.cell_x as f32 + 0.5,
             center_z: thing.cell_z as f32 + 0.5,
-            zoom: 1.0,
         })
     } else if let Some(pawn) = map.pawns.first() {
         Some(CameraSpec {
             center_x: pawn.cell_x as f32 + 0.5,
             center_z: pawn.cell_z as f32 + 0.5,
-            zoom: 1.0,
         })
     } else {
         Some(CameraSpec {
             center_x: map.width as f32 * 0.5,
             center_z: map.height as f32 * 0.5,
-            zoom: 1.0,
         })
     };
 
