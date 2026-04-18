@@ -174,14 +174,19 @@ pub struct HumanlikeRenderTreeLayers {
     pub apparel_head_base_layer: f32,
 }
 
-pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>> {
+/// Walk every XML file under `<core_data_dir>/Core/Defs` and run `parse_doc`
+/// on each parseable document, accumulating into a single map. Files that
+/// fail to parse as XML are silently skipped (matches RimWorld's mod loader,
+/// which tolerates corrupt files in third-party content).
+fn walk_defs<T>(
+    core_data_dir: &Path,
+    parse_doc: impl Fn(&Document<'_>, &mut HashMap<String, T>),
+) -> Result<HashMap<String, T>> {
     let defs_dir = core_data_dir.join("Core").join("Defs");
     if !defs_dir.exists() {
         anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
     }
-
     let mut defs = HashMap::new();
-
     for entry in WalkDir::new(&defs_dir)
         .follow_links(true)
         .into_iter()
@@ -190,169 +195,54 @@ pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>
         if !entry.file_type().is_file() {
             continue;
         }
-
-        let Some(ext) = entry.path().extension() else {
-            continue;
-        };
-        if ext != "xml" {
+        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
             continue;
         }
-
         let xml = fs::read_to_string(entry.path())
             .with_context(|| format!("failed reading {}", entry.path().display()))?;
-
         if let Ok(doc) = Document::parse(&xml) {
-            parse_doc_thing_defs(&doc, &mut defs);
+            parse_doc(&doc, &mut defs);
         }
     }
-
     Ok(defs)
+}
+
+pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>> {
+    walk_defs(core_data_dir, parse_doc_thing_defs)
 }
 
 pub fn load_terrain_defs(core_data_dir: &Path) -> Result<HashMap<String, TerrainDef>> {
-    let defs_dir = core_data_dir.join("Core").join("Defs");
-    if !defs_dir.exists() {
-        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
-    }
-
-    let mut defs = HashMap::new();
-    for entry in WalkDir::new(&defs_dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-
-        let Some(ext) = entry.path().extension() else {
-            continue;
-        };
-        if ext != "xml" {
-            continue;
-        }
-
-        let xml = fs::read_to_string(entry.path())
-            .with_context(|| format!("failed reading {}", entry.path().display()))?;
-        if let Ok(doc) = Document::parse(&xml) {
-            parse_doc_terrain_defs(&doc, &mut defs);
-        }
-    }
-
-    Ok(defs)
+    walk_defs(core_data_dir, parse_doc_terrain_defs)
 }
 
 pub fn load_apparel_defs(core_data_dir: &Path) -> Result<HashMap<String, ApparelDef>> {
-    let defs_dir = core_data_dir.join("Core").join("Defs");
-    if !defs_dir.exists() {
-        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
-    }
-
-    let mut defs = HashMap::new();
-    for entry in WalkDir::new(&defs_dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-
-        let Some(ext) = entry.path().extension() else {
-            continue;
-        };
-        if ext != "xml" {
-            continue;
-        }
-
-        let xml = fs::read_to_string(entry.path())
-            .with_context(|| format!("failed reading {}", entry.path().display()))?;
-        if let Ok(doc) = Document::parse(&xml) {
-            parse_doc_apparel_defs(&doc, &mut defs);
-        }
-    }
-
-    Ok(defs)
+    walk_defs(core_data_dir, parse_doc_apparel_defs)
 }
 
 pub fn load_body_type_defs(core_data_dir: &Path) -> Result<HashMap<String, BodyTypeDefRender>> {
-    let defs_dir = core_data_dir.join("Core").join("Defs");
-    if !defs_dir.exists() {
-        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
-    }
+    walk_defs(core_data_dir, parse_doc_body_type_defs)
+}
 
-    let mut defs = HashMap::new();
-    for entry in WalkDir::new(&defs_dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
-            continue;
-        }
-        let xml = fs::read_to_string(entry.path())
-            .with_context(|| format!("failed reading {}", entry.path().display()))?;
-        if let Ok(doc) = Document::parse(&xml) {
-            parse_doc_body_type_defs(&doc, &mut defs);
-        }
-    }
-    Ok(defs)
+pub fn load_beard_defs(core_data_dir: &Path) -> Result<HashMap<String, BeardDefRender>> {
+    walk_defs(core_data_dir, parse_doc_beard_defs)
+}
+
+pub fn load_hair_defs(core_data_dir: &Path) -> Result<HashMap<String, HairDefRender>> {
+    walk_defs(core_data_dir, parse_doc_hair_defs)
+}
+
+#[derive(Clone, Default)]
+struct RawHeadType {
+    parent_name: Option<String>,
+    def_name: Option<String>,
+    graphic_path: Option<String>,
+    narrow: Option<bool>,
+    beard_offset: Option<Vec3>,
+    beard_offset_x_east: Option<f32>,
 }
 
 pub fn load_head_type_defs(core_data_dir: &Path) -> Result<HashMap<String, HeadTypeDefRender>> {
-    let defs_dir = core_data_dir.join("Core").join("Defs");
-    if !defs_dir.exists() {
-        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
-    }
-
-    #[derive(Clone, Default)]
-    struct RawHeadType {
-        key: String,
-        parent_name: Option<String>,
-        def_name: Option<String>,
-        graphic_path: Option<String>,
-        narrow: Option<bool>,
-        beard_offset: Option<Vec3>,
-        beard_offset_x_east: Option<f32>,
-    }
-
-    let mut raw = HashMap::<String, RawHeadType>::new();
-    for entry in WalkDir::new(&defs_dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
-            continue;
-        }
-        let xml = fs::read_to_string(entry.path())
-            .with_context(|| format!("failed reading {}", entry.path().display()))?;
-        let Ok(doc) = Document::parse(&xml) else {
-            continue;
-        };
-        for node in doc.descendants().filter(|n| n.has_tag_name("HeadTypeDef")) {
-            let mut record = RawHeadType::default();
-            let name_attr = node.attribute("Name").map(str::to_string);
-            record.parent_name = node.attribute("ParentName").map(str::to_string);
-            record.def_name = child_text(node, "defName").map(str::to_string);
-            record.graphic_path = child_text(node, "graphicPath").map(str::to_string);
-            record.narrow = child_text(node, "narrow").map(|v| parse_bool(v).unwrap_or(false));
-            record.beard_offset = child_text(node, "beardOffset").and_then(parse_vec3_inline);
-            record.beard_offset_x_east =
-                child_text(node, "beardOffsetXEast").and_then(|v| v.parse::<f32>().ok());
-            let Some(key) = record.def_name.clone().or(name_attr) else {
-                continue;
-            };
-            record.key = key.clone();
-            raw.insert(key, record);
-        }
-    }
+    let raw = walk_defs(core_data_dir, parse_doc_head_type_raw)?;
 
     fn resolve(
         key: &str,
@@ -411,92 +301,64 @@ pub fn load_head_type_defs(core_data_dir: &Path) -> Result<HashMap<String, HeadT
     Ok(out)
 }
 
-pub fn load_beard_defs(core_data_dir: &Path) -> Result<HashMap<String, BeardDefRender>> {
-    let defs_dir = core_data_dir.join("Core").join("Defs");
-    if !defs_dir.exists() {
-        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
-    }
-    let mut defs = HashMap::new();
-    for entry in WalkDir::new(&defs_dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
-            continue;
-        }
-        let xml = fs::read_to_string(entry.path())
-            .with_context(|| format!("failed reading {}", entry.path().display()))?;
-        let Ok(doc) = Document::parse(&xml) else {
+fn parse_doc_beard_defs(doc: &Document<'_>, defs: &mut HashMap<String, BeardDefRender>) {
+    for node in doc.descendants().filter(|n| n.has_tag_name("BeardDef")) {
+        let Some(def_name) = child_text(node, "defName").map(str::to_string) else {
             continue;
         };
-        for node in doc.descendants().filter(|n| n.has_tag_name("BeardDef")) {
-            let Some(def_name) = child_text(node, "defName").map(str::to_string) else {
-                continue;
-            };
-            let no_graphic = child_text(node, "noGraphic")
-                .and_then(parse_bool)
-                .unwrap_or(false);
-            let tex_path = child_text(node, "texPath")
-                .map(str::to_string)
-                .unwrap_or_default();
-            let offset_narrow_east = child_text(node, "offsetNarrowEast")
-                .and_then(parse_vec3_inline)
-                .unwrap_or(Vec3::ZERO);
-            let offset_narrow_south = child_text(node, "offsetNarrowSouth")
-                .and_then(parse_vec3_inline)
-                .unwrap_or(Vec3::ZERO);
-            defs.insert(
-                def_name.clone(),
-                BeardDefRender {
-                    def_name,
-                    tex_path,
-                    no_graphic,
-                    offset_narrow_east,
-                    offset_narrow_south,
-                },
-            );
-        }
+        let no_graphic = child_text(node, "noGraphic")
+            .and_then(parse_bool)
+            .unwrap_or(false);
+        let tex_path = child_text(node, "texPath")
+            .map(str::to_string)
+            .unwrap_or_default();
+        let offset_narrow_east = child_text(node, "offsetNarrowEast")
+            .and_then(parse_vec3_inline)
+            .unwrap_or(Vec3::ZERO);
+        let offset_narrow_south = child_text(node, "offsetNarrowSouth")
+            .and_then(parse_vec3_inline)
+            .unwrap_or(Vec3::ZERO);
+        defs.insert(
+            def_name.clone(),
+            BeardDefRender {
+                def_name,
+                tex_path,
+                no_graphic,
+                offset_narrow_east,
+                offset_narrow_south,
+            },
+        );
     }
-    Ok(defs)
 }
 
-pub fn load_hair_defs(core_data_dir: &Path) -> Result<HashMap<String, HairDefRender>> {
-    let defs_dir = core_data_dir.join("Core").join("Defs");
-    if !defs_dir.exists() {
-        anyhow::bail!("Core defs dir not found: {}", defs_dir.display());
-    }
-    let mut defs = HashMap::new();
-    for entry in WalkDir::new(&defs_dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        if entry.path().extension().and_then(|e| e.to_str()) != Some("xml") {
-            continue;
-        }
-        let xml = fs::read_to_string(entry.path())
-            .with_context(|| format!("failed reading {}", entry.path().display()))?;
-        let Ok(doc) = Document::parse(&xml) else {
+fn parse_doc_hair_defs(doc: &Document<'_>, defs: &mut HashMap<String, HairDefRender>) {
+    for node in doc.descendants().filter(|n| n.has_tag_name("HairDef")) {
+        let Some(def_name) = child_text(node, "defName").map(str::to_string) else {
             continue;
         };
-        for node in doc.descendants().filter(|n| n.has_tag_name("HairDef")) {
-            let Some(def_name) = child_text(node, "defName").map(str::to_string) else {
-                continue;
-            };
-            let Some(tex_path) = child_text(node, "texPath").map(str::to_string) else {
-                continue;
-            };
-            defs.insert(def_name.clone(), HairDefRender { def_name, tex_path });
-        }
+        let Some(tex_path) = child_text(node, "texPath").map(str::to_string) else {
+            continue;
+        };
+        defs.insert(def_name.clone(), HairDefRender { def_name, tex_path });
     }
-    Ok(defs)
+}
+
+fn parse_doc_head_type_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawHeadType>) {
+    for node in doc.descendants().filter(|n| n.has_tag_name("HeadTypeDef")) {
+        let mut record = RawHeadType::default();
+        let name_attr = node.attribute("Name").map(str::to_string);
+        record.parent_name = node.attribute("ParentName").map(str::to_string);
+        record.def_name = child_text(node, "defName").map(str::to_string);
+        record.graphic_path = child_text(node, "graphicPath").map(str::to_string);
+        record.narrow = child_text(node, "narrow").map(|v| parse_bool(v).unwrap_or(false));
+        record.beard_offset = child_text(node, "beardOffset").and_then(parse_vec3_inline);
+        record.beard_offset_x_east =
+            child_text(node, "beardOffsetXEast").and_then(|v| v.parse::<f32>().ok());
+        let Some(key) = record.def_name.clone().or(name_attr) else {
+            continue;
+        };
+        raw.insert(key, record);
+    }
 }
 
 pub fn load_humanlike_render_tree_layers(
