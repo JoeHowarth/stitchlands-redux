@@ -260,9 +260,7 @@ mod tests {
             graphic_data: GraphicData {
                 tex_path: tex_path.to_string(),
                 graphic_class: None,
-                shader_type: None,
                 color: RgbaColor::WHITE,
-                color_two: None,
                 draw_size: Vec2::new(1.0, 1.0),
                 draw_offset: Vec3::ZERO,
             },

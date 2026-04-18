@@ -28,9 +28,7 @@ impl RgbaColor {
 pub struct GraphicData {
     pub tex_path: String,
     pub graphic_class: Option<String>,
-    pub shader_type: Option<String>,
     pub color: RgbaColor,
-    pub color_two: Option<RgbaColor>,
     pub draw_size: Vec2,
     pub draw_offset: Vec3,
 }
@@ -60,10 +58,8 @@ pub enum ApparelLayerDef {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ApparelSkipFlagDef {
-    None,
     Hair,
     Beard,
-    Eyes,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -127,7 +123,6 @@ pub struct ApparelDef {
     pub def_name: String,
     pub tex_path: String,
     pub layer: ApparelLayerDef,
-    pub draw_size: Vec2,
     pub color: RgbaColor,
     pub covers_upper_head: bool,
     pub covers_full_head: bool,
@@ -712,7 +707,6 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
         def_name,
         tex_path,
         layer,
-        draw_size: graphic_data.draw_size,
         color: graphic_data.color,
         covers_upper_head,
         covers_full_head,
@@ -727,11 +721,9 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
 fn parse_graphic_data(node: Node<'_, '_>) -> Option<GraphicData> {
     let tex_path = child_text(node, "texPath")?.to_string();
     let graphic_class = child_text(node, "graphicClass").map(str::to_string);
-    let shader_type = child_text(node, "shaderType").map(str::to_string);
     let color = child_text(node, "color")
         .and_then(parse_color)
         .unwrap_or(RgbaColor::WHITE);
-    let color_two = child_text(node, "colorTwo").and_then(parse_color);
     let draw_size = child_node(node, "drawSize")
         .map(parse_vec2)
         .unwrap_or(Vec2::new(1.0, 1.0));
@@ -742,9 +734,7 @@ fn parse_graphic_data(node: Node<'_, '_>) -> Option<GraphicData> {
     Some(GraphicData {
         tex_path,
         graphic_class,
-        shader_type,
         color,
-        color_two,
         draw_size,
         draw_offset,
     })
@@ -780,10 +770,8 @@ fn parse_apparel_layer_def(input: &str) -> Option<ApparelLayerDef> {
 fn parse_apparel_skip_flag_def(input: &str) -> Option<ApparelSkipFlagDef> {
     let name = input.rsplit('.').next().unwrap_or(input);
     match name {
-        "None" => Some(ApparelSkipFlagDef::None),
         "Hair" => Some(ApparelSkipFlagDef::Hair),
         "Beard" => Some(ApparelSkipFlagDef::Beard),
-        "Eyes" => Some(ApparelSkipFlagDef::Eyes),
         _ => None,
     }
 }

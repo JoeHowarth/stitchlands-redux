@@ -94,7 +94,6 @@ impl Default for BodyTypeRenderData {
 #[derive(Debug, Clone, Copy)]
 pub struct HeadTypeRenderData {
     pub narrow: bool,
-    pub narrow_crown_horizontal_offset: f32,
     pub beard_offset: Vec3,
     pub beard_offset_x_east: f32,
 }
@@ -103,7 +102,6 @@ impl Default for HeadTypeRenderData {
     fn default() -> Self {
         Self {
             narrow: false,
-            narrow_crown_horizontal_offset: 0.0,
             beard_offset: Vec3::ZERO,
             beard_offset_x_east: 0.0,
         }

@@ -21,25 +21,6 @@ pub fn anchor_offset(anchor: AnchorKind, facing: PawnFacing, body: BodyTypeRende
     }
 }
 
-pub fn head_extra_offset(
-    facing: PawnFacing,
-    head_type: HeadTypeRenderData,
-    _layering: LayeringProfile,
-) -> Vec2 {
-    let mut out = Vec2::ZERO;
-    if head_type.narrow && head_type.narrow_crown_horizontal_offset != 0.0 {
-        match facing {
-            PawnFacing::East => out.x -= head_type.narrow_crown_horizontal_offset,
-            PawnFacing::West => out.x += head_type.narrow_crown_horizontal_offset,
-            PawnFacing::North | PawnFacing::South => {}
-        }
-        if matches!(facing, PawnFacing::East | PawnFacing::West) {
-            out.y -= head_type.narrow_crown_horizontal_offset;
-        }
-    }
-    out
-}
-
 pub fn beard_extra_offset(
     facing: PawnFacing,
     head_type: HeadTypeRenderData,

@@ -309,7 +309,6 @@ pub(crate) fn map_explicit_skip_flags(
         match flag {
             ApparelSkipFlagDef::Hair => skip_hair = true,
             ApparelSkipFlagDef::Beard => skip_beard = true,
-            ApparelSkipFlagDef::None | ApparelSkipFlagDef::Eyes => {}
         }
     }
     (skip_hair, skip_beard, true)

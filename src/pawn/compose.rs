@@ -159,7 +159,7 @@ fn evaluate_graph(
                 input.head_tex_path.clone().unwrap_or_default(),
                 pawn_quad,
                 input.tint,
-                workers::head_extra_offset(input.facing, input.head_type, config.layering),
+                Vec2::ZERO,
                 config.layering.head_z,
             ),
             NodePayload::Stump => (

@@ -253,7 +253,6 @@ pub(crate) fn build_world_sprites(
             head_type: head
                 .map(|v| HeadTypeRenderData {
                     narrow: v.narrow,
-                    narrow_crown_horizontal_offset: 0.0,
                     beard_offset: v.beard_offset,
                     beard_offset_x_east: v.beard_offset_x_east,
                 })
