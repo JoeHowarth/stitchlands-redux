@@ -46,22 +46,10 @@ pub struct PackedDecodeHealth {
 
 impl PackedTextureResolver {
     pub fn build(roots: &[PathBuf], typetree_registries: &[PathBuf]) -> Result<Option<Self>> {
-        let existing_roots: Vec<PathBuf> = roots.iter().filter(|r| r.exists()).cloned().collect();
-        if existing_roots.is_empty() {
+        let Some((env, existing_roots)) = build_packed_environment(roots, typetree_registries)?
+        else {
             return Ok(None);
-        }
-
-        let mut env = Environment::new();
-        if let Some(registry) = load_typetree_registry(typetree_registries)? {
-            env.set_type_tree_registry(Some(registry));
-        }
-        for root in &existing_roots {
-            if let Err(err) = env.load(root) {
-                warn!("failed to load packed root {}: {err}", root.display());
-            } else {
-                info!("loaded packed data root: {}", root.display());
-            }
-        }
+        };
 
         let converter = Texture2DConverter::new(UnityVersion::default());
         let mut keys_by_name = HashMap::new();
@@ -376,6 +364,34 @@ impl PackedTextureResolver {
 
 const RESOURCE_MANAGER_CLASS_ID: i32 = 147;
 
+/// Build a Unity `Environment` from the given packed roots. Returns `Some((env,
+/// existing_roots))` when at least one root exists, `None` when all roots are
+/// missing. Load failures of individual roots are warned; the typetree registry
+/// (if any) is attached before loading.
+pub(crate) fn build_packed_environment(
+    roots: &[PathBuf],
+    typetree_registries: &[PathBuf],
+) -> Result<Option<(Environment, Vec<PathBuf>)>> {
+    let existing_roots: Vec<PathBuf> = roots.iter().filter(|r| r.exists()).cloned().collect();
+    if existing_roots.is_empty() {
+        return Ok(None);
+    }
+
+    let mut env = Environment::new();
+    if let Some(registry) = load_typetree_registry(typetree_registries)? {
+        env.set_type_tree_registry(Some(registry));
+    }
+    for root in &existing_roots {
+        if let Err(err) = env.load(root) {
+            warn!("failed to load packed root {}: {err}", root.display());
+        } else {
+            info!("loaded packed data root: {}", root.display());
+        }
+    }
+
+    Ok(Some((env, existing_roots)))
+}
+
 pub(crate) fn collect_container_paths(env: &Environment) -> Vec<(String, BinaryObjectKey)> {
     let mut out: Vec<(String, BinaryObjectKey)> = env
         .find_binary_object_keys_in_bundle_container("")
@@ -460,26 +476,11 @@ pub fn extract_all_packed_textures(
     typetree_registries: &[PathBuf],
     output_dir: &Path,
 ) -> Result<PackedTextureExtractionSummary> {
-    let existing_roots: Vec<PathBuf> = packed_roots
-        .iter()
-        .filter(|p| p.exists())
-        .cloned()
-        .collect();
-    if existing_roots.is_empty() {
+    let Some((env, _)) = build_packed_environment(packed_roots, typetree_registries)? else {
         anyhow::bail!("no existing packed roots were provided");
-    }
+    };
 
     std::fs::create_dir_all(output_dir)?;
-
-    let mut env = Environment::new();
-    if let Some(registry) = load_typetree_registry(typetree_registries)? {
-        env.set_type_tree_registry(Some(registry));
-    }
-    for root in &existing_roots {
-        if let Err(err) = env.load(root) {
-            warn!("failed to load packed root {}: {err}", root.display());
-        }
-    }
 
     let converter = Texture2DConverter::new(UnityVersion::default());
     let mut scanned = 0usize;

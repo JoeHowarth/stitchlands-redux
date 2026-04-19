@@ -4,12 +4,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use log::info;
-use unity_asset::environment::{Environment, EnvironmentObjectRef};
+use unity_asset::environment::EnvironmentObjectRef;
 use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
 use unity_asset_decode::unity_version::UnityVersion;
-
-use crate::assets::typetree_registry::load_typetree_registry;
 
 pub struct PackedTextureIndex {
     signature: String,
@@ -114,27 +112,15 @@ impl PackedTextureIndex {
         typetree_registries: &[PathBuf],
         signature: String,
     ) -> Result<Self> {
-        let existing_roots: Vec<PathBuf> = roots.iter().filter(|r| r.exists()).cloned().collect();
-        if existing_roots.is_empty() {
+        let Some((env, _)) =
+            crate::assets::packed_textures::build_packed_environment(roots, typetree_registries)?
+        else {
             return Ok(Self {
                 signature,
                 names: Vec::new(),
                 container_paths: Vec::new(),
             });
-        }
-
-        let mut env = Environment::new();
-        if let Some(registry) = load_typetree_registry(typetree_registries)? {
-            env.set_type_tree_registry(Some(registry));
-        }
-        for root in &existing_roots {
-            if let Err(err) = env.load(root) {
-                info!(
-                    "failed loading packed root for index {}: {err}",
-                    root.display()
-                );
-            }
-        }
+        };
 
         let converter = Texture2DConverter::new(UnityVersion::default());
         let mut names_set = HashSet::new();
