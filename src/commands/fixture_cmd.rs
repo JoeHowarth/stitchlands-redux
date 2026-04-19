@@ -47,21 +47,21 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let edge_sprites =
         emit_terrain_edge_sprites(ctx.data_dir, ctx.asset_resolver, &ctx.defs, &world, false)?;
-    let noise_image = {
-        let resolved = ctx
-            .asset_resolver
-            .resolve_texture_path(ctx.data_dir, ROUGH_ALPHA_ADD_PATH)
-            .with_context(|| format!("resolving noise texture '{ROUGH_ALPHA_ADD_PATH}'"))?;
-        if resolved.sprite.used_fallback {
-            warn!(
-                "noise texture '{}' not resolved; using 1x1 gray fallback (FadeRough edges will be flat)",
-                ROUGH_ALPHA_ADD_PATH
-            );
-            crate::renderer::fallback_noise_image()
-        } else {
-            resolved.sprite.image
-        }
-    };
+        let noise_image = {
+            let resolved = ctx
+                .asset_resolver
+                .resolve_texture_path(ROUGH_ALPHA_ADD_PATH)
+                .with_context(|| format!("resolving noise texture '{ROUGH_ALPHA_ADD_PATH}'"))?;
+            if resolved.used_fallback() {
+                warn!(
+                    "noise texture '{}' not resolved; using 1x1 gray fallback (FadeRough edges will be flat)",
+                    ROUGH_ALPHA_ADD_PATH
+                );
+                crate::renderer::fallback_noise_image()
+            } else {
+                resolved.image
+            }
+        };
     let blocking_things = world
         .things()
         .iter()
@@ -158,30 +158,31 @@ fn build_world_sprites(
                 .with_context(|| format!("missing TerrainDef '{}'", tile.terrain_def))?;
             let resolved = ctx
                 .asset_resolver
-                .resolve_texture_path(ctx.data_dir, &terrain_def.texture_path)
+                .resolve_texture_path(&terrain_def.texture_path)
                 .with_context(|| {
                     format!(
                         "resolving terrain texture '{}' for '{}'",
                         terrain_def.texture_path, terrain_def.def_name
                     )
                 })?;
-            if strict_missing && resolved.sprite.used_fallback {
+            if strict_missing && resolved.used_fallback() {
                 anyhow::bail!(
                     "missing terrain texture '{}' for '{}'",
                     terrain_def.texture_path,
                     terrain_def.def_name
                 );
             }
+            let used_fallback = resolved.used_fallback();
             static_sprites.push(RenderSprite {
                 def_name: format!("Terrain::{}", terrain_def.def_name),
-                image: resolved.sprite.image,
+                image: resolved.image,
                 params: SpriteParams {
                     world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -1.0),
                     size: Vec2::new(1.0, 1.0),
                     tint: [1.0, 1.0, 1.0, 1.0],
                     uv_rect: FULL_UV_RECT,
                 },
-                used_fallback: resolved.sprite.used_fallback,
+                used_fallback,
                 pawn_id: None,
             });
         }
@@ -215,9 +216,9 @@ fn build_world_sprites(
         }
         let resolved = ctx
             .asset_resolver
-            .resolve_thing(ctx.data_dir, thing_def, thing.id)
+            .resolve_thing(thing_def, thing.id)
             .with_context(|| format!("resolving ThingDef '{}'", thing_def.def_name))?;
-        if strict_missing && resolved.sprite.used_fallback {
+        if strict_missing && resolved.used_fallback() {
             anyhow::bail!(
                 "missing thing texture for '{}' ({})",
                 thing_def.def_name,
@@ -225,9 +226,10 @@ fn build_world_sprites(
             );
         }
         let draw_offset = thing_def.graphic_data.draw_offset;
+        let used_fallback = resolved.used_fallback();
         static_sprites.push(RenderSprite {
             def_name: format!("Thing::{}", thing_def.def_name),
-            image: resolved.sprite.image,
+            image: resolved.image,
             params: SpriteParams {
                 world_pos: Vec3::new(
                     thing.cell_x as f32 + 0.5 + draw_offset.x,
@@ -243,7 +245,7 @@ fn build_world_sprites(
                 ],
                 uv_rect: FULL_UV_RECT,
             },
-            used_fallback: resolved.sprite.used_fallback,
+            used_fallback,
             pawn_id: None,
         });
     }
@@ -282,21 +284,16 @@ fn build_world_sprites(
         let facing = pawn.facing;
 
         // Resolve directional texture paths for body/head/hair/beard
-        let body_directional = resolve_directional_tex_path(
-            ctx.asset_resolver,
-            ctx.data_dir,
-            &body.body_naked_graphic_path,
-            facing,
-        );
+        let body_directional =
+            resolve_directional_tex_path(ctx.asset_resolver, &body.body_naked_graphic_path, facing);
         let head_tex_path = head.map(|h| {
-            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.graphic_path, facing)
-                .path
+            resolve_directional_tex_path(ctx.asset_resolver, &h.graphic_path, facing).path
         });
         let hair_tex_path = hair.map(|h| {
-            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.tex_path, facing).path
+            resolve_directional_tex_path(ctx.asset_resolver, &h.tex_path, facing).path
         });
         let beard_tex_path = beard.map(|b| {
-            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &b.tex_path, facing).path
+            resolve_directional_tex_path(ctx.asset_resolver, &b.tex_path, facing).path
         });
 
         let apparel_inputs = build_apparel_inputs(
@@ -305,7 +302,6 @@ fn build_world_sprites(
             Some(&body.def_name),
             facing,
             ctx.asset_resolver,
-            ctx.data_dir,
         )?;
 
         let render_input = PawnRenderInput {
@@ -346,21 +342,22 @@ fn build_world_sprites(
         for node in composed.nodes {
             let resolved = ctx
                 .asset_resolver
-                .resolve_texture_path(ctx.data_dir, &node.tex_path)
+                .resolve_texture_path(&node.tex_path)
                 .with_context(|| format!("resolving pawn texture '{}'", node.tex_path))?;
-            if strict_missing && resolved.sprite.used_fallback {
+            if strict_missing && resolved.used_fallback() {
                 anyhow::bail!("missing pawn node texture: {}", node.tex_path);
             }
+            let used_fallback = resolved.used_fallback();
             dynamic_sprites.push(RenderSprite {
                 def_name: format!("PawnNode::{}", node.id),
-                image: resolved.sprite.image,
+                image: resolved.image,
                 params: SpriteParams {
                     world_pos: node.world_pos,
                     size: node.size,
                     tint: node.tint,
                     uv_rect: FULL_UV_RECT,
                 },
-                used_fallback: resolved.sprite.used_fallback,
+                used_fallback,
                 pawn_id: Some(pawn.id),
             });
         }
@@ -411,7 +408,6 @@ fn build_apparel_inputs(
     body_def_name: Option<&str>,
     facing: PawnFacing,
     asset_resolver: &mut crate::assets::AssetResolver,
-    data_dir: &std::path::Path,
 ) -> Result<Vec<ApparelRenderInput>> {
     let mut out = Vec::new();
     for def_name in apparel_defs {
@@ -433,11 +429,10 @@ fn build_apparel_inputs(
             body_def_name,
             render_as_pack,
             asset_resolver,
-            data_dir,
         );
 
         // Resolve directional texture
-        let directional = resolve_directional_tex_path(asset_resolver, data_dir, &tex_path, facing);
+        let directional = resolve_directional_tex_path(asset_resolver, &tex_path, facing);
         let tex_path = directional.path;
 
         // Worn data (offset/scale) with body overrides

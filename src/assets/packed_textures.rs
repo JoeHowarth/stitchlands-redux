@@ -10,8 +10,9 @@ use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
 use unity_asset_decode::unity_version::UnityVersion;
 
-use crate::assets::packed_index::{wanted_container_patterns, wanted_texture_names};
 use crate::assets::typetree_registry::load_typetree_registry;
+use crate::assets::variants::variants_for;
+use crate::defs::GraphicKind;
 
 pub struct PackedTextureResolver {
     env: Environment,
@@ -46,22 +47,10 @@ pub struct PackedDecodeHealth {
 
 impl PackedTextureResolver {
     pub fn build(roots: &[PathBuf], typetree_registries: &[PathBuf]) -> Result<Option<Self>> {
-        let existing_roots: Vec<PathBuf> = roots.iter().filter(|r| r.exists()).cloned().collect();
-        if existing_roots.is_empty() {
+        let Some((env, existing_roots)) = build_packed_environment(roots, typetree_registries)?
+        else {
             return Ok(None);
-        }
-
-        let mut env = Environment::new();
-        if let Some(registry) = load_typetree_registry(typetree_registries)? {
-            env.set_type_tree_registry(Some(registry));
-        }
-        for root in &existing_roots {
-            if let Err(err) = env.load(root) {
-                warn!("failed to load packed root {}: {err}", root.display());
-            } else {
-                info!("loaded packed data root: {}", root.display());
-            }
-        }
+        };
 
         let converter = Texture2DConverter::new(UnityVersion::default());
         let mut keys_by_name = HashMap::new();
@@ -136,19 +125,12 @@ impl PackedTextureResolver {
         let mut candidates: Vec<(String, BinaryObjectKey)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        for wanted in wanted_texture_names(tex_path) {
+        let variants = variants_for(tex_path, GraphicKind::Single);
+        for wanted in variants.base_names() {
             if let Some(key) = self.keys_by_name.get(&wanted)
                 && seen.insert((key.source.describe(), key.path_id))
             {
                 candidates.push((wanted, key.clone()));
-            }
-        }
-        for (name, key) in self.find_fuzzy_name_matches(tex_path) {
-            if seen.insert((key.source.describe(), key.path_id)) {
-                candidates.push((name, key));
-            }
-            if candidates.len() >= limit {
-                break;
             }
         }
 
@@ -173,7 +155,8 @@ impl PackedTextureResolver {
     }
 
     pub fn resolve(&self, tex_path: &str) -> Result<Option<PackedTextureHit>> {
-        for wanted in wanted_texture_names(tex_path) {
+        let variants = variants_for(tex_path, GraphicKind::Single);
+        for wanted in variants.base_names() {
             let Some(key) = self.keys_by_name.get(&wanted) else {
                 continue;
             };
@@ -184,18 +167,6 @@ impl PackedTextureResolver {
             };
             let source_label = format!("{}::{}", key.source.describe(), key.path_id);
 
-            return Ok(Some(PackedTextureHit {
-                image,
-                source_label,
-            }));
-        }
-
-        for (_matched_name, key) in self.find_fuzzy_name_matches(tex_path) {
-            let image = match self.decode_texture_for_key(&key) {
-                Ok(image) => image,
-                Err(_) => continue,
-            };
-            let source_label = format!("{}::{}", key.source.describe(), key.path_id);
             return Ok(Some(PackedTextureHit {
                 image,
                 source_label,
@@ -237,10 +208,9 @@ impl PackedTextureResolver {
     }
 
     fn folder_members(&self, tex_path: &str) -> Vec<(String, BinaryObjectKey)> {
-        let base = format!(
-            "textures/{}/",
-            tex_path.to_ascii_lowercase().trim_end_matches('/')
-        );
+        let Some(base) = variants_for(tex_path, GraphicKind::Random).folder_prefix() else {
+            return Vec::new();
+        };
         let mut matches: Vec<(String, BinaryObjectKey)> = self
             .container_index
             .iter()
@@ -357,36 +327,6 @@ impl PackedTextureResolver {
         }
     }
 
-    fn find_fuzzy_name_matches(&self, tex_path: &str) -> Vec<(String, BinaryObjectKey)> {
-        let basename = tex_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(tex_path)
-            .to_ascii_lowercase();
-        let mut matches: Vec<(i32, String, BinaryObjectKey)> = Vec::new();
-
-        for (name, key) in &self.keys_by_name {
-            if !name.contains(&basename) {
-                continue;
-            }
-            let score = if name == &basename {
-                100
-            } else if name.starts_with(&basename) {
-                80
-            } else {
-                50
-            } - (name.len() as i32 / 20);
-
-            matches.push((score, name.clone(), key.clone()));
-        }
-        matches.sort_by(|a, b| b.0.cmp(&a.0));
-        matches
-            .into_iter()
-            .take(10)
-            .map(|(_, name, key)| (name, key))
-            .collect()
-    }
-
     fn decode_texture_for_key(&self, key: &BinaryObjectKey) -> Result<RgbaImage> {
         let obj = self.env.read_binary_object_key(key)?;
         let mut texture = self.converter.from_unity_object(&obj)?;
@@ -410,7 +350,8 @@ impl PackedTextureResolver {
     }
 
     fn find_by_container_paths(&self, tex_path: &str) -> Vec<(String, BinaryObjectKey)> {
-        let candidates = wanted_container_patterns(tex_path);
+        let variants = variants_for(tex_path, GraphicKind::Single);
+        let candidates = variants.container_paths();
         let mut matches: Vec<(i32, String, BinaryObjectKey)> = Vec::new();
 
         for (asset_path, key) in &self.container_index {
@@ -434,6 +375,34 @@ impl PackedTextureResolver {
 }
 
 const RESOURCE_MANAGER_CLASS_ID: i32 = 147;
+
+/// Build a Unity `Environment` from the given packed roots. Returns `Some((env,
+/// existing_roots))` when at least one root exists, `None` when all roots are
+/// missing. Load failures of individual roots are warned; the typetree registry
+/// (if any) is attached before loading.
+pub(crate) fn build_packed_environment(
+    roots: &[PathBuf],
+    typetree_registries: &[PathBuf],
+) -> Result<Option<(Environment, Vec<PathBuf>)>> {
+    let existing_roots: Vec<PathBuf> = roots.iter().filter(|r| r.exists()).cloned().collect();
+    if existing_roots.is_empty() {
+        return Ok(None);
+    }
+
+    let mut env = Environment::new();
+    if let Some(registry) = load_typetree_registry(typetree_registries)? {
+        env.set_type_tree_registry(Some(registry));
+    }
+    for root in &existing_roots {
+        if let Err(err) = env.load(root) {
+            warn!("failed to load packed root {}: {err}", root.display());
+        } else {
+            info!("loaded packed data root: {}", root.display());
+        }
+    }
+
+    Ok(Some((env, existing_roots)))
+}
 
 pub(crate) fn collect_container_paths(env: &Environment) -> Vec<(String, BinaryObjectKey)> {
     let mut out: Vec<(String, BinaryObjectKey)> = env
@@ -519,26 +488,11 @@ pub fn extract_all_packed_textures(
     typetree_registries: &[PathBuf],
     output_dir: &Path,
 ) -> Result<PackedTextureExtractionSummary> {
-    let existing_roots: Vec<PathBuf> = packed_roots
-        .iter()
-        .filter(|p| p.exists())
-        .cloned()
-        .collect();
-    if existing_roots.is_empty() {
+    let Some((env, _)) = build_packed_environment(packed_roots, typetree_registries)? else {
         anyhow::bail!("no existing packed roots were provided");
-    }
+    };
 
     std::fs::create_dir_all(output_dir)?;
-
-    let mut env = Environment::new();
-    if let Some(registry) = load_typetree_registry(typetree_registries)? {
-        env.set_type_tree_registry(Some(registry));
-    }
-    for root in &existing_roots {
-        if let Err(err) = env.load(root) {
-            warn!("failed to load packed root {}: {err}", root.display());
-        }
-    }
 
     let converter = Texture2DConverter::new(UnityVersion::default());
     let mut scanned = 0usize;

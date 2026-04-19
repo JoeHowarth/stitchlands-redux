@@ -3,18 +3,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use log::info;
-use unity_asset::environment::{Environment, EnvironmentObjectRef};
+use log::{info, warn};
+use unity_asset::environment::EnvironmentObjectRef;
 use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
 use unity_asset_decode::unity_version::UnityVersion;
 
-use crate::assets::typetree_registry::load_typetree_registry;
-
 pub struct PackedTextureIndex {
     signature: String,
     names: Vec<String>,
-    container_paths: Vec<String>,
+    container_paths: HashSet<String>,
 }
 
 impl PackedTextureIndex {
@@ -39,36 +37,32 @@ impl PackedTextureIndex {
         }
 
         let built = Self::build(roots, typetree_registries, signature)?;
-        built.save(cache_path)?;
-        info!(
-            "rebuilt packed texture index cache: {} (names={} container={})",
-            cache_path.display(),
-            built.names.len(),
-            built.container_paths.len()
-        );
+        match built.save(cache_path) {
+            Ok(()) => info!(
+                "rebuilt packed texture index cache: {} (names={} container={})",
+                cache_path.display(),
+                built.names.len(),
+                built.container_paths.len()
+            ),
+            Err(err) => warn!(
+                "rebuilt packed texture index in memory but failed to save cache {}: {err}",
+                cache_path.display()
+            ),
+        }
         Ok(built)
     }
 
     pub fn search_names(&self, query: &str, limit: usize) -> Vec<String> {
         let needle = query.to_ascii_lowercase();
-        let mut matches: Vec<String> = self
-            .names
+        self.names
             .iter()
             .filter(|name| name.contains(&needle))
             .take(limit)
             .cloned()
-            .collect();
-        matches.sort();
-        matches
+            .collect()
     }
 
     pub fn maybe_contains(&self, tex_path: &str) -> bool {
-        // Fail open if the index is effectively empty; this avoids false negatives
-        // from stripped-name Unity layouts where metadata extraction is incomplete.
-        if self.is_empty() {
-            return true;
-        }
-
         let basename = tex_path
             .rsplit('/')
             .next()
@@ -78,12 +72,10 @@ impl PackedTextureIndex {
             return true;
         }
 
-        for path in wanted_container_patterns(tex_path) {
-            if self
-                .container_paths
-                .iter()
-                .any(|entry| entry.contains(&path))
-            {
+        let variants =
+            crate::assets::variants::variants_for(tex_path, crate::defs::GraphicKind::Single);
+        for path in variants.container_paths() {
+            if self.container_paths.contains(&path) {
                 return true;
             }
         }
@@ -91,8 +83,30 @@ impl PackedTextureIndex {
         false
     }
 
+    pub fn maybe_contains_folder(&self, tex_path: &str) -> bool {
+        crate::assets::variants::variants_for(tex_path, crate::defs::GraphicKind::Random)
+            .folder_key()
+            .is_some_and(|path| self.container_paths.contains(&path))
+    }
+
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.names.is_empty() && self.container_paths.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_parts(names: &[&str], container_paths: &[&str]) -> Self {
+        let mut names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        names.sort();
+        let container_paths = container_paths
+            .iter()
+            .map(|path| path.to_string())
+            .collect();
+        Self {
+            signature: String::new(),
+            names,
+            container_paths,
+        }
     }
 
     fn has_prefix_match(&self, basename: &str) -> bool {
@@ -114,27 +128,15 @@ impl PackedTextureIndex {
         typetree_registries: &[PathBuf],
         signature: String,
     ) -> Result<Self> {
-        let existing_roots: Vec<PathBuf> = roots.iter().filter(|r| r.exists()).cloned().collect();
-        if existing_roots.is_empty() {
+        let Some((env, _)) =
+            crate::assets::packed_textures::build_packed_environment(roots, typetree_registries)?
+        else {
             return Ok(Self {
                 signature,
                 names: Vec::new(),
-                container_paths: Vec::new(),
+                container_paths: HashSet::new(),
             });
-        }
-
-        let mut env = Environment::new();
-        if let Some(registry) = load_typetree_registry(typetree_registries)? {
-            env.set_type_tree_registry(Some(registry));
-        }
-        for root in &existing_roots {
-            if let Err(err) = env.load(root) {
-                info!(
-                    "failed loading packed root for index {}: {err}",
-                    root.display()
-                );
-            }
-        }
+        };
 
         let converter = Texture2DConverter::new(UnityVersion::default());
         let mut names_set = HashSet::new();
@@ -163,13 +165,10 @@ impl PackedTextureIndex {
             }
         }
 
-        let mut container_paths: Vec<String> =
-            crate::assets::packed_textures::collect_container_paths(&env)
-                .into_iter()
-                .map(|(path, _)| path)
-                .collect();
-        container_paths.sort();
-        container_paths.dedup();
+        let mut container_paths: HashSet<String> = HashSet::new();
+        for (path, _) in crate::assets::packed_textures::collect_container_paths(&env) {
+            insert_with_ancestors(&mut container_paths, &path);
+        }
 
         let mut names: Vec<String> = names_set.into_iter().collect();
         names.sort();
@@ -187,7 +186,7 @@ impl PackedTextureIndex {
         }
 
         let mut out = String::new();
-        out.push_str("STITCHLANDS_PACKED_INDEX_V2\n");
+        out.push_str("STITCHLANDS_PACKED_INDEX_V3\n");
         out.push_str(&self.signature);
         out.push('\n');
         out.push_str(&format!("{}\n", self.names.len()));
@@ -195,8 +194,10 @@ impl PackedTextureIndex {
             out.push_str(name);
             out.push('\n');
         }
-        out.push_str(&format!("{}\n", self.container_paths.len()));
-        for path in &self.container_paths {
+        let mut paths: Vec<&String> = self.container_paths.iter().collect();
+        paths.sort();
+        out.push_str(&format!("{}\n", paths.len()));
+        for path in paths {
             out.push_str(path);
             out.push('\n');
         }
@@ -210,7 +211,7 @@ impl PackedTextureIndex {
         let mut lines = input.lines();
 
         let version = lines.next().unwrap_or_default();
-        if version != "STITCHLANDS_PACKED_INDEX_V2" {
+        if version != "STITCHLANDS_PACKED_INDEX_V3" {
             anyhow::bail!("unsupported packed index version");
         }
 
@@ -225,10 +226,10 @@ impl PackedTextureIndex {
         }
 
         let container_len = lines.next().unwrap_or("0").parse::<usize>().unwrap_or(0);
-        let mut container_paths = Vec::with_capacity(container_len);
+        let mut container_paths = HashSet::with_capacity(container_len);
         for _ in 0..container_len {
             if let Some(line) = lines.next() {
-                container_paths.push(line.to_string());
+                container_paths.insert(line.to_string());
             }
         }
 
@@ -266,56 +267,25 @@ fn roots_signature(roots: &[PathBuf], typetree_registries: &[PathBuf]) -> String
     parts.join(";")
 }
 
-pub(crate) fn wanted_texture_names(tex_path: &str) -> Vec<String> {
-    let basename = tex_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(tex_path)
-        .to_ascii_lowercase();
-    vec![
-        basename.clone(),
-        format!("{}_south", basename),
-        format!("{}_north", basename),
-        format!("{}_east", basename),
-        format!("{}_west", basename),
-    ]
-}
-
-pub(crate) fn wanted_container_patterns(tex_path: &str) -> Vec<String> {
-    let base = tex_path.to_ascii_lowercase();
-    vec![
-        base.clone(),
-        format!("{base}.png"),
-        format!("{base}_south"),
-        format!("{base}_north"),
-        format!("{base}_east"),
-        format!("{base}_west"),
-    ]
+fn insert_with_ancestors(set: &mut HashSet<String>, path: &str) {
+    set.insert(path.to_string());
+    let mut remaining = path;
+    while let Some(idx) = remaining.rfind('/') {
+        remaining = &remaining[..idx];
+        if remaining.is_empty() {
+            break;
+        }
+        if !set.insert(remaining.to_string()) {
+            break;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use super::{PackedTextureIndex, wanted_container_patterns, wanted_texture_names};
-
-    #[test]
-    fn wanted_names_include_directional_suffixes() {
-        let names = wanted_texture_names("Things/Item/Resource/Steel");
-        assert_eq!(names[0], "steel");
-        assert!(names.contains(&"steel_south".to_string()));
-        assert!(names.contains(&"steel_north".to_string()));
-        assert!(names.contains(&"steel_east".to_string()));
-        assert!(names.contains(&"steel_west".to_string()));
-    }
-
-    #[test]
-    fn wanted_container_patterns_include_png_and_rotations() {
-        let patterns = wanted_container_patterns("Things/Item/Resource/Steel");
-        assert!(patterns.contains(&"things/item/resource/steel".to_string()));
-        assert!(patterns.contains(&"things/item/resource/steel.png".to_string()));
-        assert!(patterns.contains(&"things/item/resource/steel_south".to_string()));
-    }
+    use super::PackedTextureIndex;
 
     #[test]
     fn persists_and_reloads_metadata_index() {
@@ -354,7 +324,7 @@ mod tests {
         let cache_path = root.join("cache.txt");
 
         let stale = [
-            "STITCHLANDS_PACKED_INDEX_V2",
+            "STITCHLANDS_PACKED_INDEX_V3",
             "stale_signature",
             "1",
             "made_up_texture",
@@ -383,12 +353,12 @@ mod tests {
         let cache_path = root.join("cache.txt");
 
         let input = [
-            "STITCHLANDS_PACKED_INDEX_V2",
+            "STITCHLANDS_PACKED_INDEX_V3",
             "any",
             "1",
             "steel_a",
             "1",
-            "assets/resources/things/pawn/humanlike/bodies/naked_male.png",
+            "textures/things/pawn/humanlike/bodies/naked_male.png",
             "",
         ]
         .join("\n");
@@ -403,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_index_fails_open_for_lookup() {
+    fn empty_index_misses_lookup() {
         let root = std::env::temp_dir().join(format!(
             "stitchlands-packed-index-empty-{}",
             std::process::id()
@@ -412,26 +382,48 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let cache_path = root.join("cache.txt");
 
-        let input = ["STITCHLANDS_PACKED_INDEX_V2", "any", "0", "0", ""].join("\n");
+        let input = ["STITCHLANDS_PACKED_INDEX_V3", "any", "0", "0", ""].join("\n");
         fs::write(&cache_path, input).unwrap();
 
         let index = PackedTextureIndex::load(&cache_path).unwrap();
         assert!(index.is_empty());
-        assert!(index.maybe_contains("Things/Item/Resource/DefinitelyMissing"));
+        assert!(!index.maybe_contains("Things/Item/Resource/DefinitelyMissing"));
+        assert!(!index.maybe_contains_folder("Things/Item/Chunk/ChunkSlag"));
 
         let _ = fs::remove_dir_all(root);
     }
 
     fn index_with_names(names: &[&str]) -> PackedTextureIndex {
-        PackedTextureIndex {
-            signature: String::new(),
-            names: {
-                let mut v: Vec<String> = names.iter().map(|s| s.to_string()).collect();
-                v.sort();
-                v
-            },
-            container_paths: Vec::new(),
-        }
+        PackedTextureIndex::from_parts(names, &[])
+    }
+
+    #[test]
+    fn maybe_contains_folder_uses_ancestor_entries() {
+        let index = PackedTextureIndex::from_parts(
+            &[],
+            &[
+                "textures/things/item/chunk/chunkslag",
+                "textures/things/item/chunk/chunkslag/chunkslag_a.png",
+            ],
+        );
+        assert!(index.maybe_contains_folder("Things/Item/Chunk/ChunkSlag"));
+    }
+
+    #[test]
+    fn load_or_build_succeeds_when_cache_save_fails() {
+        let root = std::env::temp_dir().join(format!(
+            "stitchlands-packed-index-save-failure-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let index =
+            PackedTextureIndex::load_or_build(std::slice::from_ref(&root), &[], &root, false)
+                .unwrap();
+        assert!(index.search_names("steel", 5).is_empty());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

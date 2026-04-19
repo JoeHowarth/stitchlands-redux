@@ -6,7 +6,7 @@ use log::warn;
 
 use crate::assets::AssetResolver;
 use crate::cell::Cell;
-use crate::defs::ThingDef;
+use crate::defs::{GraphicKind, ThingDef};
 use crate::linking::{
     LinkDrawerType, LinkFlags, TerrainEdgeType, atlas_uv_rect, corner_filler_positions, link_index,
     perimeter_alphas_from_neighbor_matches,
@@ -36,7 +36,7 @@ const CORNER_FILL_SIZE: f32 = 0.5;
 const CORNER_FILL_Z_SHIFT: f32 = 0.09;
 
 pub fn emit_linked_thing_sprites(
-    data_dir: &Path,
+    _data_dir: &Path,
     asset_resolver: &mut AssetResolver,
     defs: &DefSet<'_>,
     thing: &ThingState,
@@ -46,14 +46,14 @@ pub fn emit_linked_thing_sprites(
 ) -> Result<Vec<RenderSprite>> {
     let atlas_path = linked_atlas_path(thing_def);
     let resolved = asset_resolver
-        .resolve_texture_path(data_dir, &atlas_path)
+        .resolve_texture_path(&atlas_path)
         .with_context(|| {
             format!(
                 "resolving linked atlas '{}' for '{}'",
                 atlas_path, thing_def.def_name
             )
         })?;
-    if strict_missing && resolved.sprite.used_fallback {
+    if strict_missing && resolved.used_fallback() {
         anyhow::bail!(
             "missing linked atlas '{}' for '{}'",
             atlas_path,
@@ -78,14 +78,14 @@ pub fn emit_linked_thing_sprites(
     let mut sprites = Vec::with_capacity(1);
     sprites.push(RenderSprite {
         def_name: format!("Thing::{}", thing_def.def_name),
-        image: resolved.sprite.image.clone(),
+        image: resolved.image.clone(),
         params: SpriteParams {
             world_pos: Vec3::new(cell.x as f32 + 0.5, cell.z as f32 + 0.5, DEPTH_WALL),
             size: Vec2::new(1.0, 1.0),
             tint,
             uv_rect,
         },
-        used_fallback: resolved.sprite.used_fallback,
+        used_fallback: resolved.used_fallback(),
         pawn_id: None,
     });
 
@@ -118,7 +118,7 @@ pub fn emit_linked_thing_sprites(
             let (ox, oz) = corner_offsets[i];
             sprites.push(RenderSprite {
                 def_name: format!("Thing::{}", thing_def.def_name),
-                image: resolved.sprite.image.clone(),
+                image: resolved.image.clone(),
                 params: SpriteParams {
                     world_pos: Vec3::new(
                         cell.x as f32 + 0.5 + ox,
@@ -129,7 +129,7 @@ pub fn emit_linked_thing_sprites(
                     tint,
                     uv_rect: CORNER_FILL_UV_RECT,
                 },
-                used_fallback: resolved.sprite.used_fallback,
+                used_fallback: resolved.used_fallback(),
                 pawn_id: None,
             });
         }
@@ -152,9 +152,10 @@ fn linked_atlas_path(thing_def: &ThingDef) -> String {
     if basename.contains("_Atlas") {
         return tex_path.to_string();
     }
-    match thing_def.graphic_data.graphic_class.as_deref() {
-        Some("Graphic_Appearances") => format!("{tex_path}/{basename}_Atlas_Bricks"),
-        _ => tex_path.to_string(),
+    if thing_def.graphic_data.kind == GraphicKind::Appearances {
+        format!("{tex_path}/{basename}_Atlas_Bricks")
+    } else {
+        tex_path.to_string()
     }
 }
 
@@ -337,7 +338,7 @@ const FAN_LOCAL_XY: [(f32, f32); 9] = [
 /// For each cell, emit one fan per unique neighboring terrain whose
 /// `render_precedence >= self.render_precedence`.
 pub fn emit_terrain_edge_sprites(
-    data_dir: &Path,
+    _data_dir: &Path,
     asset_resolver: &mut AssetResolver,
     defs: &DefSet<'_>,
     world: &WorldState,
@@ -347,14 +348,14 @@ pub fn emit_terrain_edge_sprites(
     let mut out = Vec::with_capacity(contributions.len());
     for contribution in contributions {
         let resolved = asset_resolver
-            .resolve_texture_path(data_dir, &contribution.neighbor_texture_path)
+            .resolve_texture_path(&contribution.neighbor_texture_path)
             .with_context(|| {
                 format!(
                     "resolving terrain edge texture '{}' for '{}'",
                     contribution.neighbor_texture_path, contribution.neighbor_def_name
                 )
             })?;
-        if strict_missing && resolved.sprite.used_fallback {
+        if strict_missing && resolved.used_fallback() {
             anyhow::bail!(
                 "missing terrain edge texture '{}' for '{}'",
                 contribution.neighbor_texture_path,
@@ -385,7 +386,7 @@ pub fn emit_terrain_edge_sprites(
             };
         }
         out.push(EdgeSpriteInput {
-            image: resolved.sprite.image,
+            image: resolved.image,
             fan: EdgeFan { vertices },
         });
     }
@@ -404,12 +405,12 @@ mod tests {
     use crate::fixtures::{MapSpec, SceneFixture, TerrainCell};
     use crate::world::world_from_fixture;
 
-    fn make_def(def_name: &str, tex_path: &str, graphic_class: Option<&str>) -> ThingDef {
+    fn make_def(def_name: &str, tex_path: &str, kind: GraphicKind) -> ThingDef {
         ThingDef {
             def_name: def_name.to_string(),
             graphic_data: GraphicData {
                 tex_path: tex_path.to_string(),
-                graphic_class: graphic_class.map(str::to_string),
+                kind,
                 color: RgbaColor::WHITE,
                 draw_size: Vec2::ONE,
                 draw_offset: Vec3::ZERO,
@@ -424,7 +425,7 @@ mod tests {
         let def = make_def(
             "Wall",
             "Things/Building/Linked/Wall",
-            Some("Graphic_Appearances"),
+            GraphicKind::Appearances,
         );
         assert_eq!(
             linked_atlas_path(&def),
@@ -437,14 +438,14 @@ mod tests {
         let def = make_def(
             "Granite",
             "Things/Building/Linked/Rock_Atlas",
-            Some("Graphic_Single"),
+            GraphicKind::Single,
         );
         assert_eq!(linked_atlas_path(&def), "Things/Building/Linked/Rock_Atlas");
     }
 
     #[test]
     fn effective_link_type_falls_back_to_basic() {
-        let mut def = make_def("X", "p", None);
+        let mut def = make_def("X", "p", GraphicKind::Single);
         def.graphic_data.link_type = LinkDrawerType::Transmitter;
         assert_eq!(effective_link_type(&def), LinkDrawerType::Basic);
 

@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+const PACKED_INDEX_FILENAME: &str = "packed_texture_index_v3.txt";
+const PACKED_INDEX_FALLBACK_FILENAME: &str = ".stitchlands-packed-index-v3.txt";
+
 pub fn resolve_rimworld_input(explicit: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(path) = explicit {
         return Some(path);
@@ -47,10 +50,10 @@ pub fn default_packed_index_path() -> PathBuf {
         return PathBuf::from(home)
             .join(".cache")
             .join("stitchlands-redux")
-            .join("packed_texture_index_v2.txt");
+            .join(PACKED_INDEX_FILENAME);
     }
 
-    PathBuf::from(".stitchlands-packed-index-v2.txt")
+    PathBuf::from(PACKED_INDEX_FALLBACK_FILENAME)
 }
 
 fn common_rimworld_candidates() -> Vec<PathBuf> {
@@ -110,5 +113,12 @@ mod tests {
             "__MISSING_STITCHLANDS_VAR__",
         );
         assert_eq!(merged, vec![PathBuf::from("a"), PathBuf::from("b")]);
+    }
+
+    #[test]
+    fn default_packed_index_path_uses_v3_filename() {
+        let path = default_packed_index_path();
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap();
+        assert!(name.ends_with("v3.txt"));
     }
 }

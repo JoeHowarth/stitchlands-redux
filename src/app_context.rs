@@ -40,7 +40,6 @@ impl AppContext {
             auto_typetree: data.auto_typetree,
             packed_index_path: data.packed_index_path.clone(),
             rebuild_packed_index: data.rebuild_packed_index,
-            disable_packed_index: data.no_packed_index,
         })?;
 
         let data_dir = setup.data_dir;

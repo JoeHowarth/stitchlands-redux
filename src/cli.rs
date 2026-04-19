@@ -27,8 +27,6 @@ pub struct DataArgs {
     pub packed_index_path: Option<PathBuf>,
     #[arg(long, default_value_t = false)]
     pub rebuild_packed_index: bool,
-    #[arg(long, default_value_t = false)]
-    pub no_packed_index: bool,
     #[arg(long)]
     pub typetree_registry: Vec<PathBuf>,
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]

@@ -1,97 +1,83 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use log::info;
 
+use crate::assets::backend::{
+    BackendLookup, ResolvedSprite, SpriteSource, TextureBackend, TextureQuery,
+};
+use crate::assets::loose::{LooseFiles, checkerboard_image};
 use crate::assets::packed_index::PackedTextureIndex;
 use crate::assets::packed_textures::{PackedProbeSummary, PackedTextureResolver};
-use crate::assets::{SpriteAsset, resolve_sprite, resolve_texture_path};
-use crate::defs::ThingDef;
 
 pub struct AssetResolver {
-    texture_roots: Vec<PathBuf>,
-    packed_roots: Vec<PathBuf>,
-    typetree_registries: Vec<PathBuf>,
-    packed_index: Option<PackedTextureIndex>,
-    packed_resolver_state: PackedResolverState,
+    loose: LooseFiles,
+    packed: PackedCatalog,
 }
 
 impl AssetResolver {
     pub fn new(
+        core_data_dir: PathBuf,
         texture_roots: Vec<PathBuf>,
         packed_roots: Vec<PathBuf>,
         typetree_registries: Vec<PathBuf>,
-        packed_index: Option<PackedTextureIndex>,
+        packed_index: PackedTextureIndex,
     ) -> Self {
-        let packed_resolver_state =
-            PackedResolverState::new(packed_roots.clone(), typetree_registries.clone());
         Self {
-            texture_roots,
-            packed_roots,
-            typetree_registries,
-            packed_index,
-            packed_resolver_state,
+            loose: LooseFiles::new(core_data_dir, texture_roots),
+            packed: PackedCatalog::new(packed_roots, typetree_registries, packed_index),
         }
     }
 
     pub fn texture_roots(&self) -> &[PathBuf] {
-        &self.texture_roots
+        self.loose.extra_texture_roots()
     }
 
     pub fn packed_roots(&self) -> &[PathBuf] {
-        &self.packed_roots
+        self.packed.packed_roots()
     }
 
     pub fn typetree_registries(&self) -> &[PathBuf] {
-        &self.typetree_registries
+        self.packed.typetree_registries()
     }
 
-    pub fn search_packed_names(&self, query: &str, limit: usize) -> Option<Vec<String>> {
-        self.packed_index
-            .as_ref()
-            .map(|index| index.search_names(query, limit))
+    pub fn resolve(&mut self, query: TextureQuery) -> Result<ResolvedSprite> {
+        let mut attempted = Vec::new();
+
+        match self.loose.lookup(&query)? {
+            BackendLookup::Hit(sprite) => return Ok(sprite),
+            BackendLookup::Miss { attempted: a } => attempted.extend(a),
+        }
+
+        match self.packed.lookup(&query)? {
+            BackendLookup::Hit(sprite) => return Ok(sprite),
+            BackendLookup::Miss { attempted: a } => attempted.extend(a),
+        }
+
+        Ok(ResolvedSprite {
+            image: checkerboard_image(64, 64),
+            source: SpriteSource::Fallback { attempted },
+        })
+    }
+
+    pub fn resolve_texture_path(&mut self, tex_path: &str) -> Result<ResolvedSprite> {
+        self.resolve(TextureQuery::single(tex_path))
     }
 
     pub fn resolve_thing(
         &mut self,
-        data_dir: &Path,
-        thing_def: &ThingDef,
+        thing_def: &crate::defs::ThingDef,
         variant_index: usize,
-    ) -> Result<ResolvedSpriteAsset> {
-        let mut sprite_asset = resolve_sprite(data_dir, thing_def, &self.texture_roots)?;
-        let mut resolved_from_packed = false;
-        if sprite_asset.used_fallback {
-            let tex_path = thing_def.graphic_data.tex_path.as_str();
-            let graphic_class = thing_def.graphic_data.graphic_class.as_deref();
-            resolved_from_packed = if is_random_graphic_class(graphic_class) {
-                self.try_resolve_folder_from_packed(tex_path, variant_index, &mut sprite_asset)?
-                    || self.try_resolve_from_packed(tex_path, &mut sprite_asset)?
-            } else {
-                self.try_resolve_from_packed(tex_path, &mut sprite_asset)?
-            };
-        }
-
-        Ok(ResolvedSpriteAsset {
-            sprite: sprite_asset,
-            resolved_from_packed,
-        })
+    ) -> Result<ResolvedSprite> {
+        self.resolve(TextureQuery::for_thing(thing_def, variant_index))
     }
 
-    pub fn resolve_texture_path(
-        &mut self,
-        data_dir: &Path,
-        tex_path: &str,
-    ) -> Result<ResolvedSpriteAsset> {
-        let mut sprite_asset = resolve_texture_path(data_dir, tex_path, &self.texture_roots)?;
-        let mut resolved_from_packed = false;
-        if sprite_asset.used_fallback {
-            resolved_from_packed = self.try_resolve_from_packed(tex_path, &mut sprite_asset)?;
-        }
+    pub fn search_packed_names(&self, query: &str, limit: usize) -> Vec<String> {
+        self.packed.search_names(query, limit)
+    }
 
-        Ok(ResolvedSpriteAsset {
-            sprite: sprite_asset,
-            resolved_from_packed,
-        })
+    pub fn can_try_packed(&self, tex_path: &str) -> bool {
+        self.packed.can_try(tex_path)
     }
 
     pub fn maybe_probe_decode_candidates(
@@ -99,14 +85,7 @@ impl AssetResolver {
         tex_path: &str,
         limit: usize,
     ) -> Result<Option<PackedProbeSummary>> {
-        if !self.can_try_packed(tex_path) {
-            return Ok(None);
-        }
-        let probe = self
-            .packed_resolver_state
-            .get()?
-            .map(|resolver| resolver.probe_decode_candidates(tex_path, limit));
-        Ok(probe)
+        self.packed.maybe_probe_decode_candidates(tex_path, limit)
     }
 
     pub fn probe_folder_variant(
@@ -114,13 +93,7 @@ impl AssetResolver {
         tex_path: &str,
         variant_index: usize,
     ) -> Result<Option<String>> {
-        let Some(resolver) = self.packed_resolver_state.get()? else {
-            return Ok(None);
-        };
-        match resolver.resolve_folder_variant(tex_path, variant_index)? {
-            Some(hit) => Ok(Some(hit.source_label)),
-            None => Ok(None),
-        }
+        self.packed.probe_folder_variant(tex_path, variant_index)
     }
 
     pub fn search_packed_container(
@@ -128,18 +101,11 @@ impl AssetResolver {
         query: &str,
         limit: usize,
     ) -> Result<Option<Vec<String>>> {
-        let Some(resolver) = self.packed_resolver_state.get()? else {
-            return Ok(None);
-        };
-        Ok(Some(resolver.search_container_paths(query, limit)))
+        self.packed.search_container_paths(query, limit)
     }
 
     pub fn run_packed_class_probe(&mut self, sample_limit: usize) -> Result<bool> {
-        let Some(resolver) = self.packed_resolver_state.get()? else {
-            return Ok(false);
-        };
-        resolver.run_class_id_probe(sample_limit);
-        Ok(true)
+        self.packed.run_class_probe(sample_limit)
     }
 
     pub fn run_packed_decode_probe(
@@ -147,95 +113,8 @@ impl AssetResolver {
         sample_limit: usize,
         min_attempts: usize,
     ) -> Result<Option<PackedDecodeProbeOutcome>> {
-        let Some(resolver) = self.packed_resolver_state.get()? else {
-            return Ok(None);
-        };
-
-        let health = resolver.decode_health_sample(sample_limit);
-        if health.attempted < min_attempts {
-            return Ok(None);
-        }
-
-        let disable_packed = health.succeeded == 0;
-        let outcome = PackedDecodeProbeOutcome {
-            attempted: health.attempted,
-            succeeded: health.succeeded,
-            sample_errors: health.sample_errors,
-            disable_packed,
-        };
-
-        if disable_packed {
-            self.packed_resolver_state.disable();
-        }
-
-        Ok(Some(outcome))
+        self.packed.run_decode_probe(sample_limit, min_attempts)
     }
-
-    pub fn can_try_packed(&self, tex_path: &str) -> bool {
-        self.packed_index
-            .as_ref()
-            .map(|index| index.maybe_contains(tex_path))
-            .unwrap_or(true)
-    }
-
-    fn try_resolve_from_packed(
-        &mut self,
-        tex_path: &str,
-        sprite_asset: &mut SpriteAsset,
-    ) -> Result<bool> {
-        if !self.can_try_packed(tex_path) {
-            return Ok(false);
-        }
-
-        let Some(resolver) = self.packed_resolver_state.get()? else {
-            return Ok(false);
-        };
-
-        let Ok(Some(hit)) = resolver.resolve(tex_path) else {
-            return Ok(false);
-        };
-
-        sprite_asset.image = hit.image;
-        sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
-        sprite_asset.used_fallback = false;
-        Ok(true)
-    }
-
-    fn try_resolve_folder_from_packed(
-        &mut self,
-        tex_path: &str,
-        variant_index: usize,
-        sprite_asset: &mut SpriteAsset,
-    ) -> Result<bool> {
-        if !self.can_try_packed(tex_path) {
-            return Ok(false);
-        }
-
-        let Some(resolver) = self.packed_resolver_state.get()? else {
-            return Ok(false);
-        };
-
-        let Ok(Some(hit)) = resolver.resolve_folder_variant(tex_path, variant_index) else {
-            return Ok(false);
-        };
-
-        sprite_asset.image = hit.image;
-        sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
-        sprite_asset.used_fallback = false;
-        Ok(true)
-    }
-}
-
-fn is_random_graphic_class(graphic_class: Option<&str>) -> bool {
-    matches!(
-        graphic_class,
-        Some("Graphic_Random") | Some("Graphic_RandomRotated")
-    )
-}
-
-pub struct ResolvedSpriteAsset {
-    pub sprite: SpriteAsset,
-    pub resolved_from_packed: bool,
 }
 
 pub struct PackedDecodeProbeOutcome {
@@ -245,9 +124,10 @@ pub struct PackedDecodeProbeOutcome {
     pub disable_packed: bool,
 }
 
-struct PackedResolverState {
+pub struct PackedCatalog {
     packed_roots: Vec<PathBuf>,
     typetree_registries: Vec<PathBuf>,
+    index: PackedTextureIndex,
     resolver: Option<PackedTextureResolver>,
     build_attempted: bool,
     build_fn: Box<BuildPackedResolverFn>,
@@ -256,11 +136,22 @@ struct PackedResolverState {
 type BuildPackedResolverFn =
     dyn FnMut(&[PathBuf], &[PathBuf]) -> Result<Option<PackedTextureResolver>>;
 
-impl PackedResolverState {
-    fn new(packed_roots: Vec<PathBuf>, typetree_registries: Vec<PathBuf>) -> Self {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackedPrefilter {
+    Texture,
+    Folder,
+}
+
+impl PackedCatalog {
+    fn new(
+        packed_roots: Vec<PathBuf>,
+        typetree_registries: Vec<PathBuf>,
+        index: PackedTextureIndex,
+    ) -> Self {
         Self {
             packed_roots,
             typetree_registries,
+            index,
             resolver: None,
             build_attempted: false,
             build_fn: Box::new(PackedTextureResolver::build),
@@ -276,9 +167,41 @@ impl PackedResolverState {
         Self {
             packed_roots,
             typetree_registries,
+            index: PackedTextureIndex::from_parts(&[], &[]),
             resolver: None,
             build_attempted: false,
             build_fn,
+        }
+    }
+
+    fn packed_roots(&self) -> &[PathBuf] {
+        &self.packed_roots
+    }
+
+    fn typetree_registries(&self) -> &[PathBuf] {
+        &self.typetree_registries
+    }
+
+    fn search_names(&self, query: &str, limit: usize) -> Vec<String> {
+        self.index.search_names(query, limit)
+    }
+
+    fn can_try(&self, tex_path: &str) -> bool {
+        self.index.maybe_contains(tex_path)
+    }
+
+    fn can_try_query(&self, query: &TextureQuery) -> bool {
+        match Self::prefilter_for(query) {
+            PackedPrefilter::Folder => self.index.maybe_contains_folder(query.tex_path),
+            PackedPrefilter::Texture => self.index.maybe_contains(query.tex_path),
+        }
+    }
+
+    fn prefilter_for(query: &TextureQuery) -> PackedPrefilter {
+        if query.kind.is_random() {
+            PackedPrefilter::Folder
+        } else {
+            PackedPrefilter::Texture
         }
     }
 
@@ -299,6 +222,115 @@ impl PackedResolverState {
         self.build_attempted = true;
         self.resolver = None;
     }
+
+    fn maybe_probe_decode_candidates(
+        &mut self,
+        tex_path: &str,
+        limit: usize,
+    ) -> Result<Option<PackedProbeSummary>> {
+        if !self.can_try(tex_path) {
+            return Ok(None);
+        }
+        let probe = self
+            .get()?
+            .map(|resolver| resolver.probe_decode_candidates(tex_path, limit));
+        Ok(probe)
+    }
+
+    fn probe_folder_variant(
+        &mut self,
+        tex_path: &str,
+        variant_index: usize,
+    ) -> Result<Option<String>> {
+        let Some(resolver) = self.get()? else {
+            return Ok(None);
+        };
+        match resolver.resolve_folder_variant(tex_path, variant_index)? {
+            Some(hit) => Ok(Some(hit.source_label)),
+            None => Ok(None),
+        }
+    }
+
+    fn search_container_paths(&mut self, query: &str, limit: usize) -> Result<Option<Vec<String>>> {
+        let Some(resolver) = self.get()? else {
+            return Ok(None);
+        };
+        Ok(Some(resolver.search_container_paths(query, limit)))
+    }
+
+    fn run_class_probe(&mut self, sample_limit: usize) -> Result<bool> {
+        let Some(resolver) = self.get()? else {
+            return Ok(false);
+        };
+        resolver.run_class_id_probe(sample_limit);
+        Ok(true)
+    }
+
+    fn run_decode_probe(
+        &mut self,
+        sample_limit: usize,
+        min_attempts: usize,
+    ) -> Result<Option<PackedDecodeProbeOutcome>> {
+        let Some(resolver) = self.get()? else {
+            return Ok(None);
+        };
+
+        let health = resolver.decode_health_sample(sample_limit);
+        if health.attempted < min_attempts {
+            return Ok(None);
+        }
+
+        let disable_packed = health.succeeded == 0;
+        let outcome = PackedDecodeProbeOutcome {
+            attempted: health.attempted,
+            succeeded: health.succeeded,
+            sample_errors: health.sample_errors,
+            disable_packed,
+        };
+
+        if disable_packed {
+            self.disable();
+        }
+
+        Ok(Some(outcome))
+    }
+}
+
+impl TextureBackend for PackedCatalog {
+    fn lookup(&mut self, query: &TextureQuery) -> Result<BackendLookup> {
+        if !self.can_try_query(query) {
+            return Ok(BackendLookup::Miss {
+                attempted: Vec::new(),
+            });
+        }
+
+        let Some(resolver) = self.get()? else {
+            return Ok(BackendLookup::Miss {
+                attempted: Vec::new(),
+            });
+        };
+
+        let hit = if query.kind.is_random() {
+            match resolver.resolve_folder_variant(query.tex_path, query.variant_index)? {
+                Some(hit) => Some(hit),
+                None => resolver.resolve(query.tex_path)?,
+            }
+        } else {
+            resolver.resolve(query.tex_path)?
+        };
+
+        match hit {
+            Some(hit) => Ok(BackendLookup::Hit(ResolvedSprite {
+                image: hit.image,
+                source: SpriteSource::Packed {
+                    label: hit.source_label,
+                },
+            })),
+            None => Ok(BackendLookup::Miss {
+                attempted: Vec::new(),
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -306,13 +338,16 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::PackedResolverState;
+    use super::{PackedCatalog, PackedPrefilter};
+    use crate::assets::backend::TextureQuery;
+    use crate::assets::packed_index::PackedTextureIndex;
+    use crate::defs::GraphicKind;
 
     #[test]
     fn lazy_builder_runs_once_when_result_is_none() {
         let calls = Rc::new(RefCell::new(0usize));
         let calls_for_builder = Rc::clone(&calls);
-        let mut state = PackedResolverState::with_builder(
+        let mut catalog = PackedCatalog::with_builder(
             vec![],
             vec![],
             Box::new(move |_, _| {
@@ -321,8 +356,8 @@ mod tests {
             }),
         );
 
-        let _ = state.get().unwrap();
-        let _ = state.get().unwrap();
+        let _ = catalog.get().unwrap();
+        let _ = catalog.get().unwrap();
         assert_eq!(*calls.borrow(), 1);
     }
 
@@ -330,7 +365,7 @@ mod tests {
     fn disable_prevents_builder_execution() {
         let calls = Rc::new(RefCell::new(0usize));
         let calls_for_builder = Rc::clone(&calls);
-        let mut state = PackedResolverState::with_builder(
+        let mut catalog = PackedCatalog::with_builder(
             vec![],
             vec![],
             Box::new(move |_, _| {
@@ -339,8 +374,71 @@ mod tests {
             }),
         );
 
-        state.disable();
-        let _ = state.get().unwrap();
+        catalog.disable();
+        let _ = catalog.get().unwrap();
         assert_eq!(*calls.borrow(), 0);
+    }
+
+    #[test]
+    fn random_queries_select_folder_prefilter() {
+        assert_eq!(
+            PackedCatalog::prefilter_for(&TextureQuery {
+                tex_path: "Things/Item/Chunk/ChunkSlag",
+                kind: GraphicKind::Random,
+                variant_index: 0,
+            }),
+            PackedPrefilter::Folder
+        );
+        assert_eq!(
+            PackedCatalog::prefilter_for(&TextureQuery {
+                tex_path: "Things/Item/Chunk/ChunkSlag",
+                kind: GraphicKind::RandomRotated,
+                variant_index: 0,
+            }),
+            PackedPrefilter::Folder
+        );
+    }
+
+    #[test]
+    fn single_queries_select_texture_prefilter() {
+        assert_eq!(
+            PackedCatalog::prefilter_for(&TextureQuery {
+                tex_path: "Things/Item/Chunk/ChunkSlag",
+                kind: GraphicKind::Single,
+                variant_index: 0,
+            }),
+            PackedPrefilter::Texture
+        );
+        assert_eq!(
+            PackedCatalog::prefilter_for(&TextureQuery {
+                tex_path: "Things/Item/Resource/Steel",
+                kind: GraphicKind::Multi,
+                variant_index: 0,
+            }),
+            PackedPrefilter::Texture
+        );
+    }
+
+    #[test]
+    fn can_try_query_respects_selected_prefilter() {
+        let mut catalog = PackedCatalog::with_builder(vec![], vec![], Box::new(|_, _| Ok(None)));
+        catalog.index =
+            PackedTextureIndex::from_parts(&["steel_a"], &["textures/things/item/chunk/chunkslag"]);
+
+        assert!(catalog.can_try_query(&TextureQuery {
+            tex_path: "Things/Item/Chunk/ChunkSlag",
+            kind: GraphicKind::Random,
+            variant_index: 0,
+        }));
+        assert!(catalog.can_try_query(&TextureQuery {
+            tex_path: "Things/Item/Resource/Steel",
+            kind: GraphicKind::Single,
+            variant_index: 0,
+        }));
+        assert!(!catalog.can_try_query(&TextureQuery {
+            tex_path: "Things/Item/Resource/Gold",
+            kind: GraphicKind::Random,
+            variant_index: 0,
+        }));
     }
 }

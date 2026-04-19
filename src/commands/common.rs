@@ -39,14 +39,11 @@ pub fn run_extract_packed_textures(
 }
 
 pub fn print_packed_texture_search(resolver: &AssetResolver, query: &str, limit: usize) {
-    if let Some(matches) = resolver.search_packed_names(query, limit) {
-        for name in &matches {
-            println!("{name}");
-        }
-        println!("matched {} packed texture names", matches.len());
-    } else {
-        println!("no packed texture index loaded");
+    let matches = resolver.search_packed_names(query, limit);
+    for name in &matches {
+        println!("{name}");
     }
+    println!("matched {} packed texture names", matches.len());
 }
 
 pub fn diagnose_textures(data_dir: &Path, texture_roots: &[PathBuf], packed_roots: &[PathBuf]) {
@@ -126,14 +123,8 @@ pub fn list_defs(
             }
         }
         println!(
-            "{} | texPath={} | class={}",
-            thing.def_name,
-            thing.graphic_data.tex_path,
-            thing
-                .graphic_data
-                .graphic_class
-                .as_deref()
-                .unwrap_or("Graphic_Single")
+            "{} | texPath={} | class={:?}",
+            thing.def_name, thing.graphic_data.tex_path, thing.graphic_data.kind
         );
         shown += 1;
     }
@@ -142,13 +133,11 @@ pub fn list_defs(
 }
 
 pub fn run_defs_probe(
-    data_dir: &Path,
     defs: &DefSet<'_>,
     resolver: &mut AssetResolver,
 ) -> Result<()> {
     fn probe<T>(
         label: &str,
-        data_dir: &Path,
         resolver: &mut AssetResolver,
         defs: &HashMap<String, T>,
         name_of: impl Fn(&T) -> &str,
@@ -168,8 +157,8 @@ pub fn run_defs_probe(
                 skipped += 1;
                 continue;
             }
-            let resolved = resolver.resolve_texture_path(data_dir, tex)?;
-            if resolved.sprite.used_fallback {
+            let resolved = resolver.resolve_texture_path(tex)?;
+            if resolved.used_fallback() {
                 fallback += 1;
             } else {
                 decoded += 1;
@@ -187,7 +176,6 @@ pub fn run_defs_probe(
 
     probe(
         "body",
-        data_dir,
         resolver,
         defs.body_type_defs,
         |d| d.def_name.as_str(),
@@ -195,7 +183,6 @@ pub fn run_defs_probe(
     )?;
     probe(
         "head",
-        data_dir,
         resolver,
         defs.head_type_defs,
         |d| d.def_name.as_str(),
@@ -203,7 +190,6 @@ pub fn run_defs_probe(
     )?;
     probe(
         "hair",
-        data_dir,
         resolver,
         defs.hair_defs,
         |d| d.def_name.as_str(),
@@ -211,7 +197,6 @@ pub fn run_defs_probe(
     )?;
     probe(
         "beard",
-        data_dir,
         resolver,
         defs.beard_defs,
         |d| d.def_name.as_str(),
@@ -225,7 +210,6 @@ pub fn run_defs_probe(
     )?;
     probe(
         "apparel",
-        data_dir,
         resolver,
         defs.apparel_defs,
         |d| d.def_name.as_str(),
@@ -235,7 +219,6 @@ pub fn run_defs_probe(
 }
 
 pub fn run_terrain_probe(
-    data_dir: &Path,
     terrain_defs: &std::collections::HashMap<String, TerrainDef>,
     resolver: &mut AssetResolver,
     limit: usize,
@@ -246,8 +229,8 @@ pub fn run_terrain_probe(
     let mut failed = 0usize;
 
     for terrain in rows.into_iter().take(limit) {
-        let resolved = resolver.resolve_texture_path(data_dir, terrain.texture_path.as_str())?;
-        if resolved.sprite.used_fallback {
+        let resolved = resolver.resolve_texture_path(terrain.texture_path.as_str())?;
+        if resolved.used_fallback() {
             failed += 1;
             println!(
                 "FAIL {:<28} texPath={} source=<fallback>",
@@ -256,9 +239,7 @@ pub fn run_terrain_probe(
         } else {
             success += 1;
             let source = resolved
-                .sprite
-                .source_path
-                .as_ref()
+                .source_path()
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "<unknown>".to_string());
             println!(
@@ -284,7 +265,6 @@ pub(crate) struct DirectionalTexturePath {
 
 pub(crate) fn resolve_directional_tex_path(
     asset_resolver: &mut AssetResolver,
-    data_dir: &Path,
     path: &str,
     facing: PawnFacing,
 ) -> DirectionalTexturePath {
@@ -308,8 +288,8 @@ pub(crate) fn resolve_directional_tex_path(
 
     for (data_facing, suffix) in candidates {
         let candidate = format!("{path}{suffix}");
-        if let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, &candidate)
-            && !resolved.sprite.used_fallback
+        if let Ok(resolved) = asset_resolver.resolve_texture_path(&candidate)
+            && !resolved.used_fallback()
         {
             return DirectionalTexturePath {
                 path: candidate,
@@ -436,7 +416,6 @@ pub(crate) fn build_apparel_tex_path(
     body_def_name: Option<&str>,
     render_as_pack: bool,
     asset_resolver: &mut AssetResolver,
-    data_dir: &Path,
 ) -> String {
     use crate::pawn::ApparelLayer as ComposeApparelLayer;
 
@@ -448,8 +427,8 @@ pub(crate) fn build_apparel_tex_path(
         && let Some(body_name) = body_def_name
     {
         let suffixed = format!("{}_{}", apparel.tex_path, body_name);
-        if let Ok(resolved) = asset_resolver.resolve_texture_path(data_dir, &suffixed)
-            && !resolved.sprite.used_fallback
+        if let Ok(resolved) = asset_resolver.resolve_texture_path(&suffixed)
+            && !resolved.used_fallback()
         {
             return suffixed;
         }

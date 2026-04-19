@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+mod backend;
 mod default_config;
 mod loose;
 pub(crate) mod packed_index;
@@ -9,8 +10,8 @@ mod packed_textures;
 mod resolver;
 mod rimworld_paths;
 mod typetree_registry;
+pub(crate) mod variants;
 
-pub use loose::{SpriteAsset, resolve_sprite, resolve_texture_path};
 pub use packed_textures::{extract_all_packed_textures, infer_packed_data_roots};
 pub use resolver::AssetResolver;
 
@@ -30,7 +31,6 @@ pub struct AssetSetupOptions {
     pub auto_typetree: bool,
     pub packed_index_path: Option<PathBuf>,
     pub rebuild_packed_index: bool,
-    pub disable_packed_index: bool,
 }
 
 pub fn prepare_asset_setup(options: AssetSetupOptions) -> Result<AssetSetup> {
@@ -58,21 +58,18 @@ pub fn prepare_asset_setup(options: AssetSetupOptions) -> Result<AssetSetup> {
         options.auto_typetree,
     );
 
-    let packed_index = if options.disable_packed_index {
-        None
-    } else {
-        let cache_path = options
-            .packed_index_path
-            .unwrap_or_else(default_packed_index_path);
-        Some(packed_index::PackedTextureIndex::load_or_build(
-            &packed_roots,
-            &typetree_registries,
-            &cache_path,
-            options.rebuild_packed_index,
-        )?)
-    };
+    let cache_path = options
+        .packed_index_path
+        .unwrap_or_else(default_packed_index_path);
+    let packed_index = packed_index::PackedTextureIndex::load_or_build(
+        &packed_roots,
+        &typetree_registries,
+        &cache_path,
+        options.rebuild_packed_index,
+    )?;
 
     let resolver = AssetResolver::new(
+        data_dir.clone(),
         texture_roots.clone(),
         packed_roots.clone(),
         typetree_registries.clone(),
