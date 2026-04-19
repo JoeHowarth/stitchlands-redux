@@ -286,7 +286,8 @@ pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>
 }
 
 pub fn load_terrain_defs(core_data_dir: &Path) -> Result<HashMap<String, TerrainDef>> {
-    walk_defs(core_data_dir, parse_doc_terrain_defs)
+    let raw = walk_defs(core_data_dir, parse_doc_terrain_raw)?;
+    Ok(resolve_terrain_defs_from_raw(raw))
 }
 
 pub fn load_apparel_defs(core_data_dir: &Path) -> Result<HashMap<String, ApparelDef>> {
@@ -544,12 +545,140 @@ fn parse_doc_thing_defs(doc: &Document<'_>, defs: &mut HashMap<String, ThingDef>
     }
 }
 
-fn parse_doc_terrain_defs(doc: &Document<'_>, defs: &mut HashMap<String, TerrainDef>) {
+#[derive(Clone, Default)]
+struct RawTerrainDef {
+    parent_name: Option<String>,
+    def_name: Option<String>,
+    is_abstract: bool,
+    texture_path: Option<String>,
+    edge_texture_path: Option<String>,
+    edge_type: Option<TerrainEdgeType>,
+    render_precedence: Option<i32>,
+}
+
+fn parse_doc_terrain_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawTerrainDef>) {
     for node in doc.descendants().filter(|n| n.has_tag_name("TerrainDef")) {
-        if let Some(terrain_def) = parse_terrain_def(node) {
-            defs.insert(terrain_def.def_name.clone(), terrain_def);
-        }
+        let name_attr = node.attribute("Name").map(str::to_string);
+        let def_name = child_text(node, "defName").map(str::to_string);
+        let Some(key) = def_name.clone().or_else(|| name_attr.clone()) else {
+            continue;
+        };
+        let edge_type = child_text(node, "edgeType").and_then(|value| {
+            match TerrainEdgeType::from_token(value) {
+                Some(parsed) => Some(parsed),
+                None => {
+                    warn!("unknown edgeType '{value}' for terrain '{key}'");
+                    None
+                }
+            }
+        });
+        let record = RawTerrainDef {
+            parent_name: node.attribute("ParentName").map(str::to_string),
+            def_name,
+            is_abstract: node
+                .attribute("Abstract")
+                .and_then(parse_bool)
+                .unwrap_or(false),
+            texture_path: child_text(node, "texturePath")
+                .or_else(|| child_text(node, "texPath"))
+                .map(str::to_string),
+            edge_texture_path: child_text(node, "edgePath")
+                .or_else(|| child_text(node, "edgeTexturePath"))
+                .map(str::to_string),
+            edge_type,
+            render_precedence: child_text(node, "renderPrecedence")
+                .and_then(|value| value.parse::<i32>().ok()),
+        };
+        raw.insert(key, record);
     }
+}
+
+/// Resolve `ParentName` inheritance chains into concrete `TerrainDef`s.
+///
+/// RimWorld's XML loader merges each child's fields over its parent chain
+/// (child wins per-field). `Abstract="True"` nodes supply fields but are
+/// not themselves returned. Cycles are logged and broken. Missing parents
+/// are silently tolerated — the child keeps its own fields and inherits
+/// nothing.
+///
+/// Without this resolver, concrete water defs like `WaterDeep` and
+/// `WaterMovingChestDeep` — which inherit `texturePath` / `edgeType` /
+/// `waterDepthShader` from abstract parents — are silently dropped by
+/// the flat parser.
+fn resolve_terrain_defs_from_raw(
+    raw: HashMap<String, RawTerrainDef>,
+) -> HashMap<String, TerrainDef> {
+    fn resolve(
+        key: &str,
+        all: &HashMap<String, RawTerrainDef>,
+        cache: &mut HashMap<String, RawTerrainDef>,
+        stack: &mut Vec<String>,
+    ) -> Option<RawTerrainDef> {
+        if let Some(existing) = cache.get(key) {
+            return Some(existing.clone());
+        }
+        if stack.iter().any(|k| k == key) {
+            warn!("cyclic ParentName chain detected for terrain '{key}'");
+            return None;
+        }
+        let raw = all.get(key)?;
+        stack.push(key.to_string());
+        let parent = raw
+            .parent_name
+            .as_ref()
+            .and_then(|p| resolve(p, all, cache, stack));
+        let merged = RawTerrainDef {
+            parent_name: raw.parent_name.clone(),
+            def_name: raw.def_name.clone(),
+            is_abstract: raw.is_abstract,
+            texture_path: raw
+                .texture_path
+                .clone()
+                .or_else(|| parent.as_ref().and_then(|p| p.texture_path.clone())),
+            edge_texture_path: raw
+                .edge_texture_path
+                .clone()
+                .or_else(|| parent.as_ref().and_then(|p| p.edge_texture_path.clone())),
+            edge_type: raw
+                .edge_type
+                .or_else(|| parent.as_ref().and_then(|p| p.edge_type)),
+            render_precedence: raw
+                .render_precedence
+                .or_else(|| parent.as_ref().and_then(|p| p.render_precedence)),
+        };
+        stack.pop();
+        cache.insert(key.to_string(), merged.clone());
+        Some(merged)
+    }
+
+    let mut out = HashMap::new();
+    let mut resolved_cache = HashMap::new();
+    for key in raw.keys() {
+        let mut stack = Vec::new();
+        let Some(merged) = resolve(key, &raw, &mut resolved_cache, &mut stack) else {
+            continue;
+        };
+        if merged.is_abstract {
+            continue;
+        }
+        let Some(def_name) = merged.def_name else {
+            continue;
+        };
+        let Some(texture_path) = merged.texture_path else {
+            continue;
+        };
+        out.insert(
+            def_name.clone(),
+            TerrainDef {
+                def_name,
+                texture_path,
+                edge_texture_path: merged.edge_texture_path,
+                edge_type: merged.edge_type.unwrap_or_default(),
+                render_precedence: merged.render_precedence.unwrap_or(0),
+            },
+        );
+    }
+    out
 }
 
 fn parse_doc_apparel_defs(doc: &Document<'_>, defs: &mut HashMap<String, ApparelDef>) {
@@ -568,36 +697,6 @@ fn parse_thing_def(node: Node<'_, '_>) -> Option<ThingDef> {
     Some(ThingDef {
         def_name,
         graphic_data,
-    })
-}
-
-fn parse_terrain_def(node: Node<'_, '_>) -> Option<TerrainDef> {
-    let def_name = child_text(node, "defName")?.to_string();
-    let texture_path = child_text(node, "texturePath")
-        .or_else(|| child_text(node, "texPath"))
-        .map(str::to_string)?;
-    let edge_texture_path = child_text(node, "edgePath")
-        .or_else(|| child_text(node, "edgeTexturePath"))
-        .map(str::to_string);
-    let edge_type = child_text(node, "edgeType")
-        .and_then(|value| match TerrainEdgeType::from_token(value) {
-            Some(parsed) => Some(parsed),
-            None => {
-                warn!("unknown edgeType '{value}' for terrain '{def_name}'");
-                None
-            }
-        })
-        .unwrap_or_default();
-    let render_precedence = child_text(node, "renderPrecedence")
-        .and_then(|value| value.parse::<i32>().ok())
-        .unwrap_or(0);
-
-    Some(TerrainDef {
-        def_name,
-        texture_path,
-        edge_texture_path,
-        edge_type,
-        render_precedence,
     })
 }
 
@@ -991,9 +1090,17 @@ mod tests {
         assert_eq!(thing.graphic_data.draw_offset, Vec3::new(0.1, 0.2, 0.3));
     }
 
+    fn parse_terrain_xml(xml: &str) -> HashMap<String, TerrainDef> {
+        let doc = Document::parse(xml).unwrap();
+        let mut raw = HashMap::new();
+        parse_doc_terrain_raw(&doc, &mut raw);
+        resolve_terrain_defs_from_raw(raw)
+    }
+
     #[test]
     fn parses_minimal_terraindef() {
-        let xml = r#"
+        let defs = parse_terrain_xml(
+            r#"
         <Defs>
             <TerrainDef>
                 <defName>SoilRich</defName>
@@ -1001,10 +1108,8 @@ mod tests {
                 <edgePath>Terrain/Edges/Soil</edgePath>
             </TerrainDef>
         </Defs>
-        "#;
-        let doc = Document::parse(xml).unwrap();
-        let mut defs = HashMap::new();
-        parse_doc_terrain_defs(&doc, &mut defs);
+        "#,
+        );
 
         let terrain = defs.get("SoilRich").unwrap();
         assert_eq!(terrain.texture_path, "Terrain/Surfaces/SoilRich");
@@ -1071,7 +1176,8 @@ mod tests {
 
     #[test]
     fn parses_terrain_edge_and_precedence() {
-        let xml = r#"
+        let defs = parse_terrain_xml(
+            r#"
         <Defs>
             <TerrainDef>
                 <defName>WaterShallow</defName>
@@ -1092,10 +1198,8 @@ mod tests {
                 <renderPrecedence>70</renderPrecedence>
             </TerrainDef>
         </Defs>
-        "#;
-        let doc = Document::parse(xml).unwrap();
-        let mut defs = HashMap::new();
-        parse_doc_terrain_defs(&doc, &mut defs);
+        "#,
+        );
         let water = defs.get("WaterShallow").unwrap();
         assert_eq!(water.edge_type, TerrainEdgeType::Water);
         assert_eq!(water.render_precedence, 394);
@@ -1107,6 +1211,102 @@ mod tests {
             defs.get("Concrete").unwrap().edge_type,
             TerrainEdgeType::Hard
         );
+    }
+
+    #[test]
+    fn resolves_terrain_parent_chain() {
+        // Mirrors the real Terrain_Water.xml shape: WaterDeep inherits
+        // texturePath from WaterDeepBase and edgeType from WaterBase two
+        // levels up. Abstract nodes must not appear in the output.
+        let defs = parse_terrain_xml(
+            r#"
+        <Defs>
+            <TerrainDef Abstract="True" Name="WaterBase">
+                <edgeType>Water</edgeType>
+            </TerrainDef>
+            <TerrainDef Abstract="True" Name="WaterDeepBase" ParentName="WaterBase">
+                <texturePath>Terrain/Surfaces/WaterDeepRamp</texturePath>
+            </TerrainDef>
+            <TerrainDef ParentName="WaterDeepBase">
+                <defName>WaterDeep</defName>
+                <renderPrecedence>395</renderPrecedence>
+            </TerrainDef>
+            <TerrainDef ParentName="WaterDeepBase">
+                <defName>WaterOceanDeep</defName>
+                <renderPrecedence>397</renderPrecedence>
+            </TerrainDef>
+        </Defs>
+        "#,
+        );
+        assert_eq!(defs.len(), 2, "abstract nodes must be dropped");
+        let deep = defs.get("WaterDeep").unwrap();
+        assert_eq!(deep.texture_path, "Terrain/Surfaces/WaterDeepRamp");
+        assert_eq!(deep.edge_type, TerrainEdgeType::Water);
+        assert_eq!(deep.render_precedence, 395);
+        let ocean = defs.get("WaterOceanDeep").unwrap();
+        assert_eq!(ocean.texture_path, "Terrain/Surfaces/WaterDeepRamp");
+        assert_eq!(ocean.edge_type, TerrainEdgeType::Water);
+        assert_eq!(ocean.render_precedence, 397);
+    }
+
+    #[test]
+    fn child_overrides_parent_field() {
+        // Marsh in Terrain_Water.xml extends WaterShallowBase but overrides
+        // edgeType Water → FadeRough on the leaf.
+        let defs = parse_terrain_xml(
+            r#"
+        <Defs>
+            <TerrainDef Abstract="True" Name="WaterBase">
+                <edgeType>Water</edgeType>
+            </TerrainDef>
+            <TerrainDef ParentName="WaterBase">
+                <defName>Marsh</defName>
+                <texturePath>Terrain/Surfaces/Marsh</texturePath>
+                <edgeType>FadeRough</edgeType>
+                <renderPrecedence>325</renderPrecedence>
+            </TerrainDef>
+        </Defs>
+        "#,
+        );
+        let marsh = defs.get("Marsh").unwrap();
+        assert_eq!(marsh.edge_type, TerrainEdgeType::FadeRough);
+    }
+
+    #[test]
+    fn cyclic_parent_chain_does_not_infinite_loop() {
+        let defs = parse_terrain_xml(
+            r#"
+        <Defs>
+            <TerrainDef Abstract="True" Name="A" ParentName="B">
+                <texturePath>Terrain/A</texturePath>
+            </TerrainDef>
+            <TerrainDef Abstract="True" Name="B" ParentName="A">
+                <edgeType>Hard</edgeType>
+            </TerrainDef>
+            <TerrainDef ParentName="A">
+                <defName>Child</defName>
+            </TerrainDef>
+        </Defs>
+        "#,
+        );
+        let child = defs.get("Child").unwrap();
+        assert_eq!(child.texture_path, "Terrain/A");
+    }
+
+    #[test]
+    fn missing_parent_is_tolerated() {
+        let defs = parse_terrain_xml(
+            r#"
+        <Defs>
+            <TerrainDef ParentName="NonexistentBase">
+                <defName>Orphan</defName>
+                <texturePath>Terrain/Orphan</texturePath>
+            </TerrainDef>
+        </Defs>
+        "#,
+        );
+        let orphan = defs.get("Orphan").unwrap();
+        assert_eq!(orphan.texture_path, "Terrain/Orphan");
     }
 
     #[test]
