@@ -12,7 +12,7 @@ use unity_asset_decode::unity_version::UnityVersion;
 pub struct PackedTextureIndex {
     signature: String,
     names: Vec<String>,
-    container_paths: Vec<String>,
+    container_paths: HashSet<String>,
 }
 
 impl PackedTextureIndex {
@@ -77,11 +77,7 @@ impl PackedTextureIndex {
         }
 
         for path in wanted_container_patterns(tex_path) {
-            if self
-                .container_paths
-                .iter()
-                .any(|entry| entry.contains(&path))
-            {
+            if self.container_paths.contains(&path) {
                 return true;
             }
         }
@@ -118,7 +114,7 @@ impl PackedTextureIndex {
             return Ok(Self {
                 signature,
                 names: Vec::new(),
-                container_paths: Vec::new(),
+                container_paths: HashSet::new(),
             });
         };
 
@@ -149,12 +145,10 @@ impl PackedTextureIndex {
             }
         }
 
-        let mut container_paths: Vec<String> = crate::assets::packed_textures::collect_container_paths(&env)
-            .into_iter()
-            .map(|(path, _)| path)
-            .collect();
-        container_paths.sort();
-        container_paths.dedup();
+        let mut container_paths: HashSet<String> = HashSet::new();
+        for (path, _) in crate::assets::packed_textures::collect_container_paths(&env) {
+            insert_with_ancestors(&mut container_paths, &path);
+        }
 
         let mut names: Vec<String> = names_set.into_iter().collect();
         names.sort();
@@ -172,7 +166,7 @@ impl PackedTextureIndex {
         }
 
         let mut out = String::new();
-        out.push_str("STITCHLANDS_PACKED_INDEX_V2\n");
+        out.push_str("STITCHLANDS_PACKED_INDEX_V3\n");
         out.push_str(&self.signature);
         out.push('\n');
         out.push_str(&format!("{}\n", self.names.len()));
@@ -180,8 +174,10 @@ impl PackedTextureIndex {
             out.push_str(name);
             out.push('\n');
         }
-        out.push_str(&format!("{}\n", self.container_paths.len()));
-        for path in &self.container_paths {
+        let mut paths: Vec<&String> = self.container_paths.iter().collect();
+        paths.sort();
+        out.push_str(&format!("{}\n", paths.len()));
+        for path in paths {
             out.push_str(path);
             out.push('\n');
         }
@@ -195,7 +191,7 @@ impl PackedTextureIndex {
         let mut lines = input.lines();
 
         let version = lines.next().unwrap_or_default();
-        if version != "STITCHLANDS_PACKED_INDEX_V2" {
+        if version != "STITCHLANDS_PACKED_INDEX_V3" {
             anyhow::bail!("unsupported packed index version");
         }
 
@@ -210,10 +206,10 @@ impl PackedTextureIndex {
         }
 
         let container_len = lines.next().unwrap_or("0").parse::<usize>().unwrap_or(0);
-        let mut container_paths = Vec::with_capacity(container_len);
+        let mut container_paths = HashSet::with_capacity(container_len);
         for _ in 0..container_len {
             if let Some(line) = lines.next() {
-                container_paths.push(line.to_string());
+                container_paths.insert(line.to_string());
             }
         }
 
@@ -268,18 +264,38 @@ pub(crate) fn wanted_texture_names(tex_path: &str) -> Vec<String> {
 
 pub(crate) fn wanted_container_patterns(tex_path: &str) -> Vec<String> {
     let base = tex_path.to_ascii_lowercase();
+    let prefixed = if base.starts_with("textures/") {
+        base.clone()
+    } else {
+        format!("textures/{base}")
+    };
     vec![
-        base.clone(),
-        format!("{base}.png"),
-        format!("{base}_south"),
-        format!("{base}_north"),
-        format!("{base}_east"),
-        format!("{base}_west"),
+        prefixed.clone(),
+        format!("{prefixed}.png"),
+        format!("{prefixed}_south.png"),
+        format!("{prefixed}_north.png"),
+        format!("{prefixed}_east.png"),
+        format!("{prefixed}_west.png"),
     ]
+}
+
+fn insert_with_ancestors(set: &mut HashSet<String>, path: &str) {
+    set.insert(path.to_string());
+    let mut remaining = path;
+    while let Some(idx) = remaining.rfind('/') {
+        remaining = &remaining[..idx];
+        if remaining.is_empty() {
+            break;
+        }
+        if !set.insert(remaining.to_string()) {
+            break;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::fs;
 
     use super::{PackedTextureIndex, wanted_container_patterns, wanted_texture_names};
@@ -297,9 +313,9 @@ mod tests {
     #[test]
     fn wanted_container_patterns_include_png_and_rotations() {
         let patterns = wanted_container_patterns("Things/Item/Resource/Steel");
-        assert!(patterns.contains(&"things/item/resource/steel".to_string()));
-        assert!(patterns.contains(&"things/item/resource/steel.png".to_string()));
-        assert!(patterns.contains(&"things/item/resource/steel_south".to_string()));
+        assert!(patterns.contains(&"textures/things/item/resource/steel.png".to_string()));
+        assert!(patterns.contains(&"textures/things/item/resource/steel_south.png".to_string()));
+        assert!(patterns.contains(&"textures/things/item/resource/steel_north.png".to_string()));
     }
 
     #[test]
@@ -339,7 +355,7 @@ mod tests {
         let cache_path = root.join("cache.txt");
 
         let stale = [
-            "STITCHLANDS_PACKED_INDEX_V2",
+            "STITCHLANDS_PACKED_INDEX_V3",
             "stale_signature",
             "1",
             "made_up_texture",
@@ -368,12 +384,12 @@ mod tests {
         let cache_path = root.join("cache.txt");
 
         let input = [
-            "STITCHLANDS_PACKED_INDEX_V2",
+            "STITCHLANDS_PACKED_INDEX_V3",
             "any",
             "1",
             "steel_a",
             "1",
-            "assets/resources/things/pawn/humanlike/bodies/naked_male.png",
+            "textures/things/pawn/humanlike/bodies/naked_male.png",
             "",
         ]
         .join("\n");
@@ -397,7 +413,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let cache_path = root.join("cache.txt");
 
-        let input = ["STITCHLANDS_PACKED_INDEX_V2", "any", "0", "0", ""].join("\n");
+        let input = ["STITCHLANDS_PACKED_INDEX_V3", "any", "0", "0", ""].join("\n");
         fs::write(&cache_path, input).unwrap();
 
         let index = PackedTextureIndex::load(&cache_path).unwrap();
@@ -415,7 +431,7 @@ mod tests {
                 v.sort();
                 v
             },
-            container_paths: Vec::new(),
+            container_paths: HashSet::new(),
         }
     }
 
