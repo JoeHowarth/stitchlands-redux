@@ -4,6 +4,7 @@ mod spawn;
 mod state;
 mod tick;
 
+pub use neighbors::{DEPTH_WALL, DEPTH_WALL_CORNER, cardinal_neighbors, diagonal_neighbors};
 pub use query::{pawn_id_at_cell, pawn_is_idle, selected_pawn};
 pub use spawn::world_from_fixture;
 pub use state::{PathProgress, PawnState, TerrainTile, ThingState, WorldState};

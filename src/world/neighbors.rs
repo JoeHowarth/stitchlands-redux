@@ -4,6 +4,24 @@ use crate::cell::Cell;
 use super::ThingState;
 use super::WorldState;
 
+pub const DEPTH_WALL: f32 = -0.70;
+pub const DEPTH_WALL_CORNER: f32 = -0.69;
+
+/// Order: N, E, S, W. Matches RimWorld's `GenAdj.CardinalDirections`; the
+/// `link_index` bitmask in `crate::linking` is keyed off this same ordering.
+const CARDINAL_OFFSETS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
+
+/// Order: NE, SE, SW, NW.
+const DIAGONAL_OFFSETS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, -1), (-1, 1)];
+
+pub fn cardinal_neighbors(cell: Cell) -> [Cell; 4] {
+    CARDINAL_OFFSETS.map(|(dx, dz)| Cell::new(cell.x + dx, cell.z + dz))
+}
+
+pub fn diagonal_neighbors(cell: Cell) -> [Cell; 4] {
+    DIAGONAL_OFFSETS.map(|(dx, dz)| Cell::new(cell.x + dx, cell.z + dz))
+}
+
 impl WorldState {
     pub fn cell_in_bounds(&self, cell: Cell) -> bool {
         cell.x >= 0

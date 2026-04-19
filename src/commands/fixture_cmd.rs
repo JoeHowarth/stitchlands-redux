@@ -9,6 +9,7 @@ use crate::cli::FixtureCmd;
 use crate::defs::{
     ApparelDef, ApparelLayerDef, BodyTypeDefRender,
 };
+use crate::linking::LinkDrawerType;
 use crate::pawn::{
     ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
     PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
@@ -22,6 +23,7 @@ use super::common::{
     apparel_worn_data_for_facing, build_apparel_tex_path, build_full_apparel_layer_override,
     map_explicit_skip_flags, resolve_directional_tex_path,
 };
+use super::linking_sprites::emit_linked_thing_sprites;
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
 pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<CommandAction> {
@@ -173,6 +175,19 @@ fn build_world_sprites(
             .thing_defs
             .get(&thing.def_name)
             .with_context(|| format!("missing ThingDef '{}'", thing.def_name))?;
+        if thing_def.graphic_data.link_type != LinkDrawerType::None {
+            let linked = emit_linked_thing_sprites(
+                ctx.data_dir,
+                ctx.asset_resolver,
+                &ctx.defs,
+                &thing,
+                thing_def,
+                world,
+                strict_missing,
+            )?;
+            static_sprites.extend(linked);
+            continue;
+        }
         let resolved = ctx
             .asset_resolver
             .resolve_thing(ctx.data_dir, thing_def, thing.id)

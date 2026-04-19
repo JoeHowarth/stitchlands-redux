@@ -30,4 +30,19 @@ mod tests {
             fixture.map.terrain.len()
         );
     }
+
+    #[test]
+    fn parses_walls_patterns_fixture() {
+        let path = std::path::Path::new("fixtures/v2/walls_patterns.ron");
+        let fixture = load_fixture(path).expect("walls_patterns.ron should parse");
+        assert_eq!(
+            fixture.map.width * fixture.map.height,
+            fixture.map.terrain.len(),
+            "terrain count must match width*height"
+        );
+        assert!(
+            fixture.things.iter().all(|t| t.def_name == "Wall"),
+            "walls_patterns is wall-only"
+        );
+    }
 }

@@ -11,6 +11,7 @@ use crate::renderer::RendererOptions;
 pub mod common;
 mod debug_cmd;
 mod fixture_cmd;
+mod linking_sprites;
 mod render_cmd;
 
 pub use common::DefSet;

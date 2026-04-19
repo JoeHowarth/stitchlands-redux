@@ -1,0 +1,110 @@
+// Showcase fixture for LinkDrawer wall linking. Each cluster exercises a
+// different neighbor-bitmask case in the 4x4 atlas, plus a handful of
+// CornerFiller interiors to verify the corner quads land correctly.
+(
+  schema_version: 2,
+  map: (
+    width: 24,
+    height: 16,
+    terrain: [
+      // row z=0
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=1
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=2
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=3
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=4
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=5
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=6
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=7
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=8
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=9
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=10
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=11
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=12
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=13
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=14
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+      // z=15
+      (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
+    ],
+  ),
+  things: [
+    // Isolated wall (atlas index 0 — no neighbors)
+    (def_name: "Wall", cell_x: 2, cell_z: 2, blocks_movement: true),
+
+    // Horizontal run of three (middle: E+W = index 10)
+    (def_name: "Wall", cell_x: 5, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 6, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 7, cell_z: 2, blocks_movement: true),
+
+    // Vertical run of three (middle: N+S = index 5)
+    (def_name: "Wall", cell_x: 10, cell_z: 1, blocks_movement: true),
+    (def_name: "Wall", cell_x: 10, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 10, cell_z: 3, blocks_movement: true),
+
+    // L-corner at (13, 2) with arms going east (to 15,2) and north (to 13,4)
+    (def_name: "Wall", cell_x: 13, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 14, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 15, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 13, cell_z: 3, blocks_movement: true),
+    (def_name: "Wall", cell_x: 13, cell_z: 4, blocks_movement: true),
+
+    // T-junction centered at (19, 2): arms E, W, and N
+    (def_name: "Wall", cell_x: 18, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 19, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 20, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 19, cell_z: 3, blocks_movement: true),
+
+    // Plus-shape centered at (4, 7): all four arms
+    (def_name: "Wall", cell_x: 4, cell_z: 6, blocks_movement: true),
+    (def_name: "Wall", cell_x: 4, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 4, cell_z: 8, blocks_movement: true),
+    (def_name: "Wall", cell_x: 3, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 5, cell_z: 7, blocks_movement: true),
+
+    // 3x3 wall block (exercises corner fillers at NE/SE/SW/NW interior)
+    (def_name: "Wall", cell_x: 9, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 10, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 11, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 9, cell_z: 8, blocks_movement: true),
+    (def_name: "Wall", cell_x: 10, cell_z: 8, blocks_movement: true),
+    (def_name: "Wall", cell_x: 11, cell_z: 8, blocks_movement: true),
+    (def_name: "Wall", cell_x: 9, cell_z: 9, blocks_movement: true),
+    (def_name: "Wall", cell_x: 10, cell_z: 9, blocks_movement: true),
+    (def_name: "Wall", cell_x: 11, cell_z: 9, blocks_movement: true),
+
+    // Small enclosed room (4x3) to check enclosed corners
+    (def_name: "Wall", cell_x: 15, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 16, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 17, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 18, cell_z: 7, blocks_movement: true),
+    (def_name: "Wall", cell_x: 15, cell_z: 8, blocks_movement: true),
+    (def_name: "Wall", cell_x: 18, cell_z: 8, blocks_movement: true),
+    (def_name: "Wall", cell_x: 15, cell_z: 9, blocks_movement: true),
+    (def_name: "Wall", cell_x: 16, cell_z: 9, blocks_movement: true),
+    (def_name: "Wall", cell_x: 17, cell_z: 9, blocks_movement: true),
+    (def_name: "Wall", cell_x: 18, cell_z: 9, blocks_movement: true),
+
+    // Diagonal-only pair (no orthogonal link) near (20, 6) / (21, 7)
+    (def_name: "Wall", cell_x: 20, cell_z: 6, blocks_movement: true),
+    (def_name: "Wall", cell_x: 21, cell_z: 7, blocks_movement: true),
+  ],
+  pawns: [],
+  camera: (
+    center_x: 12.0,
+    center_z: 8.0,
+  ),
+)

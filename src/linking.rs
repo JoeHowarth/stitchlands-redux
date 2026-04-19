@@ -1,11 +1,5 @@
 //! Link-drawer and terrain-edge types, mirroring RimWorld's `Verse.LinkDrawer*`
 //! and `Verse.TerrainEdgeType` enums. Pure data + arithmetic; no I/O.
-//!
-//! `atlas_uv_rect`, `link_index`, and `corner_filler_positions` are the
-//! index/UV helpers that Phase C's wall-linking emission consumes; they're
-//! exercised by the unit tests in this file, so the `#[allow(dead_code)]` is
-//! scoped to the main binary build only.
-#![allow(dead_code)]
 
 /// Matches RimWorld's `LinkFlags` `[Flags]` enum. The values are the same on
 /// both sides: a wall's `linkFlags` lists *both* what it is and what it
@@ -23,14 +17,6 @@ impl LinkFlags {
     pub const POWER_CONDUIT: Self = Self(0x10);
     pub const BARRICADES: Self = Self(0x20);
     pub const FENCES: Self = Self(0x40);
-
-    pub const fn bits(self) -> u32 {
-        self.0
-    }
-
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
 
     pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) == other.0
