@@ -104,6 +104,20 @@ impl AssetResolver {
         Ok(probe)
     }
 
+    pub fn probe_folder_variant(
+        &mut self,
+        tex_path: &str,
+        variant_index: usize,
+    ) -> Result<Option<String>> {
+        let Some(resolver) = self.packed_resolver_state.get()? else {
+            return Ok(None);
+        };
+        match resolver.resolve_folder_variant(tex_path, variant_index)? {
+            Some(hit) => Ok(Some(hit.source_label)),
+            None => Ok(None),
+        }
+    }
+
     pub fn search_packed_container(
         &mut self,
         query: &str,

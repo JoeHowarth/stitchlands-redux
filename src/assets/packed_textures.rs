@@ -218,6 +218,44 @@ impl PackedTextureResolver {
         Ok(None)
     }
 
+    pub fn resolve_folder_variant(
+        &self,
+        tex_path: &str,
+        variant_index: usize,
+    ) -> Result<Option<PackedTextureHit>> {
+        let members = self.folder_members(tex_path);
+        if members.is_empty() {
+            return Ok(None);
+        }
+        let (_asset_path, key) = &members[variant_index % members.len()];
+        let image = self.decode_texture_for_key(key)?;
+        let source_label = format!("{}::{}", key.source.describe(), key.path_id);
+        Ok(Some(PackedTextureHit {
+            image,
+            source_label,
+        }))
+    }
+
+    fn folder_members(&self, tex_path: &str) -> Vec<(String, BinaryObjectKey)> {
+        let base = format!(
+            "textures/{}/",
+            tex_path.to_ascii_lowercase().trim_end_matches('/')
+        );
+        let mut matches: Vec<(String, BinaryObjectKey)> = self
+            .container_index
+            .iter()
+            .filter(|(path, _)| {
+                let Some(tail) = path.strip_prefix(&base) else {
+                    return false;
+                };
+                !tail.contains('/') && !tail.ends_with("_m")
+            })
+            .map(|(path, key)| (path.clone(), key.clone()))
+            .collect();
+        matches.sort_by(|a, b| a.0.cmp(&b.0));
+        matches
+    }
+
     pub fn search_container_paths(&self, query: &str, limit: usize) -> Vec<String> {
         let q = query.to_ascii_lowercase();
         self.container_index

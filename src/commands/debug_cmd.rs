@@ -95,6 +95,23 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             }
             Ok(CommandAction::Done)
         }
+        DebugCmd::ProbeFolderVariant {
+            tex_path,
+            variant_index,
+        } => {
+            match ctx
+                .asset_resolver
+                .probe_folder_variant(&tex_path, variant_index)?
+            {
+                Some(label) => info!(
+                    "folder variant {variant_index} of '{tex_path}' -> {label}"
+                ),
+                None => warn!(
+                    "folder variant {variant_index} of '{tex_path}' -> no match (folder empty or packed disabled)"
+                ),
+            }
+            Ok(CommandAction::Done)
+        }
         DebugCmd::PackedClassProbe { sample_limit } => {
             let ran = ctx.asset_resolver.run_packed_class_probe(sample_limit)?;
             if !ran {

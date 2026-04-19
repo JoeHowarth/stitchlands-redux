@@ -143,6 +143,11 @@ pub enum DebugCmd {
         #[arg(long, default_value_t = 20)]
         search_limit: usize,
     },
+    ProbeFolderVariant {
+        tex_path: String,
+        #[arg(long, default_value_t = 0)]
+        variant_index: usize,
+    },
     ValidateFixture {
         path: PathBuf,
     },
