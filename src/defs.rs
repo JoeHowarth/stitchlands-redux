@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use glam::{Vec2, Vec3};
@@ -28,9 +29,22 @@ impl RgbaColor {
 pub enum GraphicKind {
     #[default]
     Single,
+    Appearances,
+    Cluster,
+    ClusterTight,
+    Fleck,
+    FleckPulse,
+    FleckSplash,
+    Flicker,
+    MealVariants,
+    Mote,
+    MoteRandom,
+    MoteWithAgeSecs,
     Multi,
+    PawnBodySilhouette,
     Random,
     RandomRotated,
+    StackCount,
 }
 
 impl GraphicKind {
@@ -41,14 +55,39 @@ impl GraphicKind {
     pub fn parse(raw: Option<&str>) -> Self {
         match raw.map(|s| s.trim()) {
             None | Some("") | Some("Graphic_Single") => Self::Single,
+            Some("Graphic_Appearances") => Self::Appearances,
+            Some("Graphic_Cluster") => Self::Cluster,
+            Some("Graphic_ClusterTight") => Self::ClusterTight,
+            Some("Graphic_Fleck") => Self::Fleck,
+            Some("Graphic_FleckPulse") => Self::FleckPulse,
+            Some("Graphic_FleckSplash") => Self::FleckSplash,
+            Some("Graphic_Flicker") => Self::Flicker,
+            Some("Graphic_MealVariants") => Self::MealVariants,
+            Some("Graphic_Mote") => Self::Mote,
+            Some("Graphic_MoteRandom") => Self::MoteRandom,
+            Some("Graphic_MoteWithAgeSecs") => Self::MoteWithAgeSecs,
             Some("Graphic_Multi") => Self::Multi,
+            Some("Graphic_PawnBodySilhouette") => Self::PawnBodySilhouette,
             Some("Graphic_Random") => Self::Random,
             Some("Graphic_RandomRotated") => Self::RandomRotated,
+            Some("Graphic_StackCount") => Self::StackCount,
             Some(other) => {
-                log::warn!("unknown graphicClass '{other}'; defaulting to Graphic_Single");
+                warn_unknown_graphic_class_once(other);
                 Self::Single
             }
         }
+    }
+}
+
+fn warn_unknown_graphic_class_once(other: &str) {
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut seen = match seen.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if seen.insert(other.to_string()) {
+        log::warn!("unknown graphicClass '{other}'; defaulting to Graphic_Single");
     }
 }
 
@@ -840,6 +879,44 @@ mod tests {
                 b: 0.3,
                 a: 0.4,
             }
+        );
+    }
+
+    #[test]
+    fn parses_known_stock_graphic_classes() {
+        let cases = [
+            ("Graphic_Appearances", GraphicKind::Appearances),
+            ("Graphic_Cluster", GraphicKind::Cluster),
+            ("Graphic_ClusterTight", GraphicKind::ClusterTight),
+            ("Graphic_Fleck", GraphicKind::Fleck),
+            ("Graphic_FleckPulse", GraphicKind::FleckPulse),
+            ("Graphic_FleckSplash", GraphicKind::FleckSplash),
+            ("Graphic_Flicker", GraphicKind::Flicker),
+            ("Graphic_MealVariants", GraphicKind::MealVariants),
+            ("Graphic_Mote", GraphicKind::Mote),
+            ("Graphic_MoteRandom", GraphicKind::MoteRandom),
+            ("Graphic_MoteWithAgeSecs", GraphicKind::MoteWithAgeSecs),
+            ("Graphic_Multi", GraphicKind::Multi),
+            (
+                "Graphic_PawnBodySilhouette",
+                GraphicKind::PawnBodySilhouette,
+            ),
+            ("Graphic_Random", GraphicKind::Random),
+            ("Graphic_RandomRotated", GraphicKind::RandomRotated),
+            ("Graphic_Single", GraphicKind::Single),
+            ("Graphic_StackCount", GraphicKind::StackCount),
+        ];
+
+        for (raw, expected) in cases {
+            assert_eq!(GraphicKind::parse(Some(raw)), expected, "{raw}");
+        }
+    }
+
+    #[test]
+    fn unknown_graphic_class_defaults_to_single() {
+        assert_eq!(
+            GraphicKind::parse(Some("Graphic_TotallyNew")),
+            GraphicKind::Single
         );
     }
 
