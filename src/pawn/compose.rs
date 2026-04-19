@@ -1,11 +1,8 @@
 use glam::{Vec2, Vec3};
 
 use super::graph::{AnchorKind, GraphNode, NodePayload};
-use super::model::{
-    ApparelLayer, HUMANLIKE_MESH_BASE, OverlayAnchor, PawnComposeConfig, PawnRenderInput,
-};
+use super::model::{ApparelLayer, HUMANLIKE_MESH_BASE, PawnComposeConfig, PawnRenderInput};
 use super::parms::{PawnDrawParms, RenderSkipFlag};
-use super::rules::should_draw_hediff_overlay;
 use super::tree::{PawnNode, PawnNodeKind};
 use super::workers;
 
@@ -15,7 +12,7 @@ pub struct PawnComposition {
 }
 
 pub fn compose_pawn(input: &PawnRenderInput, config: &PawnComposeConfig) -> PawnComposition {
-    let parms = PawnDrawParms::from_inputs(input.facing, input.draw_flags, &input.apparel);
+    let parms = PawnDrawParms::from_inputs(input.draw_flags, &input.apparel);
     let graph = build_graph(input, &parms);
     let nodes = evaluate_graph(input, config, graph);
     PawnComposition { nodes }
@@ -107,25 +104,6 @@ fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode>
         order += 1;
     }
 
-    for overlay in &input.hediff_overlays {
-        if !should_draw_hediff_overlay(overlay, parms.facing, &input.present_body_part_groups) {
-            continue;
-        }
-        let anchor = if matches!(overlay.anchor, OverlayAnchor::Head) {
-            AnchorKind::Head
-        } else {
-            AnchorKind::Body
-        };
-        out.push(GraphNode {
-            id: format!("{}::Hediff::{}", input.label, overlay.label),
-            kind: PawnNodeKind::Hediff,
-            anchor,
-            order,
-            payload: NodePayload::Hediff(overlay.clone()),
-        });
-        order += 1;
-    }
-
     out
 }
 
@@ -141,7 +119,6 @@ fn evaluate_graph(
 
     let mut apparel_body_index = 0usize;
     let mut apparel_head_index = 0usize;
-    let mut hediff_index = 0usize;
 
     let pawn_quad = Vec2::splat(HUMANLIKE_MESH_BASE);
     let mut out = Vec::with_capacity(graph.len());
@@ -226,27 +203,6 @@ fn evaluate_graph(
                     z,
                 )
             }
-            NodePayload::Hediff(overlay) => {
-                let anchored_to_head = matches!(overlay.anchor, OverlayAnchor::Head);
-                let z = workers::hediff_z(
-                    config.layering,
-                    anchored_to_head,
-                    overlay.layer_offset,
-                    hediff_index,
-                );
-                hediff_index += 1;
-                (
-                    overlay.tex_path.clone(),
-                    overlay.draw_size,
-                    overlay.tint,
-                    if anchored_to_head {
-                        workers::hediff_offset_head(config.layering)
-                    } else {
-                        Vec2::ZERO
-                    },
-                    z,
-                )
-            }
         };
 
         let rim_offset = Vec2::new(anchor.x + extra_offset.x, anchor.y + extra_offset.y);
@@ -275,8 +231,7 @@ mod tests {
     use super::compose_pawn;
     use crate::pawn::model::{
         ApparelLayer, ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData,
-        HeadTypeRenderData, HediffOverlayInput, OverlayAnchor, PawnComposeConfig, PawnDrawFlags,
-        PawnFacing, PawnRenderInput,
+        HeadTypeRenderData, PawnComposeConfig, PawnDrawFlags, PawnFacing, PawnRenderInput,
     };
 
     fn fixture_input() -> PawnRenderInput {
@@ -296,8 +251,6 @@ mod tests {
             beard_type: BeardTypeRenderData::default(),
             tint: [1.0, 1.0, 1.0, 1.0],
             apparel: Vec::new(),
-            present_body_part_groups: vec!["UpperHead".to_string(), "Torso".to_string()],
-            hediff_overlays: Vec::new(),
             draw_flags: PawnDrawFlags::NONE,
         }
     }
@@ -436,29 +389,6 @@ mod tests {
         let second = apparel.next().expect("two apparel nodes");
         assert!(first.id.contains("Shirt"));
         assert!(second.id.contains("Helmet"));
-    }
-
-    #[test]
-    fn hediff_overlay_requires_body_part_group() {
-        let mut input = fixture_input();
-        input.hediff_overlays.push(HediffOverlayInput {
-            label: "EyePatch".to_string(),
-            tex_path: "Things/Pawn/Humanlike/Heads/Male/Average_Normal".to_string(),
-            anchor: OverlayAnchor::Head,
-            layer_offset: 1,
-            draw_size: Vec2::new(0.8, 0.8),
-            tint: [1.0, 0.6, 0.6, 0.85],
-            required_body_part_group: Some("Eyes".to_string()),
-            visible_facing: None,
-        });
-
-        let result = compose_pawn(&input, &PawnComposeConfig::default());
-        assert!(
-            result
-                .nodes
-                .iter()
-                .all(|n| !matches!(n.kind, crate::pawn::tree::PawnNodeKind::Hediff))
-        );
     }
 
     #[test]

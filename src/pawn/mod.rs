@@ -2,7 +2,6 @@ pub mod compose;
 mod graph;
 pub mod model;
 pub mod parms;
-pub mod rules;
 pub mod tree;
 pub mod workers;
 

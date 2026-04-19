@@ -1,4 +1,4 @@
-use super::model::{ApparelRenderInput, PawnDrawFlags, PawnFacing};
+use super::model::{ApparelRenderInput, PawnDrawFlags};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RenderSkipFlag {
@@ -9,17 +9,12 @@ pub enum RenderSkipFlag {
 
 #[derive(Debug, Clone)]
 pub struct PawnDrawParms {
-    pub facing: PawnFacing,
     pub draw_flags: PawnDrawFlags,
     pub skip_flags: Vec<RenderSkipFlag>,
 }
 
 impl PawnDrawParms {
-    pub fn from_inputs(
-        facing: PawnFacing,
-        draw_flags: PawnDrawFlags,
-        apparel: &[ApparelRenderInput],
-    ) -> Self {
+    pub fn from_inputs(draw_flags: PawnDrawFlags, apparel: &[ApparelRenderInput]) -> Self {
         let mut skip_flags = Vec::new();
         if draw_flags.hide_hair {
             skip_flags.push(RenderSkipFlag::Hair);
@@ -44,7 +39,6 @@ impl PawnDrawParms {
             }
         }
         Self {
-            facing,
             draw_flags,
             skip_flags,
         }

@@ -68,10 +68,6 @@ pub fn apparel_offset(layer: ApparelLayer, layering: LayeringProfile) -> Vec2 {
     }
 }
 
-pub fn hediff_offset_head(layering: LayeringProfile) -> Vec2 {
-    Vec2::new(0.0, layering.hediff_head_y_offset)
-}
-
 pub fn apparel_z(profile: LayeringProfile, layer: ApparelLayer, stack_index: usize) -> f32 {
     let base = if matches!(layer, ApparelLayer::Overhead | ApparelLayer::EyeCover) {
         profile.apparel_head_base_z
@@ -79,20 +75,6 @@ pub fn apparel_z(profile: LayeringProfile, layer: ApparelLayer, stack_index: usi
         profile.apparel_body_base_z
     };
     base + stack_index as f32 * profile.apparel_step_z
-}
-
-pub fn hediff_z(
-    profile: LayeringProfile,
-    anchored_to_head: bool,
-    layer_offset: i32,
-    index: usize,
-) -> f32 {
-    let base = if anchored_to_head {
-        profile.hediff_head_base_z
-    } else {
-        profile.hediff_body_base_z
-    };
-    base + layer_offset as f32 * profile.hediff_step_z + index as f32 * 0.0001
 }
 
 pub fn layer_to_z_delta(layer: f32) -> f32 {

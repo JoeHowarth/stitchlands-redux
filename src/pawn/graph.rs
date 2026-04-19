@@ -1,4 +1,4 @@
-use super::model::{ApparelRenderInput, HediffOverlayInput};
+use super::model::ApparelRenderInput;
 use super::tree::PawnNodeKind;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -15,7 +15,6 @@ pub enum NodePayload {
     Hair,
     Beard,
     Apparel(ApparelRenderInput),
-    Hediff(HediffOverlayInput),
 }
 
 #[derive(Debug, Clone)]

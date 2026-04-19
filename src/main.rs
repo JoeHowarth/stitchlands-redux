@@ -84,10 +84,5 @@ fn compose_config_from_humanlike_layers(layers: HumanlikeRenderTreeLayers) -> Pa
     out.layering.apparel_head_base_z =
         pawn_base_z + crate::pawn::workers::layer_to_z_delta(layers.apparel_head_base_layer);
     out.layering.apparel_step_z = crate::pawn::workers::layer_to_z_delta(1.0);
-    out.layering.hediff_body_base_z =
-        out.layering.apparel_body_base_z - out.layering.apparel_step_z;
-    out.layering.hediff_head_base_z =
-        out.layering.head_z + crate::pawn::workers::layer_to_z_delta(4.0);
-    out.layering.hediff_step_z = crate::pawn::workers::layer_to_z_delta(1.0);
     out
 }

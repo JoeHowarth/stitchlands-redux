@@ -282,12 +282,6 @@ pub(crate) fn build_world_sprites(
                 .unwrap_or_default(),
             tint: [1.0, 1.0, 1.0, 1.0],
             apparel: apparel_inputs,
-            present_body_part_groups: vec![
-                "Torso".to_string(),
-                "UpperHead".to_string(),
-                "Eyes".to_string(),
-            ],
-            hediff_overlays: Vec::new(),
             draw_flags: PawnDrawFlags::NONE,
         };
         pawn_visual_profiles.push(PawnVisualProfile {

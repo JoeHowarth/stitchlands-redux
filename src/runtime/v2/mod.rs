@@ -237,7 +237,7 @@ impl V2Runtime {
 
 #[cfg(test)]
 mod tests {
-    use glam::{Vec2, Vec3};
+    use glam::Vec3;
 
     use crate::cell::Cell;
     use crate::fixtures::{MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn};
@@ -266,8 +266,6 @@ mod tests {
                 beard_type: BeardTypeRenderData::default(),
                 tint: [1.0, 1.0, 1.0, 1.0],
                 apparel: Vec::new(),
-                present_body_part_groups: vec!["UpperHead".to_string(), "Torso".to_string()],
-                hediff_overlays: Vec::new(),
                 draw_flags: PawnDrawFlags::NONE,
             },
         }
