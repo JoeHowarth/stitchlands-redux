@@ -41,11 +41,7 @@ mod tests {
             "terrain count must match width*height"
         );
         assert!(
-            fixture
-                .map
-                .terrain
-                .iter()
-                .any(|c| c.terrain_def == "Ice"),
+            fixture.map.terrain.iter().any(|c| c.terrain_def == "Ice"),
             "terrain_mix must include Ice pocket"
         );
     }

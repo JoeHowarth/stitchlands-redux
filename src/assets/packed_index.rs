@@ -163,10 +163,11 @@ impl PackedTextureIndex {
             }
         }
 
-        let mut container_paths: Vec<String> = crate::assets::packed_textures::collect_container_paths(&env)
-            .into_iter()
-            .map(|(path, _)| path)
-            .collect();
+        let mut container_paths: Vec<String> =
+            crate::assets::packed_textures::collect_container_paths(&env)
+                .into_iter()
+                .map(|(path, _)| path)
+                .collect();
         container_paths.sort();
         container_paths.dedup();
 

@@ -215,7 +215,13 @@ pub fn run_defs_probe(
         resolver,
         defs.beard_defs,
         |d| d.def_name.as_str(),
-        |d| if d.no_graphic { None } else { Some(d.tex_path.as_str()) },
+        |d| {
+            if d.no_graphic {
+                None
+            } else {
+                Some(d.tex_path.as_str())
+            }
+        },
     )?;
     probe(
         "apparel",
@@ -296,14 +302,8 @@ pub(crate) fn resolve_directional_tex_path(
     let candidates: &[(PawnFacing, &str)] = match facing {
         PawnFacing::North => &[(PawnFacing::North, "_north")],
         PawnFacing::South => &[(PawnFacing::South, "_south")],
-        PawnFacing::East => &[
-            (PawnFacing::East, "_east"),
-            (PawnFacing::West, "_west"),
-        ],
-        PawnFacing::West => &[
-            (PawnFacing::West, "_west"),
-            (PawnFacing::East, "_east"),
-        ],
+        PawnFacing::East => &[(PawnFacing::East, "_east"), (PawnFacing::West, "_west")],
+        PawnFacing::West => &[(PawnFacing::West, "_west"), (PawnFacing::East, "_east")],
     };
 
     for (data_facing, suffix) in candidates {
@@ -401,10 +401,7 @@ pub(crate) fn map_explicit_skip_flags(
     (skip_hair, skip_beard, true)
 }
 
-pub(crate) fn make_missing_def_message(
-    thingdef: &str,
-    defs: &HashMap<String, ThingDef>,
-) -> String {
+pub(crate) fn make_missing_def_message(thingdef: &str, defs: &HashMap<String, ThingDef>) -> String {
     let mut suggestions: Vec<&str> = defs
         .keys()
         .filter_map(|name| {
@@ -482,4 +479,3 @@ pub(crate) fn build_full_apparel_layer_override(
         }
     })
 }
-

@@ -278,13 +278,19 @@ impl PackedTextureResolver {
         let mut rows: Vec<(i32, usize)> = histogram.into_iter().collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1));
 
-        info!("packed class-id histogram ({} distinct classes):", rows.len());
+        info!(
+            "packed class-id histogram ({} distinct classes):",
+            rows.len()
+        );
         for (class_id, count) in &rows {
             let name = unity_asset_core::get_class_name_str(*class_id).unwrap_or("Unknown");
             info!("  class {:>4} ({:<24}) = {}", class_id, name, count);
         }
 
-        info!("sampling up to {} class-147 (ResourceManager) objects:", sample_limit);
+        info!(
+            "sampling up to {} class-147 (ResourceManager) objects:",
+            sample_limit
+        );
         let mut sampled = 0usize;
         for obj in self.env.objects() {
             let EnvironmentObjectRef::Binary(binary) = obj else {
@@ -299,7 +305,10 @@ impl PackedTextureResolver {
                     let field_names: Vec<&String> = parsed.class.property_names().collect();
                     info!("  class-147 #{sampled} fields: {:?}", field_names);
                     if let Some(UnityValue::Array(items)) = parsed.class.get("m_Container") {
-                        info!("  class-147 #{sampled} m_Container entries: {}", items.len());
+                        info!(
+                            "  class-147 #{sampled} m_Container entries: {}",
+                            items.len()
+                        );
                         for (i, item) in items.iter().take(5).enumerate() {
                             info!("    [{i}] {:?}", item);
                         }

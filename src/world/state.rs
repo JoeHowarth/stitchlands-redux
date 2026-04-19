@@ -20,7 +20,10 @@ pub struct ThingState {
 pub enum PathProgress {
     #[default]
     Idle,
-    Following { cells: Vec<Cell>, index: usize },
+    Following {
+        cells: Vec<Cell>,
+        index: usize,
+    },
 }
 
 impl PathProgress {

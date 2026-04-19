@@ -77,7 +77,9 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             .thing_defs
             .get(extra_name)
             .cloned()
-            .with_context(|| super::common::make_missing_def_message(extra_name, ctx.defs.thing_defs))?;
+            .with_context(|| {
+                super::common::make_missing_def_message(extra_name, ctx.defs.thing_defs)
+            })?;
         info!("selected extra def: {}", extra.def_name);
         selected_defs.push(extra);
     }

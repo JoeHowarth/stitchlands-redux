@@ -374,10 +374,7 @@ mod tests {
         ];
 
         let result = compose_pawn(&input, &PawnComposeConfig::default());
-        let mut apparel = result
-            .nodes
-            .iter()
-            .filter(|n| n.id.contains("::Apparel::"));
+        let mut apparel = result.nodes.iter().filter(|n| n.id.contains("::Apparel::"));
         let first = apparel.next().expect("at least one apparel node");
         let second = apparel.next().expect("two apparel nodes");
         assert!(first.id.contains("Shirt"));
@@ -451,7 +448,10 @@ mod tests {
             .find(|n| n.id.contains("Jacket"))
             .expect("jacket node");
         let expected = Vec2::splat(crate::pawn::model::HUMANLIKE_MESH_BASE);
-        assert_eq!(jacket.size, expected, "non-pack apparel should use mesh base unscaled");
+        assert_eq!(
+            jacket.size, expected,
+            "non-pack apparel should use mesh base unscaled"
+        );
     }
 
     #[test]
@@ -482,8 +482,7 @@ mod tests {
             .expect("pack node");
         let base = crate::pawn::model::HUMANLIKE_MESH_BASE;
         assert!(
-            (pack.size.x - base * 0.8).abs() < 0.001
-                && (pack.size.y - base * 0.9).abs() < 0.001,
+            (pack.size.x - base * 0.8).abs() < 0.001 && (pack.size.y - base * 0.9).abs() < 0.001,
             "pack apparel should scale mesh base by pack_scale, got {:?}",
             pack.size,
         );

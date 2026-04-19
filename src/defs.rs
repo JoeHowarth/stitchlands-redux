@@ -994,8 +994,14 @@ mod tests {
         let water = defs.get("WaterShallow").unwrap();
         assert_eq!(water.edge_type, TerrainEdgeType::Water);
         assert_eq!(water.render_precedence, 394);
-        assert_eq!(defs.get("Soil").unwrap().edge_type, TerrainEdgeType::FadeRough);
-        assert_eq!(defs.get("Concrete").unwrap().edge_type, TerrainEdgeType::Hard);
+        assert_eq!(
+            defs.get("Soil").unwrap().edge_type,
+            TerrainEdgeType::FadeRough
+        );
+        assert_eq!(
+            defs.get("Concrete").unwrap().edge_type,
+            TerrainEdgeType::Hard
+        );
     }
 
     #[test]

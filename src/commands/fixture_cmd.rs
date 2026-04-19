@@ -6,13 +6,11 @@ use log::{info, warn};
 
 use crate::cell::Cell;
 use crate::cli::FixtureCmd;
-use crate::defs::{
-    ApparelDef, ApparelLayerDef, BodyTypeDefRender,
-};
+use crate::defs::{ApparelDef, ApparelLayerDef, BodyTypeDefRender};
 use crate::linking::LinkDrawerType;
 use crate::pawn::{
-    ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
-    PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
+    ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData, PawnDrawFlags,
+    PawnFacing, PawnRenderInput, compose_pawn,
 };
 use crate::renderer::{FULL_UV_RECT, SpriteParams};
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
@@ -113,7 +111,10 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         for _ in 0..tick_limit {
             runtime.tick_once();
         }
-        info!("fixture headless ticks complete: ticks={}", runtime.tick_count());
+        info!(
+            "fixture headless ticks complete: ticks={}",
+            runtime.tick_count()
+        );
         return Ok(CommandAction::Done);
     }
 
@@ -281,10 +282,15 @@ fn build_world_sprites(
         let facing = pawn.facing;
 
         // Resolve directional texture paths for body/head/hair/beard
-        let body_directional =
-            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &body.body_naked_graphic_path, facing);
+        let body_directional = resolve_directional_tex_path(
+            ctx.asset_resolver,
+            ctx.data_dir,
+            &body.body_naked_graphic_path,
+            facing,
+        );
         let head_tex_path = head.map(|h| {
-            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.graphic_path, facing).path
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.graphic_path, facing)
+                .path
         });
         let hair_tex_path = hair.map(|h| {
             resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.tex_path, facing).path
@@ -435,11 +441,8 @@ fn build_apparel_inputs(
         let tex_path = directional.path;
 
         // Worn data (offset/scale) with body overrides
-        let worn_data = apparel_worn_data_for_facing(
-            apparel,
-            directional.data_facing,
-            body_def_name,
-        );
+        let worn_data =
+            apparel_worn_data_for_facing(apparel, directional.data_facing, body_def_name);
 
         let (explicit_skip_hair, explicit_skip_beard, has_explicit_skip_flags) =
             map_explicit_skip_flags(&apparel.render_skip_flags);

@@ -84,7 +84,10 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             query,
             search_limit,
         } => {
-            match ctx.asset_resolver.search_packed_container(&query, search_limit)? {
+            match ctx
+                .asset_resolver
+                .search_packed_container(&query, search_limit)?
+            {
                 Some(paths) => {
                     info!("{} container paths match '{query}':", paths.len());
                     for path in paths {
@@ -103,9 +106,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
                 .asset_resolver
                 .probe_folder_variant(&tex_path, variant_index)?
             {
-                Some(label) => info!(
-                    "folder variant {variant_index} of '{tex_path}' -> {label}"
-                ),
+                Some(label) => info!("folder variant {variant_index} of '{tex_path}' -> {label}"),
                 None => warn!(
                     "folder variant {variant_index} of '{tex_path}' -> no match (folder empty or packed disabled)"
                 ),
