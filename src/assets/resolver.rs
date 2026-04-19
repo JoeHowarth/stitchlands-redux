@@ -56,14 +56,19 @@ impl AssetResolver {
         &mut self,
         data_dir: &Path,
         thing_def: &ThingDef,
+        variant_index: usize,
     ) -> Result<ResolvedSpriteAsset> {
         let mut sprite_asset = resolve_sprite(data_dir, thing_def, &self.texture_roots)?;
         let mut resolved_from_packed = false;
         if sprite_asset.used_fallback {
-            resolved_from_packed = self.try_resolve_from_packed(
-                thing_def.graphic_data.tex_path.as_str(),
-                &mut sprite_asset,
-            )?;
+            let tex_path = thing_def.graphic_data.tex_path.as_str();
+            let graphic_class = thing_def.graphic_data.graphic_class.as_deref();
+            resolved_from_packed = if is_random_graphic_class(graphic_class) {
+                self.try_resolve_folder_from_packed(tex_path, variant_index, &mut sprite_asset)?
+                    || self.try_resolve_from_packed(tex_path, &mut sprite_asset)?
+            } else {
+                self.try_resolve_from_packed(tex_path, &mut sprite_asset)?
+            };
         }
 
         Ok(ResolvedSpriteAsset {
@@ -195,6 +200,37 @@ impl AssetResolver {
         sprite_asset.used_fallback = false;
         Ok(true)
     }
+
+    fn try_resolve_folder_from_packed(
+        &mut self,
+        tex_path: &str,
+        variant_index: usize,
+        sprite_asset: &mut SpriteAsset,
+    ) -> Result<bool> {
+        if !self.can_try_packed(tex_path) {
+            return Ok(false);
+        }
+
+        let Some(resolver) = self.packed_resolver_state.get()? else {
+            return Ok(false);
+        };
+
+        let Ok(Some(hit)) = resolver.resolve_folder_variant(tex_path, variant_index) else {
+            return Ok(false);
+        };
+
+        sprite_asset.image = hit.image;
+        sprite_asset.source_path = Some(PathBuf::from(hit.source_label));
+        sprite_asset.used_fallback = false;
+        Ok(true)
+    }
+}
+
+fn is_random_graphic_class(graphic_class: Option<&str>) -> bool {
+    matches!(
+        graphic_class,
+        Some("Graphic_Random") | Some("Graphic_RandomRotated")
+    )
 }
 
 pub struct ResolvedSpriteAsset {

@@ -83,7 +83,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
     for (index, selected) in selected_defs.iter().enumerate() {
         let resolved = ctx
             .asset_resolver
-            .resolve_thing(ctx.data_dir, selected)
+            .resolve_thing(ctx.data_dir, selected, index)
             .with_context(|| {
                 format!(
                     "resolving texture for def '{}' path '{}'",

@@ -174,7 +174,7 @@ fn build_world_sprites(
             .with_context(|| format!("missing ThingDef '{}'", thing.def_name))?;
         let resolved = ctx
             .asset_resolver
-            .resolve_thing(ctx.data_dir, thing_def)
+            .resolve_thing(ctx.data_dir, thing_def, thing.id)
             .with_context(|| format!("resolving ThingDef '{}'", thing_def.def_name))?;
         if strict_missing && resolved.sprite.used_fallback {
             anyhow::bail!(
