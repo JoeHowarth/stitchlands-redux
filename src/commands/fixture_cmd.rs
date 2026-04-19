@@ -1,659 +1,526 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
 
-use anyhow::Result;
-use glam::Vec2;
+use anyhow::{Context, Result};
+use glam::{Vec2, Vec3};
 use log::{info, warn};
 
-use crate::cli::{AuditCmd, FixtureCmd};
-use crate::defs::ApparelLayerDef;
-use crate::fixtures::{
-    CameraSpec, MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn,
+use crate::cell::Cell;
+use crate::cli::FixtureCmd;
+use crate::defs::{
+    ApparelDef, ApparelLayerDef, BodyTypeDefRender,
 };
-use crate::pawn::PawnFacing;
-use crate::runtime::v2::{V2Runtime, V2RuntimeConfig};
-use crate::scene::generate_fixture_map;
-use crate::world::world_from_fixture;
+use crate::pawn::{
+    ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
+    PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
+};
+use crate::renderer::SpriteParams;
+use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
+use crate::viewer::RenderSprite;
+use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
 
-use super::common::{body_head_compatible, select_fixture_apparel_names};
-use super::fixture_v2_cmd::build_world_sprites;
+use super::common::{
+    apparel_worn_data_for_facing, build_apparel_tex_path, build_full_apparel_layer_override,
+    map_explicit_skip_flags, resolve_directional_tex_path,
+};
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
-pub fn run_fixture(ctx: &mut DispatchContext<'_>, mode: FixtureCmd) -> Result<CommandAction> {
-    if let FixtureCmd::V2(args) = mode {
-        return super::fixture_v2_cmd::run_fixture_v2(ctx, args);
+pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<CommandAction> {
+    let (should_run_renderer, render_options, hide_window) = crate::cli::render_runtime(&cmd.view);
+    let fixture = crate::fixtures::load_fixture(&cmd.scene)?;
+    let mut world = world_from_fixture(&fixture);
+    let _ = build_path_grid(&world);
+    if let Some(first_pawn_id) = world.pawns().first().map(|pawn| pawn.id) {
+        let start = {
+            let pawn = world.pawns().iter().find(|pawn| pawn.id == first_pawn_id);
+            pawn.map(|pawn| Cell::new(pawn.cell_x, pawn.cell_z))
+                .unwrap_or(Cell::new(0, 0))
+        };
+        let _ = issue_move_intent(&mut world, first_pawn_id, start);
+        tick_world(&mut world, 0.0);
     }
+    let sprites = build_world_sprites(ctx, &world, false)?;
+    validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
+    let blocking_things = world
+        .things()
+        .iter()
+        .filter(|thing| thing.blocks_movement)
+        .count();
 
-    let (fixture_args, is_pawn) = match mode {
-        FixtureCmd::V1(args) => (args, false),
-        FixtureCmd::Pawn(args) => (args, true),
-        FixtureCmd::V2(_) => unreachable!("v2 handled above"),
-    };
-    let (should_run_renderer, render_options, hide_window) =
-        crate::cli::render_runtime(&fixture_args.view);
-
-    let (width, height, pawn_focus_only, pawn_count) = if is_pawn {
-        (
-            fixture_args.map_width.clamp(8, 18),
-            fixture_args.map_height.clamp(8, 18),
-            true,
-            1,
-        )
-    } else {
-        (fixture_args.map_width, fixture_args.map_height, false, 6)
-    };
-
-    let scene_fixture = generate_v1_scene_fixture(
-        ctx,
-        width,
-        height,
-        pawn_count,
-        fixture_args.pawn_fixture_variant,
-        pawn_focus_only,
-        false,
-    )?;
-
-    let strict_missing = !ctx.allow_fallback;
-    let world = world_from_fixture(&scene_fixture);
-    let sprites = build_world_sprites(ctx, &world, strict_missing)?;
-
-    if pawn_focus_only {
-        validate_pawn_focus(&sprites, fixture_args.pawn_fixture_variant)?;
-    }
-
-    if let Some(path) = &fixture_args.dump_pawn_trace {
-        dump_trace(ctx, &world, path)?;
-    }
-
-    let camera_focus = scene_fixture
+    let camera_focus = fixture
         .camera
         .as_ref()
-        .map(|cam| Vec2::new(cam.center_x, cam.center_z));
-
-    if !should_run_renderer {
-        return Ok(CommandAction::Done);
-    }
-
-    let runtime = V2Runtime::new(
-        world,
-        sprites.pawn_visual_profiles,
-        V2RuntimeConfig {
-            fixed_dt_seconds: 1.0 / 60.0,
-            compose_config: ctx.compose_config.clone(),
-        },
-    );
-    Ok(CommandAction::Launch(Box::new(LaunchSpec {
-        static_sprites: sprites.static_sprites,
-        dynamic_sprites: sprites.dynamic_sprites,
-        runtime: Some(runtime),
-        runtime_tick_limit: None,
-        screenshot: fixture_args.view.screenshot,
-        camera_focus,
-        render_options,
-        hide_window,
-        fixed_step: true,
-    })))
-}
-
-pub fn run_audit(ctx: &mut DispatchContext<'_>, audit: AuditCmd) -> Result<CommandAction> {
-    let (should_run_renderer, render_options, hide_window) =
-        crate::cli::render_runtime(&audit.view);
-
-    let scene_fixture = generate_v1_scene_fixture(
-        ctx,
-        audit.map_width.max(24),
-        audit.map_height.max(24),
-        audit.pawn_count.clamp(6, 20),
-        audit.pawn_fixture_variant,
-        false,
-        true,
-    )?;
-
-    let strict_missing = !ctx.allow_fallback;
-    let world = world_from_fixture(&scene_fixture);
-    let sprites = build_world_sprites(ctx, &world, strict_missing)?;
-
-    if let Some(path) = &audit.dump_pawn_trace {
-        dump_trace(ctx, &world, path)?;
-    }
-
-    let camera_focus = scene_fixture
-        .camera
-        .as_ref()
-        .map(|cam| Vec2::new(cam.center_x, cam.center_z));
-
-    if !should_run_renderer {
-        return Ok(CommandAction::Done);
-    }
-
-    let runtime = V2Runtime::new(
-        world,
-        sprites.pawn_visual_profiles,
-        V2RuntimeConfig {
-            fixed_dt_seconds: 1.0 / 60.0,
-            compose_config: ctx.compose_config.clone(),
-        },
-    );
-    Ok(CommandAction::Launch(Box::new(LaunchSpec {
-        static_sprites: sprites.static_sprites,
-        dynamic_sprites: sprites.dynamic_sprites,
-        runtime: Some(runtime),
-        runtime_tick_limit: None,
-        screenshot: audit.view.screenshot,
-        camera_focus,
-        render_options,
-        hide_window,
-        fixed_step: true,
-    })))
-}
-
-/// Build a SceneFixture procedurally, filtering all selections to decodable
-/// textures just like the old v1 monolith did.
-fn generate_v1_scene_fixture(
-    ctx: &mut DispatchContext<'_>,
-    width: usize,
-    height: usize,
-    pawn_count: usize,
-    pawn_fixture_variant: usize,
-    pawn_focus_only: bool,
-    pawn_audit_mode: bool,
-) -> Result<SceneFixture> {
-    let defs = &ctx.defs;
-
-    // --- Terrain: sorted, filtered to decodable, take first 3 ---
-    let mut terrain_rows: Vec<_> = defs.terrain_defs.values().collect();
-    terrain_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
-    let mut chosen_terrain: Vec<&str> = Vec::new();
-    for terrain in &terrain_rows {
-        let resolved = ctx
-            .asset_resolver
-            .resolve_texture_path(ctx.data_dir, &terrain.texture_path)?;
-        if resolved.sprite.used_fallback {
-            continue;
-        }
-        chosen_terrain.push(&terrain.def_name);
-        if chosen_terrain.len() >= 3 {
-            break;
-        }
-    }
-    if chosen_terrain.len() < 3 {
-        anyhow::bail!("v1 fixture needs at least 3 decodable terrain defs");
-    }
-    let terrain_arr = [chosen_terrain[0], chosen_terrain[1], chosen_terrain[2]];
-
-    // --- Things: preferred list, filtered to decodable ---
-    let preferred_things = [
-        "Steel",
-        "ChunkSlagSteel",
-        "Plasteel",
-        "WoodLog",
-        "ComponentIndustrial",
-    ];
-    let thing_names: Vec<String> = if pawn_focus_only || pawn_audit_mode {
-        Vec::new()
-    } else {
-        let mut out = Vec::new();
-        for name in preferred_things {
-            if let Some(def) = defs.thing_defs.get(name) {
-                let resolved = ctx.asset_resolver.resolve_thing(ctx.data_dir, def)?;
-                if resolved.sprite.used_fallback {
-                    continue;
-                }
-                out.push(name.to_string());
-            }
-        }
-        out
-    };
-    if thing_names.is_empty() && !pawn_focus_only && !pawn_audit_mode {
-        anyhow::bail!("v1 fixture needs at least one decodable ThingDef");
-    }
-
-    // --- Body types: sorted, filtered to decodable ---
-    let mut body_rows_all: Vec<_> = defs.body_type_defs.values().collect();
-    body_rows_all.sort_by(|a, b| a.def_name.cmp(&b.def_name));
-    let mut body_rows = Vec::new();
-    for body in &body_rows_all {
-        let resolved = ctx
-            .asset_resolver
-            .resolve_texture_path(ctx.data_dir, &body.body_naked_graphic_path)?;
-        if !resolved.sprite.used_fallback {
-            body_rows.push(*body);
-        }
-    }
-    if body_rows.is_empty() {
-        anyhow::bail!("v1 fixture needs at least one decodable pawn body texture");
-    }
-
-    // --- Head types: sorted, filtered to decodable ---
-    let mut head_rows_all: Vec<_> = defs.head_type_defs.values().collect();
-    head_rows_all.sort_by(|a, b| a.def_name.cmp(&b.def_name));
-    let mut head_rows = Vec::new();
-    for head in &head_rows_all {
-        let resolved = ctx
-            .asset_resolver
-            .resolve_texture_path(ctx.data_dir, &head.graphic_path)?;
-        if !resolved.sprite.used_fallback {
-            head_rows.push(*head);
-        }
-    }
-
-    // --- Hair: sorted, filtered to decodable ---
-    let mut hair_rows_all: Vec<_> = defs.hair_defs.values().collect();
-    hair_rows_all.sort_by(|a, b| a.def_name.cmp(&b.def_name));
-    let mut hair_rows = Vec::new();
-    for hair in &hair_rows_all {
-        let resolved = ctx
-            .asset_resolver
-            .resolve_texture_path(ctx.data_dir, &hair.tex_path)?;
-        if !resolved.sprite.used_fallback {
-            hair_rows.push(*hair);
-        }
-    }
-
-    // --- Beard: sorted, filtered to decodable + no anchors ---
-    let mut beard_rows_all: Vec<_> = defs
-        .beard_defs
-        .values()
-        .filter(|b| !b.no_graphic && !b.tex_path.is_empty())
-        .filter(|b| {
-            let key = b.def_name.to_ascii_lowercase();
-            let tex = b.tex_path.to_ascii_lowercase();
-            !key.contains("anchor") && !tex.contains("beardanchor")
-        })
-        .collect();
-    beard_rows_all.sort_by(|a, b| a.def_name.cmp(&b.def_name));
-    let mut beard_rows = Vec::new();
-    for beard in &beard_rows_all {
-        let resolved = ctx
-            .asset_resolver
-            .resolve_texture_path(ctx.data_dir, &beard.tex_path)?;
-        if !resolved.sprite.used_fallback {
-            beard_rows.push(*beard);
-        }
-    }
-
-    // --- Apparel: sorted, categorized by layer, filtered to decodable ---
-    let mut apparel_rows: Vec<_> = defs.apparel_defs.values().collect();
-    apparel_rows.sort_by(|a, b| a.def_name.cmp(&b.def_name));
-    let mut body_layer_apparel = Vec::new();
-    let mut shell_layer_apparel = Vec::new();
-    let mut head_layer_apparel = Vec::new();
-    for apparel in &apparel_rows {
-        let resolved = ctx
-            .asset_resolver
-            .resolve_texture_path(ctx.data_dir, &apparel.tex_path)?;
-        if resolved.sprite.used_fallback {
-            continue;
-        }
-        let is_body = matches!(
-            apparel.layer,
-            ApparelLayerDef::OnSkin | ApparelLayerDef::Middle
-        );
-        let is_shellish = matches!(
-            apparel.layer,
-            ApparelLayerDef::Shell | ApparelLayerDef::Belt
-        );
-        let is_head = matches!(
-            apparel.layer,
-            ApparelLayerDef::Overhead | ApparelLayerDef::EyeCover
-        );
-        if is_body {
-            body_layer_apparel.push(*apparel);
-        }
-        if is_shellish {
-            shell_layer_apparel.push(*apparel);
-        }
-        if is_head {
-            head_layer_apparel.push(*apparel);
-        }
-    }
-
-    let decodable_apparel_layers = usize::from(!body_layer_apparel.is_empty())
-        + usize::from(!shell_layer_apparel.is_empty())
-        + usize::from(!head_layer_apparel.is_empty());
-    if decodable_apparel_layers == 0 {
-        warn!("v1 fixture found no decodable apparel layers; pawns will be unclothed");
-    } else if pawn_focus_only && decodable_apparel_layers < 2 {
-        anyhow::bail!(
-            "pawn fixture requires at least two decodable apparel layers (body + shell/head)"
-        );
-    }
-
-    // --- Layout ---
-    let layout_pawn_count = if pawn_focus_only {
-        1
-    } else if pawn_audit_mode {
-        pawn_count
-    } else {
-        body_rows.len().min(6)
-    };
-
-    let mut map = generate_fixture_map(
-        width.max(8),
-        height.max(8),
-        terrain_arr,
-        &thing_names,
-        layout_pawn_count,
-    );
-
-    if pawn_audit_mode {
-        let cols = 5usize;
-        let spacing = 4i32;
-        let rows = map.pawns.len().div_ceil(cols).max(1);
-        let span_x = (cols.saturating_sub(1) as i32) * spacing;
-        let span_z = (rows.saturating_sub(1) as i32) * spacing;
-        let origin_x = ((map.width as i32 - 1 - span_x) / 2).max(0);
-        let origin_z = ((map.height as i32 - 1 - span_z) / 2).max(0);
-        for (i, pawn) in map.pawns.iter_mut().enumerate() {
-            let col = (i % cols) as i32;
-            let row = (i / cols) as i32;
-            pawn.cell_x = (origin_x + col * spacing).min(map.width.saturating_sub(1) as i32);
-            pawn.cell_z = (origin_z + row * spacing).min(map.height.saturating_sub(1) as i32);
-        }
-    }
-
-    // Convert terrain to TerrainCell vec
-    let terrain: Vec<TerrainCell> = map
-        .terrain
-        .iter()
-        .map(|name| TerrainCell {
-            terrain_def: name.clone(),
-        })
-        .collect();
-
-    // Convert things to ThingSpawn vec
-    let things: Vec<ThingSpawn> = map
-        .things
-        .iter()
-        .map(|thing| ThingSpawn {
-            def_name: thing.def_name.clone(),
-            cell_x: thing.cell_x,
-            cell_z: thing.cell_z,
-            blocks_movement: false,
-        })
-        .collect();
-
-    // --- Build PawnSpawn for each map pawn ---
-    let pawns: Vec<PawnSpawn> = map
-        .pawns
-        .iter()
-        .enumerate()
-        .map(|(pawn_index, map_pawn)| {
-            let body_def = &body_rows[pawn_index % body_rows.len()];
-            let body_tex = &body_def.body_naked_graphic_path;
-
-            let facing = if pawn_focus_only {
-                PawnFacing::South
-            } else {
-                map_pawn.facing
-            };
-
-            // Head selection: filter by body compatibility
-            let compatible_heads: Vec<_> = head_rows
-                .iter()
-                .copied()
-                .filter(|h| body_head_compatible(body_tex, &h.graphic_path))
-                .collect();
-            let head_pool = if compatible_heads.is_empty() {
-                &head_rows
-            } else {
-                &compatible_heads
-            };
-
-            // Hair selection
-            let hair_name = if hair_rows.is_empty() {
-                None
-            } else {
-                Some(
-                    hair_rows[(pawn_fixture_variant / 5) % hair_rows.len()]
-                        .def_name
-                        .clone(),
-                )
-            };
-
-            // Beard selection
-            let beard_name = if beard_rows.is_empty() {
-                None
-            } else {
-                Some(
-                    beard_rows[(pawn_fixture_variant / 7) % beard_rows.len()]
-                        .def_name
-                        .clone(),
-                )
-            };
-
-            // If we have a beard, prefer male heads
-            let final_head_pool: Vec<_> = if beard_name.is_some() {
-                let male_heads: Vec<_> = head_pool
-                    .iter()
-                    .copied()
-                    .filter(|h| h.graphic_path.to_ascii_lowercase().contains("/male/"))
-                    .collect();
-                if male_heads.is_empty() {
-                    head_pool.to_vec()
-                } else {
-                    male_heads
-                }
-            } else {
-                head_pool.to_vec()
-            };
-
-            let head_name = if final_head_pool.is_empty() {
-                None
-            } else {
-                Some(
-                    final_head_pool[pawn_fixture_variant % final_head_pool.len()]
-                        .def_name
-                        .clone(),
-                )
-            };
-
-            let apparel_names = select_fixture_apparel_names(
-                pawn_index,
-                pawn_fixture_variant,
-                pawn_focus_only,
-                &body_layer_apparel,
-                &shell_layer_apparel,
-                &head_layer_apparel,
-            );
-
-            PawnSpawn {
-                cell_x: map_pawn.cell_x,
-                cell_z: map_pawn.cell_z,
-                label: Some(map_pawn.label.clone()),
-                body: Some(body_def.def_name.clone()),
-                head: head_name,
-                hair: hair_name,
-                beard: beard_name,
-                apparel_defs: apparel_names,
-                facing,
-            }
-        })
-        .collect();
-
-    let camera = if pawn_audit_mode {
-        Some(CameraSpec {
-            center_x: map.width as f32 * 0.5,
-            center_z: map.height as f32 * 0.5,
-        })
-    } else if let Some(thing) = map.things.first() {
-        Some(CameraSpec {
-            center_x: thing.cell_x as f32 + 0.5,
-            center_z: thing.cell_z as f32 + 0.5,
-        })
-    } else if let Some(pawn) = map.pawns.first() {
-        Some(CameraSpec {
-            center_x: pawn.cell_x as f32 + 0.5,
-            center_z: pawn.cell_z as f32 + 0.5,
-        })
-    } else {
-        Some(CameraSpec {
-            center_x: map.width as f32 * 0.5,
-            center_z: map.height as f32 * 0.5,
-        })
-    };
+        .map(|camera| Vec2::new(camera.center_x, camera.center_z))
+        .or_else(|| {
+            Some(Vec2::new(
+                world.width() as f32 * 0.5,
+                world.height() as f32 * 0.5,
+            ))
+        });
 
     info!(
-        "generated v1 scene fixture: map={}x{} terrain_cells={} things={} pawns={} variant={}",
-        map.width,
-        map.height,
-        terrain.len(),
-        things.len(),
-        pawns.len(),
-        pawn_fixture_variant,
+        "fixture scene built: scene={} map={}x{} terrain={} things={} blocking_things={} pawns={} static={} dynamic={}",
+        cmd.scene.display(),
+        world.width(),
+        world.height(),
+        world.terrain().len(),
+        world.things().len(),
+        blocking_things,
+        world.pawns().len(),
+        sprites.static_sprites.len(),
+        sprites.dynamic_sprites.len()
     );
 
-    Ok(SceneFixture {
-        schema_version: 2,
-        map: MapSpec {
-            width: map.width,
-            height: map.height,
-            terrain,
+    if !should_run_renderer {
+        return Ok(CommandAction::Done);
+    }
+
+    let SpriteLayers {
+        static_sprites,
+        dynamic_sprites,
+        pawn_visual_profiles,
+    } = sprites;
+    let runtime = V2Runtime::new(
+        world,
+        pawn_visual_profiles,
+        V2RuntimeConfig {
+            fixed_dt_seconds: cmd.fixed_dt.unwrap_or(1.0 / 60.0),
+            compose_config: ctx.compose_config.clone(),
         },
-        things,
-        pawns,
-        camera,
+    );
+    Ok(CommandAction::Launch(Box::new(LaunchSpec {
+        static_sprites,
+        dynamic_sprites,
+        runtime: Some(runtime),
+        runtime_tick_limit: cmd.ticks,
+        screenshot: cmd.view.screenshot,
+        camera_focus,
+        render_options,
+        hide_window,
+        fixed_step: true,
+    })))
+}
+
+struct SpriteLayers {
+    static_sprites: Vec<RenderSprite>,
+    dynamic_sprites: Vec<RenderSprite>,
+    pawn_visual_profiles: Vec<PawnVisualProfile>,
+}
+
+fn build_world_sprites(
+    ctx: &mut DispatchContext<'_>,
+    world: &crate::world::WorldState,
+    strict_missing: bool,
+) -> Result<SpriteLayers> {
+    let mut static_sprites = Vec::new();
+    let mut dynamic_sprites = Vec::new();
+    let mut pawn_visual_profiles = Vec::new();
+
+    for z in 0..world.height() {
+        for x in 0..world.width() {
+            let tile = &world.terrain()[z * world.width() + x];
+            let terrain_def = ctx
+                .defs
+                .terrain_defs
+                .get(&tile.terrain_def)
+                .with_context(|| format!("missing TerrainDef '{}'", tile.terrain_def))?;
+            let resolved = ctx
+                .asset_resolver
+                .resolve_texture_path(ctx.data_dir, &terrain_def.texture_path)
+                .with_context(|| {
+                    format!(
+                        "resolving terrain texture '{}' for '{}'",
+                        terrain_def.texture_path, terrain_def.def_name
+                    )
+                })?;
+            if strict_missing && resolved.sprite.used_fallback {
+                anyhow::bail!(
+                    "missing terrain texture '{}' for '{}'",
+                    terrain_def.texture_path,
+                    terrain_def.def_name
+                );
+            }
+            static_sprites.push(RenderSprite {
+                def_name: format!("Terrain::{}", terrain_def.def_name),
+                image: resolved.sprite.image,
+                params: SpriteParams {
+                    world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -1.0),
+                    size: Vec2::new(1.0, 1.0),
+                    tint: [1.0, 1.0, 1.0, 1.0],
+                },
+                used_fallback: resolved.sprite.used_fallback,
+                pawn_id: None,
+            });
+        }
+    }
+
+    let mut things = world.things().to_vec();
+    things.sort_by(|a, b| {
+        a.cell_z
+            .cmp(&b.cell_z)
+            .then(a.cell_x.cmp(&b.cell_x))
+            .then(a.id.cmp(&b.id))
+    });
+    for thing in things {
+        let thing_def = ctx
+            .defs
+            .thing_defs
+            .get(&thing.def_name)
+            .with_context(|| format!("missing ThingDef '{}'", thing.def_name))?;
+        let resolved = ctx
+            .asset_resolver
+            .resolve_thing(ctx.data_dir, thing_def)
+            .with_context(|| format!("resolving ThingDef '{}'", thing_def.def_name))?;
+        if strict_missing && resolved.sprite.used_fallback {
+            anyhow::bail!(
+                "missing thing texture for '{}' ({})",
+                thing_def.def_name,
+                thing_def.graphic_data.tex_path
+            );
+        }
+        let draw_offset = thing_def.graphic_data.draw_offset;
+        static_sprites.push(RenderSprite {
+            def_name: format!("Thing::{}", thing_def.def_name),
+            image: resolved.sprite.image,
+            params: SpriteParams {
+                world_pos: Vec3::new(
+                    thing.cell_x as f32 + 0.5 + draw_offset.x,
+                    thing.cell_z as f32 + 0.5 + draw_offset.z,
+                    -0.8 + draw_offset.y * 0.01,
+                ),
+                size: thing_def.graphic_data.draw_size.max(Vec2::splat(1.1)),
+                tint: [
+                    thing_def.graphic_data.color.r,
+                    thing_def.graphic_data.color.g,
+                    thing_def.graphic_data.color.b,
+                    thing_def.graphic_data.color.a,
+                ],
+            },
+            used_fallback: resolved.sprite.used_fallback,
+            pawn_id: None,
+        });
+    }
+
+    let mut pawns = world.pawns().to_vec();
+    pawns.sort_by(|a, b| {
+        a.cell_z
+            .cmp(&b.cell_z)
+            .then(a.cell_x.cmp(&b.cell_x))
+            .then(a.id.cmp(&b.id))
+    });
+    for pawn in pawns {
+        let body = choose_body_def(ctx.defs.body_type_defs, pawn.body.as_deref())?;
+        let head = choose_def(
+            ctx.defs.head_type_defs,
+            pawn.head.as_deref(),
+            "head",
+            |h| &h.def_name,
+            |_| true,
+        );
+        let hair = choose_def(
+            ctx.defs.hair_defs,
+            pawn.hair.as_deref(),
+            "hair",
+            |h| &h.def_name,
+            |_| true,
+        );
+        let beard = choose_def(
+            ctx.defs.beard_defs,
+            pawn.beard.as_deref(),
+            "beard",
+            |b| &b.def_name,
+            |b| !b.no_graphic && !b.tex_path.is_empty(),
+        );
+
+        let facing = pawn.facing;
+
+        // Resolve directional texture paths for body/head/hair/beard
+        let body_directional =
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &body.body_naked_graphic_path, facing);
+        let head_tex_path = head.map(|h| {
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.graphic_path, facing).path
+        });
+        let hair_tex_path = hair.map(|h| {
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &h.tex_path, facing).path
+        });
+        let beard_tex_path = beard.map(|b| {
+            resolve_directional_tex_path(ctx.asset_resolver, ctx.data_dir, &b.tex_path, facing).path
+        });
+
+        let apparel_inputs = build_apparel_inputs(
+            ctx.defs.apparel_defs,
+            &pawn.apparel_defs,
+            Some(&body.def_name),
+            facing,
+            ctx.asset_resolver,
+            ctx.data_dir,
+        )?;
+
+        let render_input = PawnRenderInput {
+            label: pawn.label.clone(),
+            facing,
+            world_pos: Vec3::new(pawn.world_pos.x, pawn.world_pos.y, 0.0),
+            body_tex_path: body_directional.path,
+            head_tex_path,
+            stump_tex_path: None,
+            hair_tex_path,
+            beard_tex_path,
+            body_type: BodyTypeRenderData {
+                head_offset: body.head_offset,
+            },
+            head_type: head
+                .map(|v| HeadTypeRenderData {
+                    narrow: v.narrow,
+                    beard_offset: v.beard_offset,
+                    beard_offset_x_east: v.beard_offset_x_east,
+                })
+                .unwrap_or_default(),
+            beard_type: beard
+                .map(|v| BeardTypeRenderData {
+                    offset_narrow_east: v.offset_narrow_east,
+                    offset_narrow_south: v.offset_narrow_south,
+                })
+                .unwrap_or_default(),
+            tint: [1.0, 1.0, 1.0, 1.0],
+            apparel: apparel_inputs,
+            draw_flags: PawnDrawFlags::NONE,
+        };
+        pawn_visual_profiles.push(PawnVisualProfile {
+            pawn_id: pawn.id,
+            base_render_input: render_input.clone(),
+        });
+
+        let composed = compose_pawn(&render_input, &ctx.compose_config);
+        for node in composed.nodes {
+            let resolved = ctx
+                .asset_resolver
+                .resolve_texture_path(ctx.data_dir, &node.tex_path)
+                .with_context(|| format!("resolving pawn texture '{}'", node.tex_path))?;
+            if strict_missing && resolved.sprite.used_fallback {
+                anyhow::bail!("missing pawn node texture: {}", node.tex_path);
+            }
+            dynamic_sprites.push(RenderSprite {
+                def_name: format!("PawnNode::{}", node.id),
+                image: resolved.sprite.image,
+                params: SpriteParams {
+                    world_pos: node.world_pos,
+                    size: node.size,
+                    tint: node.tint,
+                },
+                used_fallback: resolved.sprite.used_fallback,
+                pawn_id: Some(pawn.id),
+            });
+        }
+    }
+
+    Ok(SpriteLayers {
+        static_sprites,
+        dynamic_sprites,
+        pawn_visual_profiles,
     })
 }
 
-fn validate_pawn_focus(
-    sprites: &super::fixture_v2_cmd::SpriteLayers,
-    pawn_fixture_variant: usize,
-) -> Result<()> {
-    for profile in &sprites.pawn_visual_profiles {
-        let composed = crate::pawn::compose_pawn(
-            &profile.base_render_input,
-            &crate::pawn::PawnComposeConfig::default(),
+fn choose_body_def<'a>(
+    defs: &'a HashMap<String, BodyTypeDefRender>,
+    preferred: Option<&str>,
+) -> Result<&'a BodyTypeDefRender> {
+    if let Some(preferred) = preferred
+        && let Some(body) = defs.get(preferred)
+    {
+        return Ok(body);
+    }
+    defs.values()
+        .min_by(|a, b| a.def_name.cmp(&b.def_name))
+        .context("no BodyTypeDefRender entries are available")
+}
+
+fn choose_def<'a, T>(
+    defs: &'a HashMap<String, T>,
+    preferred: Option<&str>,
+    kind: &str,
+    key_of: impl Fn(&T) -> &str,
+    eligible: impl Fn(&T) -> bool,
+) -> Option<&'a T> {
+    if let Some(name) = preferred {
+        if let Some(value) = defs.get(name) {
+            return Some(value);
+        }
+        warn!("preferred {kind} def '{name}' not found, falling back");
+    }
+    defs.values()
+        .filter(|v| eligible(v))
+        .min_by_key(|v| key_of(v))
+}
+
+fn build_apparel_inputs(
+    defs: &HashMap<String, ApparelDef>,
+    apparel_defs: &[String],
+    body_def_name: Option<&str>,
+    facing: PawnFacing,
+    asset_resolver: &mut crate::assets::AssetResolver,
+    data_dir: &std::path::Path,
+) -> Result<Vec<ApparelRenderInput>> {
+    let mut out = Vec::new();
+    for def_name in apparel_defs {
+        let apparel = defs
+            .get(def_name)
+            .with_context(|| format!("missing ApparelDef '{}'", def_name))?;
+
+        // Match RimWorld's RenderAsPack(): only Belt items can render as pack,
+        // gated by renderUtilityAsPack. Non-Belt items never render as pack.
+        let render_as_pack = if matches!(apparel.layer, ApparelLayerDef::Belt) {
+            apparel.worn_graphic.render_utility_as_pack
+        } else {
+            false
+        };
+
+        // Resolve body-type suffixed texture path
+        let tex_path = build_apparel_tex_path(
+            apparel,
+            body_def_name,
+            render_as_pack,
+            asset_resolver,
+            data_dir,
         );
-        if let Some(head_body_delta) = measure_head_body_delta_y(&composed.nodes)
-            && head_body_delta <= 0.0
-        {
-            anyhow::bail!(
-                "upside-down pawn composition detected for variant {pawn_fixture_variant}: head_body_delta_y={head_body_delta:.3}"
-            );
-        }
-        if let Some(violations) = validate_basic_pawn_layering(&composed.nodes) {
-            anyhow::bail!(
-                "invalid pawn layering for variant {pawn_fixture_variant}: {}",
-                violations.join("; ")
-            );
-        }
+
+        // Resolve directional texture
+        let directional = resolve_directional_tex_path(asset_resolver, data_dir, &tex_path, facing);
+        let tex_path = directional.path;
+
+        // Worn data (offset/scale) with body overrides
+        let worn_data = apparel_worn_data_for_facing(
+            apparel,
+            directional.data_facing,
+            body_def_name,
+        );
+
+        let (explicit_skip_hair, explicit_skip_beard, has_explicit_skip_flags) =
+            map_explicit_skip_flags(&apparel.render_skip_flags);
+
+        let layer_override = build_full_apparel_layer_override(apparel, facing, render_as_pack);
+
+        let anchor_to_head = match apparel.parent_tag_def.as_deref() {
+            Some("ApparelHead") => Some(true),
+            Some("ApparelBody") => Some(false),
+            _ => None,
+        };
+
+        out.push(ApparelRenderInput {
+            label: apparel.def_name.clone(),
+            tex_path,
+            layer: apparel.layer.into(),
+            explicit_skip_hair,
+            explicit_skip_beard,
+            has_explicit_skip_flags,
+            covers_upper_head: apparel.covers_upper_head,
+            covers_full_head: apparel.covers_full_head,
+            anchor_to_head,
+            pack_offset: worn_data.offset,
+            pack_scale: worn_data.scale,
+            render_as_pack,
+            layer_override,
+            tint: [
+                apparel.color.r,
+                apparel.color.g,
+                apparel.color.b,
+                apparel.color.a,
+            ],
+        });
     }
-    Ok(())
+    Ok(out)
 }
 
-fn measure_head_body_delta_y(nodes: &[crate::pawn::tree::PawnNode]) -> Option<f32> {
-    let body_y = nodes
-        .iter()
-        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Body))
-        .map(|n| n.world_pos.y)?;
-    let head_y = nodes
-        .iter()
-        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Head))
-        .map(|n| n.world_pos.y)
-        .or_else(|| {
-            nodes
-                .iter()
-                .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Stump))
-                .map(|n| n.world_pos.y)
-        })?;
-    Some(head_y - body_y)
-}
-
-fn validate_basic_pawn_layering(nodes: &[crate::pawn::tree::PawnNode]) -> Option<Vec<String>> {
-    let body_z = nodes
-        .iter()
-        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Body))
-        .map(|n| n.z)?;
-    let head_z = nodes
-        .iter()
-        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Head))
-        .map(|n| n.z)
-        .or_else(|| {
-            nodes
-                .iter()
-                .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Stump))
-                .map(|n| n.z)
-        })?;
-
-    let mut violations = Vec::new();
-    if head_z <= body_z {
-        violations.push(format!("head_z({head_z:.6}) <= body_z({body_z:.6})"));
-    }
-
-    if let Some(hair_z) = nodes
-        .iter()
-        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Hair))
-        .map(|n| n.z)
-        && hair_z <= head_z
-    {
-        violations.push(format!("hair_z({hair_z:.6}) <= head_z({head_z:.6})"));
-    }
-
-    if let Some(beard_z) = nodes
-        .iter()
-        .find(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Beard))
-        .map(|n| n.z)
-        && beard_z <= body_z
-    {
-        violations.push(format!("beard_z({beard_z:.6}) <= body_z({body_z:.6})"));
-    }
-
-    if violations.is_empty() {
-        None
-    } else {
-        Some(violations)
-    }
-}
-
-fn dump_trace(
-    ctx: &mut DispatchContext<'_>,
-    world: &crate::world::WorldState,
-    path: &PathBuf,
+fn validate_layer_ownership(
+    static_sprites: &[RenderSprite],
+    dynamic_sprites: &[RenderSprite],
 ) -> Result<()> {
-    use anyhow::Context;
-
-    let mut trace_lines = Vec::new();
-    trace_lines.push(format!(
-        "map={}x{} pawns={}",
-        world.width(),
-        world.height(),
-        world.pawns().len()
-    ));
-
-    for pawn in world.pawns() {
-        let body_def = pawn
-            .body
-            .as_deref()
-            .and_then(|name| ctx.defs.body_type_defs.get(name));
-        let head_def = pawn
-            .head
-            .as_deref()
-            .and_then(|name| ctx.defs.head_type_defs.get(name));
-        let hair_def = pawn
-            .hair
-            .as_deref()
-            .and_then(|name| ctx.defs.hair_defs.get(name));
-        let beard_def = pawn
-            .beard
-            .as_deref()
-            .and_then(|name| ctx.defs.beard_defs.get(name));
-
-        trace_lines.push(format!(
-            "pawn={} facing={:?} body={} head={:?} hair={:?} beard={:?} apparel_count={}",
-            pawn.label,
-            pawn.facing,
-            body_def
-                .map(|b| b.body_naked_graphic_path.as_str())
-                .unwrap_or("<none>"),
-            head_def.map(|h| h.graphic_path.as_str()),
-            hair_def.map(|h| h.tex_path.as_str()),
-            beard_def.map(|b| b.tex_path.as_str()),
-            pawn.apparel_defs.len()
-        ));
+    let static_invalid: Vec<&str> = static_sprites
+        .iter()
+        .filter_map(|sprite| {
+            let name = sprite.def_name.as_str();
+            if name.starts_with("Terrain::") || name.starts_with("Thing::") {
+                None
+            } else {
+                Some(name)
+            }
+        })
+        .collect();
+    if !static_invalid.is_empty() {
+        anyhow::bail!(
+            "v2 layer ownership violation: static layer contains non-terrain/non-thing sprites: {}",
+            static_invalid.join(", ")
+        );
     }
 
-    std::fs::write(path, trace_lines.join("\n"))
-        .with_context(|| format!("writing pawn trace to {}", path.display()))?;
-    info!("wrote pawn trace: {}", path.display());
+    let dynamic_invalid: Vec<&str> = dynamic_sprites
+        .iter()
+        .filter_map(|sprite| {
+            let name = sprite.def_name.as_str();
+            if name.starts_with("PawnNode::") {
+                None
+            } else {
+                Some(name)
+            }
+        })
+        .collect();
+    if !dynamic_invalid.is_empty() {
+        anyhow::bail!(
+            "v2 layer ownership violation: dynamic layer contains non-pawn sprites: {}",
+            dynamic_invalid.join(", ")
+        );
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::{Vec2, Vec3};
+    use image::{Rgba, RgbaImage};
+
+    use super::{RenderSprite, validate_layer_ownership};
+    use crate::renderer::SpriteParams;
+
+    fn sprite(def_name: &str) -> RenderSprite {
+        RenderSprite {
+            def_name: def_name.to_string(),
+            image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])),
+            params: SpriteParams {
+                world_pos: Vec3::new(0.5, 0.5, 0.0),
+                size: Vec2::ONE,
+                tint: [1.0, 1.0, 1.0, 1.0],
+            },
+            used_fallback: false,
+            pawn_id: None,
+        }
+    }
+
+    #[test]
+    fn layer_ownership_accepts_expected_partition() {
+        let static_sprites = vec![sprite("Terrain::Soil"), sprite("Thing::ChunkSlagSteel")];
+        let dynamic_sprites = vec![
+            sprite("PawnNode::PawnA::Body"),
+            sprite("PawnNode::PawnA::Head"),
+        ];
+        assert!(validate_layer_ownership(&static_sprites, &dynamic_sprites).is_ok());
+    }
+
+    #[test]
+    fn layer_ownership_rejects_pawn_in_static() {
+        let static_sprites = vec![sprite("Terrain::Soil"), sprite("PawnNode::PawnA::Body")];
+        let dynamic_sprites = vec![sprite("PawnNode::PawnA::Head")];
+        let err =
+            validate_layer_ownership(&static_sprites, &dynamic_sprites).expect_err("should fail");
+        assert!(err.to_string().contains("static layer"));
+    }
+
+    #[test]
+    fn layer_ownership_rejects_thing_in_dynamic() {
+        let static_sprites = vec![sprite("Terrain::Soil")];
+        let dynamic_sprites = vec![
+            sprite("PawnNode::PawnA::Head"),
+            sprite("Thing::ChunkSlagSteel"),
+        ];
+        let err =
+            validate_layer_ownership(&static_sprites, &dynamic_sprites).expect_err("should fail");
+        assert!(err.to_string().contains("dynamic layer"));
+    }
 }

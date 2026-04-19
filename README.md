@@ -10,16 +10,16 @@ Render a single thing:
 cargo run -- render --thingdef Steel
 ```
 
-Render v1 fixture scene (terrain + things + pawns):
+Run a fixture scene (terrain + things + pawns + interactive runtime):
 
 ```bash
-cargo run -- fixture v1
+cargo run -- fixture fixtures/v2/move_lane.ron
 ```
 
-Headless screenshot run:
+Headless tick run:
 
 ```bash
-cargo run -- fixture v1 --no-window --screenshot target/v1_fixture.png
+cargo run -- fixture fixtures/v2/move_lane.ron --no-window --ticks 60
 ```
 
 ## Default Config
@@ -54,28 +54,16 @@ Sheet render for multiple defs:
 cargo run -- render --thingdef Steel --extra-thingdef ChunkSlagSteel --extra-thingdef Plasteel --sheet-columns 3
 ```
 
-V1 fixture (map + terrain + things + pawns):
+Fixture scene from RON:
 
 ```bash
-cargo run -- fixture v1 --map-width 40 --map-height 40
+cargo run -- fixture fixtures/v2/move_lane.ron
 ```
 
-V2 fixture (RON scene):
+Override fixed-step timing:
 
 ```bash
-cargo run -- fixture v2 --scene fixtures/v2/move_lane.ron
-```
-
-Pawn-focused fixture:
-
-```bash
-cargo run -- fixture pawn --map-width 18 --map-height 18
-```
-
-Pawn loadout audit scene:
-
-```bash
-cargo run -- audit --pawn-count 10
+cargo run -- fixture fixtures/v2/move_lane.ron --ticks 120 --fixed-dt 0.05
 ```
 
 ## Debug Commands
@@ -98,6 +86,12 @@ Probe terrain decode coverage:
 cargo run -- debug probe-terrain --terrain-probe-limit 64
 ```
 
+Probe pawn def decode coverage (body/head/hair/beard/apparel):
+
+```bash
+cargo run -- debug probe-defs
+```
+
 Diagnose texture roots:
 
 ```bash
@@ -110,9 +104,9 @@ Extract decodable packed textures:
 cargo run -- debug extract-packed-textures target/packed_textures
 ```
 
-## Smoke / Regression Tests
+## Smoke Tests
 
-v0 smoke:
+v0 (single-thing render):
 
 ```bash
 RIMWORLD_DATA_DIR="$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" \
@@ -120,26 +114,10 @@ RIMWORLD_TYPETREE_REGISTRY="/path/to/typetree.tpk" \
 cargo test --test v0_smoke -- --nocapture
 ```
 
-v1 smoke:
+v2 (fixture scene build):
 
 ```bash
 RIMWORLD_DATA_DIR="$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" \
 RIMWORLD_TYPETREE_REGISTRY="/path/to/typetree.tpk" \
-cargo test --test v1_smoke -- --nocapture
-```
-
-v1 golden screenshot regression:
-
-```bash
-RIMWORLD_DATA_DIR="$HOME/Library/Application Support/Steam/steamapps/common/RimWorld" \
-RIMWORLD_TYPETREE_REGISTRY="/path/to/typetree.tpk" \
-cargo test --test v1_golden -- --nocapture
-```
-
-Golden image path: `tests/golden/v1_fixture_256.png`
-
-Regenerate golden image intentionally:
-
-```bash
-cargo run -- fixture v1 --viewport-width 256 --viewport-height 256 --camera-zoom 8 --no-window --screenshot tests/golden/v1_fixture_256.png
+cargo test --test v2_smoke -- --nocapture
 ```

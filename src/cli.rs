@@ -58,11 +58,7 @@ pub struct ViewArgs {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     Render(RenderCmd),
-    Fixture {
-        #[command(subcommand)]
-        mode: FixtureCmd,
-    },
-    Audit(AuditCmd),
+    Fixture(FixtureCmd),
     Debug(DebugCmdArgs),
 }
 
@@ -98,51 +94,14 @@ pub struct RenderCmd {
     pub view: ViewArgs,
 }
 
-#[derive(Subcommand, Debug)]
-pub enum FixtureCmd {
-    V1(FixtureSceneCmd),
-    Pawn(FixtureSceneCmd),
-    V2(FixtureV2Cmd),
-}
-
 #[derive(Args, Debug, Clone)]
-pub struct FixtureSceneCmd {
-    #[arg(long, default_value_t = 0)]
-    pub pawn_fixture_variant: usize,
-    #[arg(long)]
-    pub dump_pawn_trace: Option<PathBuf>,
-    #[arg(long, default_value_t = 40)]
-    pub map_width: usize,
-    #[arg(long, default_value_t = 40)]
-    pub map_height: usize,
-    #[command(flatten)]
-    pub view: ViewArgs,
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct FixtureV2Cmd {
-    #[arg(long, default_value = "fixtures/v2/move_lane.ron")]
+pub struct FixtureCmd {
+    /// Path to the RON scene file to load
     pub scene: PathBuf,
     #[arg(long)]
     pub ticks: Option<u64>,
     #[arg(long)]
     pub fixed_dt: Option<f32>,
-    #[command(flatten)]
-    pub view: ViewArgs,
-}
-
-#[derive(Args, Debug)]
-pub struct AuditCmd {
-    #[arg(long, default_value_t = 10)]
-    pub pawn_count: usize,
-    #[arg(long, default_value_t = 0)]
-    pub pawn_fixture_variant: usize,
-    #[arg(long)]
-    pub dump_pawn_trace: Option<PathBuf>,
-    #[arg(long, default_value_t = 28)]
-    pub map_width: usize,
-    #[arg(long, default_value_t = 28)]
-    pub map_height: usize,
     #[command(flatten)]
     pub view: ViewArgs,
 }

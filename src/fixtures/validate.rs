@@ -106,10 +106,10 @@ pub fn validate_fixture(fixture: &SceneFixture) -> Result<()> {
         }
     }
 
-    if let Some(camera) = &fixture.camera {
-        if !camera.center_x.is_finite() || !camera.center_z.is_finite() {
-            errors.push("camera center must be finite".to_string());
-        }
+    if let Some(camera) = &fixture.camera
+        && (!camera.center_x.is_finite() || !camera.center_z.is_finite())
+    {
+        errors.push("camera center must be finite".to_string());
     }
 
     if errors.is_empty() {

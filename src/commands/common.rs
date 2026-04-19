@@ -401,18 +401,6 @@ pub(crate) fn map_explicit_skip_flags(
     (skip_hair, skip_beard, true)
 }
 
-pub(crate) fn body_head_compatible(body_tex: &str, head_tex: &str) -> bool {
-    let body_lower = body_tex.to_ascii_lowercase();
-    let head_lower = head_tex.to_ascii_lowercase();
-    if body_lower.contains("female") {
-        return head_lower.contains("female");
-    }
-    if body_lower.contains("male") {
-        return head_lower.contains("male");
-    }
-    true
-}
-
 pub(crate) fn make_missing_def_message(
     thingdef: &str,
     defs: &HashMap<String, ThingDef>,
@@ -495,39 +483,3 @@ pub(crate) fn build_full_apparel_layer_override(
     })
 }
 
-pub(crate) fn select_fixture_apparel_names(
-    pawn_index: usize,
-    pawn_fixture_variant: usize,
-    pawn_focus_only: bool,
-    body_layer_apparel: &[&ApparelDef],
-    shell_layer_apparel: &[&ApparelDef],
-    head_layer_apparel: &[&ApparelDef],
-) -> Vec<String> {
-    let seed = pawn_fixture_variant + pawn_index * 17;
-    let mut out = Vec::new();
-
-    if !body_layer_apparel.is_empty() && (pawn_focus_only || !pawn_index.is_multiple_of(4)) {
-        let idx = seed % body_layer_apparel.len();
-        out.push(body_layer_apparel[idx].def_name.clone());
-    }
-    if !shell_layer_apparel.is_empty() && (pawn_focus_only || pawn_index.is_multiple_of(2)) {
-        let idx = (seed / 2).max(1) % shell_layer_apparel.len();
-        out.push(shell_layer_apparel[idx].def_name.clone());
-    }
-    if !head_layer_apparel.is_empty() && (pawn_focus_only || !pawn_index.is_multiple_of(3)) {
-        let idx = (seed / 3).max(1) % head_layer_apparel.len();
-        out.push(head_layer_apparel[idx].def_name.clone());
-    }
-
-    if out.is_empty() {
-        if !shell_layer_apparel.is_empty() {
-            out.push(shell_layer_apparel[seed % shell_layer_apparel.len()].def_name.clone());
-        } else if !body_layer_apparel.is_empty() {
-            out.push(body_layer_apparel[seed % body_layer_apparel.len()].def_name.clone());
-        } else if !head_layer_apparel.is_empty() {
-            out.push(head_layer_apparel[seed % head_layer_apparel.len()].def_name.clone());
-        }
-    }
-
-    out
-}

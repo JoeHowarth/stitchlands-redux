@@ -10,7 +10,6 @@ mod path;
 mod pawn;
 mod renderer;
 mod runtime;
-mod scene;
 mod viewer;
 mod world;
 

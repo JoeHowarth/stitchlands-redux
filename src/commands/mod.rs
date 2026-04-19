@@ -11,7 +11,6 @@ use crate::renderer::RendererOptions;
 pub mod common;
 mod debug_cmd;
 mod fixture_cmd;
-mod fixture_v2_cmd;
 mod render_cmd;
 
 pub use common::DefSet;
@@ -44,8 +43,7 @@ pub struct LaunchSpec {
 pub fn dispatch(ctx: &mut DispatchContext<'_>, command: Command) -> Result<CommandAction> {
     match command {
         Command::Debug(debug) => debug_cmd::run(ctx, debug.command),
-        Command::Fixture { mode } => fixture_cmd::run_fixture(ctx, mode),
-        Command::Audit(audit) => fixture_cmd::run_audit(ctx, audit),
+        Command::Fixture(cmd) => fixture_cmd::run_fixture(ctx, cmd),
         Command::Render(render) => render_cmd::run(ctx, render),
     }
 }

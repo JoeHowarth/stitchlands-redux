@@ -2,13 +2,13 @@ use std::env;
 use std::process::Command;
 
 #[test]
-fn v2_fixture_scene_builds() {
+fn fixture_scene_builds() {
     let Some(rimworld_data) = env::var_os("RIMWORLD_DATA_DIR") else {
-        eprintln!("skipping: set RIMWORLD_DATA_DIR to run v2 fixture smoke test");
+        eprintln!("skipping: set RIMWORLD_DATA_DIR to run fixture smoke test");
         return;
     };
     let Some(typetree_registry) = env::var_os("RIMWORLD_TYPETREE_REGISTRY") else {
-        eprintln!("skipping: set RIMWORLD_TYPETREE_REGISTRY to run v2 fixture smoke test");
+        eprintln!("skipping: set RIMWORLD_TYPETREE_REGISTRY to run fixture smoke test");
         return;
     };
 
@@ -19,13 +19,11 @@ fn v2_fixture_scene_builds() {
         .arg("--typetree-registry")
         .arg(typetree_registry)
         .arg("fixture")
-        .arg("v2")
-        .arg("--scene")
         .arg("fixtures/v2/move_lane.ron")
         .arg("--no-window")
         .env("RUST_LOG", "info")
         .output()
-        .expect("run stitchlands-redux v2 fixture smoke command");
+        .expect("run stitchlands-redux fixture smoke command");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -35,8 +33,8 @@ fn v2_fixture_scene_builds() {
         stderr
     );
     assert!(
-        stderr.contains("v2 fixture scene built"),
-        "missing v2 fixture build log\nstderr:\n{}",
+        stderr.contains("fixture scene built"),
+        "missing fixture build log\nstderr:\n{}",
         stderr
     );
 }

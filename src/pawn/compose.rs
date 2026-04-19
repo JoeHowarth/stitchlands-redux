@@ -3,7 +3,7 @@ use glam::{Vec2, Vec3};
 use super::graph::{AnchorKind, GraphNode, NodePayload};
 use super::model::{ApparelLayer, HUMANLIKE_MESH_BASE, PawnComposeConfig, PawnRenderInput};
 use super::parms::{PawnDrawParms, RenderSkipFlag};
-use super::tree::{PawnNode, PawnNodeKind};
+use super::tree::PawnNode;
 use super::workers;
 
 #[derive(Debug, Clone)]
@@ -24,7 +24,6 @@ fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode>
 
     out.push(GraphNode {
         id: format!("{}::Body", input.label),
-        kind: PawnNodeKind::Body,
         anchor: AnchorKind::Body,
         order,
         payload: NodePayload::Body,
@@ -35,7 +34,6 @@ fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode>
         if input.stump_tex_path.is_some() {
             out.push(GraphNode {
                 id: format!("{}::Stump", input.label),
-                kind: PawnNodeKind::Stump,
                 anchor: AnchorKind::Head,
                 order,
                 payload: NodePayload::Stump,
@@ -46,7 +44,6 @@ fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode>
         if input.head_tex_path.is_some() {
             out.push(GraphNode {
                 id: format!("{}::Head", input.label),
-                kind: PawnNodeKind::Head,
                 anchor: AnchorKind::Head,
                 order,
                 payload: NodePayload::Head,
@@ -57,7 +54,6 @@ fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode>
         if !parms.skip(RenderSkipFlag::Hair) && input.hair_tex_path.is_some() {
             out.push(GraphNode {
                 id: format!("{}::Hair", input.label),
-                kind: PawnNodeKind::Hair,
                 anchor: AnchorKind::Head,
                 order,
                 payload: NodePayload::Hair,
@@ -68,7 +64,6 @@ fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode>
         if !parms.skip(RenderSkipFlag::Beard) && input.beard_tex_path.is_some() {
             out.push(GraphNode {
                 id: format!("{}::Beard", input.label),
-                kind: PawnNodeKind::Beard,
                 anchor: AnchorKind::Head,
                 order,
                 payload: NodePayload::Beard,
@@ -96,7 +91,6 @@ fn build_graph(input: &PawnRenderInput, parms: &PawnDrawParms) -> Vec<GraphNode>
         };
         out.push(GraphNode {
             id: format!("{}::Apparel::{}", input.label, apparel.label),
-            kind: PawnNodeKind::Apparel,
             anchor,
             order,
             payload: NodePayload::Apparel(apparel.clone()),
@@ -210,7 +204,6 @@ fn evaluate_graph(
         let world = Vec3::new(mapped.x, mapped.y, z);
         out.push(PawnNode {
             id: g.id,
-            kind: g.kind,
             tex_path,
             world_pos: world,
             size,
@@ -384,7 +377,7 @@ mod tests {
         let mut apparel = result
             .nodes
             .iter()
-            .filter(|n| matches!(n.kind, crate::pawn::tree::PawnNodeKind::Apparel));
+            .filter(|n| n.id.contains("::Apparel::"));
         let first = apparel.next().expect("at least one apparel node");
         let second = apparel.next().expect("two apparel nodes");
         assert!(first.id.contains("Shirt"));
@@ -395,17 +388,17 @@ mod tests {
     fn body_head_hair_beard_z_strictly_increase() {
         let input = fixture_input();
         let result = compose_pawn(&input, &PawnComposeConfig::default());
-        let z_for = |kind: crate::pawn::tree::PawnNodeKind| {
+        let z_for = |suffix: &str| {
             result
                 .nodes
                 .iter()
-                .find(|n| n.kind == kind)
+                .find(|n| n.id.ends_with(suffix))
                 .map(|n| n.z)
         };
-        let body_z = z_for(crate::pawn::tree::PawnNodeKind::Body).expect("body node");
-        let head_z = z_for(crate::pawn::tree::PawnNodeKind::Head).expect("head node");
-        let hair_z = z_for(crate::pawn::tree::PawnNodeKind::Hair).expect("hair node");
-        let beard_z = z_for(crate::pawn::tree::PawnNodeKind::Beard).expect("beard node");
+        let body_z = z_for("::Body").expect("body node");
+        let head_z = z_for("::Head").expect("head node");
+        let hair_z = z_for("::Hair").expect("hair node");
+        let beard_z = z_for("::Beard").expect("beard node");
         assert!(head_z > body_z, "head_z={head_z} not > body_z={body_z}");
         assert!(hair_z > head_z, "hair_z={hair_z} not > head_z={head_z}");
         assert!(beard_z > body_z, "beard_z={beard_z} not > body_z={body_z}");
@@ -420,12 +413,12 @@ mod tests {
         let body = result
             .nodes
             .iter()
-            .find(|n| n.kind == crate::pawn::tree::PawnNodeKind::Body)
+            .find(|n| n.id.ends_with("::Body"))
             .expect("body node");
         let stump = result
             .nodes
             .iter()
-            .find(|n| n.kind == crate::pawn::tree::PawnNodeKind::Stump)
+            .find(|n| n.id.ends_with("::Stump"))
             .expect("stump node");
         assert!(stump.world_pos.y > body.world_pos.y);
         assert!(stump.z > body.z);

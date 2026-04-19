@@ -1,5 +1,4 @@
 use super::model::ApparelRenderInput;
-use super::tree::PawnNodeKind;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum AnchorKind {
@@ -20,7 +19,6 @@ pub enum NodePayload {
 #[derive(Debug, Clone)]
 pub struct GraphNode {
     pub id: String,
-    pub kind: PawnNodeKind,
     pub anchor: AnchorKind,
     pub order: usize,
     pub payload: NodePayload,
