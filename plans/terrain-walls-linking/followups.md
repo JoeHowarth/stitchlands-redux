@@ -18,10 +18,22 @@ surrounding systems are built out.
   must be picked from the stuff's `stuffProps.appearance`. See
   `commands/linking_sprites.rs::linked_atlas_path` for the insertion
   point.
-- **Animated water wave distortion** — `TerrainEdgeType::Water` currently
-  uses the same FadeRough shader branch. Waves want a `time` uniform
-  that the base pipeline doesn't have either, and pair naturally with
-  the shader-distortion roadmap item.
+- **Water terrain rendering (base pass + depth pass)** —
+  `TerrainEdgeType::Water` currently falls through the FadeRough edge
+  shader branch, but the **base cell** for water terrains is also wrong:
+  RimWorld draws water as two passes and we draw it as one. Base pass
+  uses `ShaderDatabase.TerrainWater` with `texturePath` pointing at a
+  *gradient ramp* (e.g. `Terrain/Surfaces/WaterShallowRamp`, not a
+  tileable water tile) plus an `_AlphaAddTex` input from
+  `TexGame.AlphaAddTex`, injected in `Verse/TerrainDef.cs:434-437`. A
+  second pass via `SectionLayer_Watergen` (`Verse/SectionLayer_Watergen.cs:6-34`)
+  draws `terrain.def.waterDepthMaterial` — built from
+  `waterDepthShader = "Map/WaterDepth"` — into a separate
+  `SubcameraDefOf.WaterDepth` buffer that composites underneath. Without
+  both passes, the ramp texture reads directly to screen as a muddy
+  brown gradient. `fixtures/v2/terrain_mix.ron` swapped its WaterShallow
+  pocket for Ice until the water pipeline lands. Animated wave
+  distortion is the next step after the two-pass basics work.
 - **Door-linking via `asymmetricLink.linkToDoors`** — doors aren't
   drawn yet.
 - **RimWorld's 9-vertex edge mesh + section batching** — the current

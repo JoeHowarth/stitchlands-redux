@@ -45,8 +45,8 @@ mod tests {
                 .map
                 .terrain
                 .iter()
-                .any(|c| c.terrain_def == "WaterShallow"),
-            "terrain_mix must include WaterShallow pocket"
+                .any(|c| c.terrain_def == "Ice"),
+            "terrain_mix must include Ice pocket"
         );
     }
 

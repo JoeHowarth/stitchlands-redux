@@ -1,25 +1,28 @@
 // Showcase fixture for terrain edge overlays. Four terrain kinds exercise
-// each of RimWorld's edgeType values and the precedence-driven fade:
+// the Hard and FadeRough edgeType branches and the precedence-driven fade:
 //
-//   - Concrete     (precedence  70, Hard)       — right column; Soil fades in
-//   - Soil         (precedence 340, FadeRough)  — map background
-//   - Sand         (precedence 350, FadeRough)  — bottom-left pocket; fades onto Soil
-//   - WaterShallow (precedence 394, Water)      — central pond; fades onto Soil
-//   - WaterDeep    (precedence 395, Water)      — core of pond; fades onto WaterShallow
+//   - Concrete  (precedence  70, Hard)       — right column; Soil fades onto it
+//   - Soil      (precedence 340, FadeRough)  — map background
+//   - Sand      (precedence 350, FadeRough)  — bottom-left pocket; fades onto Soil
+//   - Ice       (precedence 350, FadeRough)  — central pocket;    fades onto Soil
+//
+// edgeType=Water is deliberately NOT exercised here — water terrains need a
+// two-pass TerrainWater + Watergen render that isn't implemented yet. See
+// followups.md.
 //
 // Layout (z grows north):
-//   row 11 .....SSSSSSSSSSSSCCCC
-//   row 10 .....SSSSSSSSSSSSCCCC
-//   row  9 .....SSSSSSSSSSSSCCCC
-//   row  8 .....SSSSSSwwwwSSCCCC
-//   row  7 .....SSSSSwwDDwwSCCCC
-//   row  6 .....SSSSSwDDDDwSCCCC
-//   row  5 .....SSSSSwwDDwwSCCCC
-//   row  4 .....SSSSSSwwwwSSCCCC
-//   row  3 .....SSSSSSSSSSSSCCCC
-//   row  2 .....aaaaSSSSSSSSCCCC
-//   row  1 .....aaaaSSSSSSSSCCCC
-//   row  0 .....aaaaSSSSSSSSCCCC
+//   row 11 ....SSSSSSSSSSSSCCCC
+//   row 10 ....SSSSSSSSSSSSCCCC
+//   row  9 ....SSSSSSSSSSSSCCCC
+//   row  8 ....SSSSSSiiiiSSCCCC
+//   row  7 ....SSSSSiiiiiiSCCCC
+//   row  6 ....SSSSSiiiiiiSCCCC
+//   row  5 ....SSSSSiiiiiiSCCCC
+//   row  4 ....SSSSSSiiiiSSCCCC
+//   row  3 ....SSSSSSSSSSSSCCCC
+//   row  2 ....aaaaSSSSSSSSCCCC
+//   row  1 ....aaaaSSSSSSSSCCCC
+//   row  0 ....aaaaSSSSSSSSCCCC
 (
   schema_version: 2,
   map: (
@@ -49,37 +52,37 @@
       // z=4
       (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
       (terrain_def: "Soil"), (terrain_def: "Soil"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"), (terrain_def: "Ice"), (terrain_def: "Ice"),
       (terrain_def: "Soil"), (terrain_def: "Soil"),
       (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
       // z=5
       (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
       (terrain_def: "Soil"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"),
       (terrain_def: "Soil"),
       (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
       // z=6
       (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
       (terrain_def: "Soil"),
-      (terrain_def: "WaterShallow"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
-      (terrain_def: "WaterShallow"),
+      (terrain_def: "Ice"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"), (terrain_def: "Ice"), (terrain_def: "Ice"),
+      (terrain_def: "Ice"),
       (terrain_def: "Soil"),
       (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
       // z=7
       (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
       (terrain_def: "Soil"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"),
       (terrain_def: "Soil"),
       (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
       // z=8
       (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
       (terrain_def: "Soil"), (terrain_def: "Soil"),
-      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Ice"), (terrain_def: "Ice"), (terrain_def: "Ice"), (terrain_def: "Ice"),
       (terrain_def: "Soil"), (terrain_def: "Soil"),
       (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
       // z=9
