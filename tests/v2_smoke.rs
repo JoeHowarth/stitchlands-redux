@@ -21,6 +21,8 @@ fn fixture_scene_builds() {
         .arg("fixture")
         .arg("fixtures/v2/move_lane.ron")
         .arg("--no-window")
+        .arg("--ticks")
+        .arg("10")
         .env("RUST_LOG", "info")
         .output()
         .expect("run stitchlands-redux fixture smoke command");
@@ -35,6 +37,11 @@ fn fixture_scene_builds() {
     assert!(
         stderr.contains("fixture scene built"),
         "missing fixture build log\nstderr:\n{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("fixture headless ticks complete: ticks=10"),
+        "missing headless tick completion log\nstderr:\n{}",
         stderr
     );
 }

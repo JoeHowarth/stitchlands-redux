@@ -38,7 +38,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         let _ = issue_move_intent(&mut world, first_pawn_id, start);
         tick_world(&mut world, 0.0);
     }
-    let sprites = build_world_sprites(ctx, &world, false)?;
+    let sprites = build_world_sprites(ctx, &world, !ctx.allow_fallback)?;
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let blocking_things = world
         .things()
@@ -70,16 +70,12 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         sprites.dynamic_sprites.len()
     );
 
-    if !should_run_renderer {
-        return Ok(CommandAction::Done);
-    }
-
     let SpriteLayers {
         static_sprites,
         dynamic_sprites,
         pawn_visual_profiles,
     } = sprites;
-    let runtime = V2Runtime::new(
+    let mut runtime = V2Runtime::new(
         world,
         pawn_visual_profiles,
         V2RuntimeConfig {
@@ -87,6 +83,16 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
             compose_config: ctx.compose_config.clone(),
         },
     );
+
+    if !should_run_renderer {
+        let tick_limit = cmd.ticks.unwrap_or(0);
+        for _ in 0..tick_limit {
+            runtime.tick_once();
+        }
+        info!("fixture headless ticks complete: ticks={}", runtime.tick_count());
+        return Ok(CommandAction::Done);
+    }
+
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites,
         dynamic_sprites,
