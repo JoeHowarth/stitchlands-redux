@@ -143,14 +143,6 @@ impl PackedTextureResolver {
                 candidates.push((wanted, key.clone()));
             }
         }
-        for (name, key) in self.find_fuzzy_name_matches(tex_path) {
-            if seen.insert((key.source.describe(), key.path_id)) {
-                candidates.push((name, key));
-            }
-            if candidates.len() >= limit {
-                break;
-            }
-        }
 
         let mut succeeded = 0usize;
         let mut sample_errors = Vec::new();
@@ -184,18 +176,6 @@ impl PackedTextureResolver {
             };
             let source_label = format!("{}::{}", key.source.describe(), key.path_id);
 
-            return Ok(Some(PackedTextureHit {
-                image,
-                source_label,
-            }));
-        }
-
-        for (_matched_name, key) in self.find_fuzzy_name_matches(tex_path) {
-            let image = match self.decode_texture_for_key(&key) {
-                Ok(image) => image,
-                Err(_) => continue,
-            };
-            let source_label = format!("{}::{}", key.source.describe(), key.path_id);
             return Ok(Some(PackedTextureHit {
                 image,
                 source_label,
@@ -346,36 +326,6 @@ impl PackedTextureResolver {
             succeeded,
             sample_errors,
         }
-    }
-
-    fn find_fuzzy_name_matches(&self, tex_path: &str) -> Vec<(String, BinaryObjectKey)> {
-        let basename = tex_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(tex_path)
-            .to_ascii_lowercase();
-        let mut matches: Vec<(i32, String, BinaryObjectKey)> = Vec::new();
-
-        for (name, key) in &self.keys_by_name {
-            if !name.contains(&basename) {
-                continue;
-            }
-            let score = if name == &basename {
-                100
-            } else if name.starts_with(&basename) {
-                80
-            } else {
-                50
-            } - (name.len() as i32 / 20);
-
-            matches.push((score, name.clone(), key.clone()));
-        }
-        matches.sort_by(|a, b| b.0.cmp(&a.0));
-        matches
-            .into_iter()
-            .take(10)
-            .map(|(_, name, key)| (name, key))
-            .collect()
     }
 
     fn decode_texture_for_key(&self, key: &BinaryObjectKey) -> Result<RgbaImage> {

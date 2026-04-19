@@ -133,8 +133,6 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         if let Some(path) = &resolved.sprite.source_path {
             if resolved.resolved_from_packed {
                 info!("resolved texture (packed): {}", path.display());
-            } else if resolved.sprite.resolved_with_fuzzy_match {
-                info!("resolved texture (fuzzy): {}", path.display());
             } else {
                 info!("resolved texture: {}", path.display());
             }
