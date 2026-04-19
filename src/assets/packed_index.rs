@@ -76,7 +76,9 @@ impl PackedTextureIndex {
             return true;
         }
 
-        for path in wanted_container_patterns(tex_path) {
+        let variants =
+            crate::assets::variants::variants_for(tex_path, crate::defs::GraphicKind::Single);
+        for path in variants.container_paths() {
             if self.container_paths.contains(&path) {
                 return true;
             }
@@ -247,38 +249,6 @@ fn roots_signature(roots: &[PathBuf], typetree_registries: &[PathBuf]) -> String
     parts.join(";")
 }
 
-pub(crate) fn wanted_texture_names(tex_path: &str) -> Vec<String> {
-    let basename = tex_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(tex_path)
-        .to_ascii_lowercase();
-    vec![
-        basename.clone(),
-        format!("{}_south", basename),
-        format!("{}_north", basename),
-        format!("{}_east", basename),
-        format!("{}_west", basename),
-    ]
-}
-
-pub(crate) fn wanted_container_patterns(tex_path: &str) -> Vec<String> {
-    let base = tex_path.to_ascii_lowercase();
-    let prefixed = if base.starts_with("textures/") {
-        base.clone()
-    } else {
-        format!("textures/{base}")
-    };
-    vec![
-        prefixed.clone(),
-        format!("{prefixed}.png"),
-        format!("{prefixed}_south.png"),
-        format!("{prefixed}_north.png"),
-        format!("{prefixed}_east.png"),
-        format!("{prefixed}_west.png"),
-    ]
-}
-
 fn insert_with_ancestors(set: &mut HashSet<String>, path: &str) {
     set.insert(path.to_string());
     let mut remaining = path;
@@ -298,25 +268,7 @@ mod tests {
     use std::collections::HashSet;
     use std::fs;
 
-    use super::{PackedTextureIndex, wanted_container_patterns, wanted_texture_names};
-
-    #[test]
-    fn wanted_names_include_directional_suffixes() {
-        let names = wanted_texture_names("Things/Item/Resource/Steel");
-        assert_eq!(names[0], "steel");
-        assert!(names.contains(&"steel_south".to_string()));
-        assert!(names.contains(&"steel_north".to_string()));
-        assert!(names.contains(&"steel_east".to_string()));
-        assert!(names.contains(&"steel_west".to_string()));
-    }
-
-    #[test]
-    fn wanted_container_patterns_include_png_and_rotations() {
-        let patterns = wanted_container_patterns("Things/Item/Resource/Steel");
-        assert!(patterns.contains(&"textures/things/item/resource/steel.png".to_string()));
-        assert!(patterns.contains(&"textures/things/item/resource/steel_south.png".to_string()));
-        assert!(patterns.contains(&"textures/things/item/resource/steel_north.png".to_string()));
-    }
+    use super::PackedTextureIndex;
 
     #[test]
     fn persists_and_reloads_metadata_index() {

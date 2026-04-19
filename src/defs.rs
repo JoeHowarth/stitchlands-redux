@@ -24,10 +24,38 @@ impl RgbaColor {
     };
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+pub enum GraphicKind {
+    #[default]
+    Single,
+    Multi,
+    Random,
+    RandomRotated,
+}
+
+impl GraphicKind {
+    pub fn is_random(self) -> bool {
+        matches!(self, Self::Random | Self::RandomRotated)
+    }
+
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(|s| s.trim()) {
+            None | Some("") | Some("Graphic_Single") => Self::Single,
+            Some("Graphic_Multi") => Self::Multi,
+            Some("Graphic_Random") => Self::Random,
+            Some("Graphic_RandomRotated") => Self::RandomRotated,
+            Some(other) => {
+                log::warn!("unknown graphicClass '{other}'; defaulting to Graphic_Single");
+                Self::Single
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GraphicData {
     pub tex_path: String,
-    pub graphic_class: Option<String>,
+    pub kind: GraphicKind,
     pub color: RgbaColor,
     pub draw_size: Vec2,
     pub draw_offset: Vec3,
@@ -582,7 +610,7 @@ fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
 
 fn parse_graphic_data(node: Node<'_, '_>) -> Option<GraphicData> {
     let tex_path = child_text(node, "texPath")?.to_string();
-    let graphic_class = child_text(node, "graphicClass").map(str::to_string);
+    let kind = GraphicKind::parse(child_text(node, "graphicClass"));
     let color = child_text(node, "color")
         .and_then(parse_color)
         .unwrap_or(RgbaColor::WHITE);
@@ -595,7 +623,7 @@ fn parse_graphic_data(node: Node<'_, '_>) -> Option<GraphicData> {
 
     Some(GraphicData {
         tex_path,
-        graphic_class,
+        kind,
         color,
         draw_size,
         draw_offset,

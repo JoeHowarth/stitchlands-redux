@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use image::{ImageBuffer, Rgba, RgbaImage};
 
-use crate::defs::ThingDef;
+use crate::assets::variants::variants_for;
+use crate::defs::{GraphicKind, ThingDef};
 
 #[derive(Debug, Clone)]
 pub struct SpriteAsset {
@@ -34,14 +35,9 @@ pub fn resolve_texture_path(
 
     let mut attempted_paths = Vec::new();
 
+    let variants = variants_for(tex_path, GraphicKind::Single);
     for root in &texture_roots {
-        let candidates = [
-            root.join(format!("{}.png", tex_path)),
-            root.join(format!("{}_south.png", tex_path)),
-            root.join(format!("{}_north.png", tex_path)),
-        ];
-
-        for candidate in candidates {
+        for candidate in variants.disk_candidates(root) {
             attempted_paths.push(candidate.clone());
             if !candidate.exists() {
                 continue;
@@ -164,7 +160,7 @@ mod tests {
             def_name: "TestThing".to_string(),
             graphic_data: GraphicData {
                 tex_path: tex_path.to_string(),
-                graphic_class: None,
+                kind: GraphicKind::Single,
                 color: RgbaColor::WHITE,
                 draw_size: Vec2::new(1.0, 1.0),
                 draw_offset: Vec3::ZERO,

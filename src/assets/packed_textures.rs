@@ -10,8 +10,9 @@ use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
 use unity_asset_decode::unity_version::UnityVersion;
 
-use crate::assets::packed_index::{wanted_container_patterns, wanted_texture_names};
 use crate::assets::typetree_registry::load_typetree_registry;
+use crate::assets::variants::variants_for;
+use crate::defs::GraphicKind;
 
 pub struct PackedTextureResolver {
     env: Environment,
@@ -124,7 +125,8 @@ impl PackedTextureResolver {
         let mut candidates: Vec<(String, BinaryObjectKey)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        for wanted in wanted_texture_names(tex_path) {
+        let variants = variants_for(tex_path, GraphicKind::Single);
+        for wanted in variants.base_names() {
             if let Some(key) = self.keys_by_name.get(&wanted)
                 && seen.insert((key.source.describe(), key.path_id))
             {
@@ -153,7 +155,8 @@ impl PackedTextureResolver {
     }
 
     pub fn resolve(&self, tex_path: &str) -> Result<Option<PackedTextureHit>> {
-        for wanted in wanted_texture_names(tex_path) {
+        let variants = variants_for(tex_path, GraphicKind::Single);
+        for wanted in variants.base_names() {
             let Some(key) = self.keys_by_name.get(&wanted) else {
                 continue;
             };
@@ -205,10 +208,9 @@ impl PackedTextureResolver {
     }
 
     fn folder_members(&self, tex_path: &str) -> Vec<(String, BinaryObjectKey)> {
-        let base = format!(
-            "textures/{}/",
-            tex_path.to_ascii_lowercase().trim_end_matches('/')
-        );
+        let Some(base) = variants_for(tex_path, GraphicKind::Random).folder_prefix() else {
+            return Vec::new();
+        };
         let mut matches: Vec<(String, BinaryObjectKey)> = self
             .container_index
             .iter()
@@ -339,7 +341,8 @@ impl PackedTextureResolver {
     }
 
     fn find_by_container_paths(&self, tex_path: &str) -> Vec<(String, BinaryObjectKey)> {
-        let candidates = wanted_container_patterns(tex_path);
+        let variants = variants_for(tex_path, GraphicKind::Single);
+        let candidates = variants.container_paths();
         let mut matches: Vec<(i32, String, BinaryObjectKey)> = Vec::new();
 
         for (asset_path, key) in &self.container_index {

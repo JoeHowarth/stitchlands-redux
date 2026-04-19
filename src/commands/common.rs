@@ -126,14 +126,8 @@ pub fn list_defs(
             }
         }
         println!(
-            "{} | texPath={} | class={}",
-            thing.def_name,
-            thing.graphic_data.tex_path,
-            thing
-                .graphic_data
-                .graphic_class
-                .as_deref()
-                .unwrap_or("Graphic_Single")
+            "{} | texPath={} | class={:?}",
+            thing.def_name, thing.graphic_data.tex_path, thing.graphic_data.kind
         );
         shown += 1;
     }

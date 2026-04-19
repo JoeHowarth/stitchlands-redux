@@ -9,6 +9,7 @@ mod packed_textures;
 mod resolver;
 mod rimworld_paths;
 mod typetree_registry;
+pub(crate) mod variants;
 
 pub use loose::{SpriteAsset, resolve_sprite, resolve_texture_path};
 pub use packed_textures::{extract_all_packed_textures, infer_packed_data_roots};

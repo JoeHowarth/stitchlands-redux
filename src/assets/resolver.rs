@@ -62,8 +62,7 @@ impl AssetResolver {
         let mut resolved_from_packed = false;
         if sprite_asset.used_fallback {
             let tex_path = thing_def.graphic_data.tex_path.as_str();
-            let graphic_class = thing_def.graphic_data.graphic_class.as_deref();
-            resolved_from_packed = if is_random_graphic_class(graphic_class) {
+            resolved_from_packed = if thing_def.graphic_data.kind.is_random() {
                 self.try_resolve_folder_from_packed(tex_path, variant_index, &mut sprite_asset)?
                     || self.try_resolve_from_packed(tex_path, &mut sprite_asset)?
             } else {
@@ -224,13 +223,6 @@ impl AssetResolver {
         sprite_asset.used_fallback = false;
         Ok(true)
     }
-}
-
-fn is_random_graphic_class(graphic_class: Option<&str>) -> bool {
-    matches!(
-        graphic_class,
-        Some("Graphic_Random") | Some("Graphic_RandomRotated")
-    )
 }
 
 pub struct ResolvedSpriteAsset {
