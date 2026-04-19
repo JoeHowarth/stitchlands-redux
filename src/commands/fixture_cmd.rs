@@ -179,6 +179,7 @@ fn build_world_sprites(
                 );
             }
             let used_fallback = resolved.used_fallback();
+            let is_water = terrain_def.water_depth_shader.is_some();
             static_sprites.push(RenderSprite {
                 def_name: format!("Terrain::{}", terrain_def.def_name),
                 image: resolved.image,
@@ -190,6 +191,7 @@ fn build_world_sprites(
                 },
                 used_fallback,
                 pawn_id: None,
+                is_water,
             });
         }
     }
@@ -253,6 +255,7 @@ fn build_world_sprites(
             },
             used_fallback,
             pawn_id: None,
+            is_water: false,
         });
     }
 
@@ -365,6 +368,7 @@ fn build_world_sprites(
                 },
                 used_fallback,
                 pawn_id: Some(pawn.id),
+                is_water: false,
             });
         }
     }
@@ -543,6 +547,7 @@ mod tests {
             },
             used_fallback: false,
             pawn_id: None,
+            is_water: false,
         }
     }
 

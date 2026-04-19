@@ -1,0 +1,53 @@
+// Phase 2 smoke test fixture. Exercises the two-pass water pipeline stub:
+// water cells should render bright red (proves the depth RT is written in
+// the first pass and sampled in screen space by the surface pass).
+// Two water types so multiple sprite batches flow through both passes.
+// Phase 3 replaces the always-red fragment with the real ramp/ripple/
+// reflection math and tunes ramp colors per water type.
+(
+  schema_version: 2,
+  map: (
+    width: 8,
+    height: 8,
+    terrain: [
+      // z=0
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      // z=1
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      // z=2
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      // z=3
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterDeep"),
+      (terrain_def: "WaterDeep"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      // z=4
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterDeep"),
+      (terrain_def: "WaterDeep"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      // z=5
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      // z=6
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      // z=7
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+    ],
+  ),
+  things: [],
+  pawns: [],
+  camera: (
+    center_x: 4.0,
+    center_z: 4.0,
+  ),
+)

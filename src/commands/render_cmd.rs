@@ -28,6 +28,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             },
             used_fallback: false,
             pawn_id: None,
+            is_water: false,
         };
 
         if let Some(screenshot) = &render.view.screenshot {
@@ -206,6 +207,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             },
             used_fallback,
             pawn_id: None,
+            is_water: false,
         });
     }
 

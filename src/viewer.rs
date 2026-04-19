@@ -27,6 +27,11 @@ pub(crate) struct RenderSprite {
     pub(crate) params: SpriteParams,
     pub(crate) used_fallback: bool,
     pub(crate) pawn_id: Option<usize>,
+    /// When true, the sprite routes through the water-depth offscreen pass and
+    /// the water-surface draw in the main pass instead of the base pipeline.
+    /// Set by the fixture builder for terrain cells whose `TerrainDef` has a
+    /// `waterDepthShader` entry.
+    pub(crate) is_water: bool,
 }
 
 pub(crate) struct ViewerLaunch {
@@ -149,6 +154,7 @@ impl ApplicationHandler for App {
             .map(|sprite| SpriteInput {
                 image: sprite.image,
                 params: sprite.params,
+                is_water: sprite.is_water,
             })
             .collect();
         let renderer = pollster::block_on(Renderer::new(
@@ -182,6 +188,7 @@ impl ApplicationHandler for App {
             self.base_dynamic_inputs.push(SpriteInstance {
                 texture_id,
                 params: sprite.params,
+                is_water: sprite.is_water,
             });
         }
         renderer

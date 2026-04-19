@@ -28,6 +28,7 @@ pub fn compose_dynamic_sprites(
         out.push(SpriteInstance {
             texture_id: *texture_id,
             params: node.params.clone(),
+            is_water: false,
         });
     }
 
@@ -40,6 +41,7 @@ pub fn compose_dynamic_sprites(
                 tint: [0.35, 1.00, 0.45, 0.65],
                 uv_rect: FULL_UV_RECT,
             },
+            is_water: false,
         });
     }
 
@@ -52,6 +54,7 @@ pub fn compose_dynamic_sprites(
                 tint: [0.20, 0.90, 1.00, 0.28],
                 uv_rect: FULL_UV_RECT,
             },
+            is_water: false,
         });
     }
 
@@ -64,6 +67,7 @@ pub fn compose_dynamic_sprites(
                 tint: [1.00, 0.90, 0.20, 0.30],
                 uv_rect: FULL_UV_RECT,
             },
+            is_water: false,
         });
     } else if let Some(Cell { x, z }) = frame.selected_cell {
         out.push(SpriteInstance {
@@ -74,6 +78,7 @@ pub fn compose_dynamic_sprites(
                 tint: [1.00, 0.90, 0.20, 0.30],
                 uv_rect: FULL_UV_RECT,
             },
+            is_water: false,
         });
     }
 
