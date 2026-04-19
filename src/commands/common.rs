@@ -141,6 +141,93 @@ pub fn list_defs(
     println!("shown {shown} defs (limit {limit})");
 }
 
+pub fn run_defs_probe(
+    data_dir: &Path,
+    defs: &DefSet<'_>,
+    resolver: &mut AssetResolver,
+) -> Result<()> {
+    fn probe<T>(
+        label: &str,
+        data_dir: &Path,
+        resolver: &mut AssetResolver,
+        defs: &HashMap<String, T>,
+        name_of: impl Fn(&T) -> &str,
+        tex_of: impl Fn(&T) -> Option<&str>,
+    ) -> Result<()> {
+        let mut rows: Vec<_> = defs.values().collect();
+        rows.sort_by(|a, b| name_of(a).cmp(name_of(b)));
+        let mut decoded = 0usize;
+        let mut fallback = 0usize;
+        let mut skipped = 0usize;
+        for def in &rows {
+            let Some(tex) = tex_of(def) else {
+                skipped += 1;
+                continue;
+            };
+            if tex.is_empty() {
+                skipped += 1;
+                continue;
+            }
+            let resolved = resolver.resolve_texture_path(data_dir, tex)?;
+            if resolved.sprite.used_fallback {
+                fallback += 1;
+            } else {
+                decoded += 1;
+            }
+        }
+        let total = decoded + fallback;
+        let skipped_note = if skipped > 0 {
+            format!(" skipped={skipped}")
+        } else {
+            String::new()
+        };
+        println!("{label:<8} decoded={decoded}/{total} fallback={fallback}{skipped_note}");
+        Ok(())
+    }
+
+    probe(
+        "body",
+        data_dir,
+        resolver,
+        defs.body_type_defs,
+        |d| d.def_name.as_str(),
+        |d| Some(d.body_naked_graphic_path.as_str()),
+    )?;
+    probe(
+        "head",
+        data_dir,
+        resolver,
+        defs.head_type_defs,
+        |d| d.def_name.as_str(),
+        |d| Some(d.graphic_path.as_str()),
+    )?;
+    probe(
+        "hair",
+        data_dir,
+        resolver,
+        defs.hair_defs,
+        |d| d.def_name.as_str(),
+        |d| Some(d.tex_path.as_str()),
+    )?;
+    probe(
+        "beard",
+        data_dir,
+        resolver,
+        defs.beard_defs,
+        |d| d.def_name.as_str(),
+        |d| if d.no_graphic { None } else { Some(d.tex_path.as_str()) },
+    )?;
+    probe(
+        "apparel",
+        data_dir,
+        resolver,
+        defs.apparel_defs,
+        |d| d.def_name.as_str(),
+        |d| Some(d.tex_path.as_str()),
+    )?;
+    Ok(())
+}
+
 pub fn run_terrain_probe(
     data_dir: &Path,
     terrain_defs: &std::collections::HashMap<String, TerrainDef>,

@@ -165,6 +165,7 @@ pub enum DebugCmd {
         #[arg(long, default_value_t = 64)]
         terrain_probe_limit: usize,
     },
+    ProbeDefs,
     ExtractPackedTextures {
         output_dir: PathBuf,
     },

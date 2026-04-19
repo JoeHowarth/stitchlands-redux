@@ -52,6 +52,10 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             )?;
             Ok(CommandAction::Done)
         }
+        DebugCmd::ProbeDefs => {
+            super::common::run_defs_probe(ctx.data_dir, &ctx.defs, ctx.asset_resolver)?;
+            Ok(CommandAction::Done)
+        }
         DebugCmd::PackedDecodeProbe {
             sample_limit,
             min_attempts,
