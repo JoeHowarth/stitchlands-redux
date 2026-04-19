@@ -462,6 +462,46 @@ mod tests {
     }
 
     #[test]
+    fn body_head_hair_beard_z_strictly_increase() {
+        let input = fixture_input();
+        let result = compose_pawn(&input, &PawnComposeConfig::default());
+        let z_for = |kind: crate::pawn::tree::PawnNodeKind| {
+            result
+                .nodes
+                .iter()
+                .find(|n| n.kind == kind)
+                .map(|n| n.z)
+        };
+        let body_z = z_for(crate::pawn::tree::PawnNodeKind::Body).expect("body node");
+        let head_z = z_for(crate::pawn::tree::PawnNodeKind::Head).expect("head node");
+        let hair_z = z_for(crate::pawn::tree::PawnNodeKind::Hair).expect("hair node");
+        let beard_z = z_for(crate::pawn::tree::PawnNodeKind::Beard).expect("beard node");
+        assert!(head_z > body_z, "head_z={head_z} not > body_z={body_z}");
+        assert!(hair_z > head_z, "hair_z={hair_z} not > head_z={head_z}");
+        assert!(beard_z > body_z, "beard_z={beard_z} not > body_z={body_z}");
+    }
+
+    #[test]
+    fn stump_falls_back_above_body_when_head_hidden() {
+        let mut input = fixture_input();
+        input.draw_flags.hide_head = true;
+        input.draw_flags.head_stump = true;
+        let result = compose_pawn(&input, &PawnComposeConfig::default());
+        let body = result
+            .nodes
+            .iter()
+            .find(|n| n.kind == crate::pawn::tree::PawnNodeKind::Body)
+            .expect("body node");
+        let stump = result
+            .nodes
+            .iter()
+            .find(|n| n.kind == crate::pawn::tree::PawnNodeKind::Stump)
+            .expect("stump node");
+        assert!(stump.world_pos.y > body.world_pos.y);
+        assert!(stump.z > body.z);
+    }
+
+    #[test]
     fn non_pack_apparel_uses_humanlike_mesh_base_size() {
         let mut input = fixture_input();
         input.apparel.push(ApparelRenderInput {
