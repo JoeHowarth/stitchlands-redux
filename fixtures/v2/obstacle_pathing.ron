@@ -15,10 +15,12 @@
     ],
   ),
   things: [
-    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 2, blocks_movement: true),
-    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 3, blocks_movement: true),
-    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 4, blocks_movement: true),
-    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 5, blocks_movement: true),
+    // Vertical wall strip — pawns must path around it and the walls link via
+    // CornerFiller into a vertical bar (atlas index 5, N+S bits set).
+    (def_name: "Wall", cell_x: 4, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 4, cell_z: 3, blocks_movement: true),
+    (def_name: "Wall", cell_x: 4, cell_z: 4, blocks_movement: true),
+    (def_name: "Wall", cell_x: 4, cell_z: 5, blocks_movement: true),
   ],
   pawns: [
     (label: "RunnerA", cell_x: 1, cell_z: 1, facing: east),
