@@ -23,8 +23,13 @@ use super::common::{
     apparel_worn_data_for_facing, build_apparel_tex_path, build_full_apparel_layer_override,
     map_explicit_skip_flags, resolve_directional_tex_path,
 };
-use super::linking_sprites::emit_linked_thing_sprites;
+use super::linking_sprites::{emit_linked_thing_sprites, emit_terrain_edge_sprites};
 use super::{CommandAction, DispatchContext, LaunchSpec};
+
+/// RimWorld ships this noise mask as the shared FadeRough / Water alpha
+/// variation. Texture lives packed; the resolver falls back to a 1x1 gray
+/// image if it can't be found, which degrades the edge to a flat fade.
+const ROUGH_ALPHA_ADD_PATH: &str = "Things/Misc/RoughAlphaAdd";
 
 pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<CommandAction> {
     let (should_run_renderer, render_options, hide_window) = crate::cli::render_runtime(&cmd.view);
@@ -42,6 +47,23 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
     }
     let sprites = build_world_sprites(ctx, &world, !ctx.allow_fallback)?;
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
+    let edge_sprites =
+        emit_terrain_edge_sprites(ctx.data_dir, ctx.asset_resolver, &ctx.defs, &world, false)?;
+    let noise_image = {
+        let resolved = ctx
+            .asset_resolver
+            .resolve_texture_path(ctx.data_dir, ROUGH_ALPHA_ADD_PATH)
+            .with_context(|| format!("resolving noise texture '{ROUGH_ALPHA_ADD_PATH}'"))?;
+        if resolved.sprite.used_fallback {
+            warn!(
+                "noise texture '{}' not resolved; using 1x1 gray fallback (FadeRough edges will be flat)",
+                ROUGH_ALPHA_ADD_PATH
+            );
+            crate::renderer::fallback_noise_image()
+        } else {
+            resolved.sprite.image
+        }
+    };
     let blocking_things = world
         .things()
         .iter()
@@ -98,6 +120,8 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites,
         dynamic_sprites,
+        edge_sprites,
+        noise_image,
         runtime: Some(runtime),
         runtime_tick_limit: cmd.ticks,
         screenshot: cmd.view.screenshot,

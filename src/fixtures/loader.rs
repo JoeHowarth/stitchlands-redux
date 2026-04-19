@@ -32,6 +32,25 @@ mod tests {
     }
 
     #[test]
+    fn parses_terrain_mix_fixture() {
+        let path = std::path::Path::new("fixtures/v2/terrain_mix.ron");
+        let fixture = load_fixture(path).expect("terrain_mix.ron should parse");
+        assert_eq!(
+            fixture.map.width * fixture.map.height,
+            fixture.map.terrain.len(),
+            "terrain count must match width*height"
+        );
+        assert!(
+            fixture
+                .map
+                .terrain
+                .iter()
+                .any(|c| c.terrain_def == "WaterDeep"),
+            "terrain_mix must include WaterDeep pocket"
+        );
+    }
+
+    #[test]
     fn parses_walls_patterns_fixture() {
         let path = std::path::Path::new("fixtures/v2/walls_patterns.ron");
         let fixture = load_fixture(path).expect("walls_patterns.ron should parse");

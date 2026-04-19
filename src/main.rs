@@ -56,6 +56,8 @@ fn main() -> Result<()> {
             crate::viewer::run_viewer(crate::viewer::ViewerLaunch {
                 static_sprites: spec.static_sprites,
                 dynamic_sprites: spec.dynamic_sprites,
+                edge_sprites: spec.edge_sprites,
+                noise_image: spec.noise_image,
                 screenshot_path: spec.screenshot,
                 initial_camera_center: spec.camera_focus,
                 renderer_options: spec.render_options,

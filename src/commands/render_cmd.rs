@@ -46,6 +46,8 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         return Ok(CommandAction::Launch(Box::new(LaunchSpec {
             static_sprites: vec![sprite],
             dynamic_sprites: Vec::new(),
+            edge_sprites: Vec::new(),
+            noise_image: crate::renderer::fallback_noise_image(),
             runtime: None,
             runtime_tick_limit: None,
             screenshot: render.view.screenshot,
@@ -212,6 +214,8 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: render_sprites,
         dynamic_sprites: Vec::new(),
+        edge_sprites: Vec::new(),
+        noise_image: crate::renderer::fallback_noise_image(),
         runtime: None,
         runtime_tick_limit: None,
         screenshot: render.view.screenshot,

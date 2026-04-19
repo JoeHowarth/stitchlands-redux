@@ -13,7 +13,8 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::renderer::{
-    Renderer, RendererOptions, SpriteInput, SpriteInstance, SpriteParams, TextureId,
+    EdgeSpriteInput, Renderer, RendererOptions, SpriteInput, SpriteInstance, SpriteParams,
+    TextureId,
 };
 use crate::runtime::v2::{
     InteractionOutcome, V2Runtime,
@@ -31,6 +32,8 @@ pub(crate) struct RenderSprite {
 pub(crate) struct ViewerLaunch {
     pub(crate) static_sprites: Vec<RenderSprite>,
     pub(crate) dynamic_sprites: Vec<RenderSprite>,
+    pub(crate) edge_sprites: Vec<EdgeSpriteInput>,
+    pub(crate) noise_image: RgbaImage,
     pub(crate) screenshot_path: Option<std::path::PathBuf>,
     pub(crate) initial_camera_center: Option<Vec2>,
     pub(crate) renderer_options: RendererOptions,
@@ -50,6 +53,8 @@ pub(crate) fn run_viewer(launch: ViewerLaunch) -> Result<()> {
 struct App {
     static_sprites: Vec<RenderSprite>,
     dynamic_sprites: Vec<RenderSprite>,
+    edge_sprites: Vec<EdgeSpriteInput>,
+    noise_image: RgbaImage,
     screenshot_path: Option<std::path::PathBuf>,
     initial_camera_center: Option<Vec2>,
     screenshot_taken: bool,
@@ -73,6 +78,8 @@ impl App {
         Self {
             static_sprites: launch.static_sprites,
             dynamic_sprites: launch.dynamic_sprites,
+            edge_sprites: launch.edge_sprites,
+            noise_image: launch.noise_image,
             screenshot_path: launch.screenshot_path,
             initial_camera_center: launch.initial_camera_center,
             screenshot_taken: false,
@@ -147,11 +154,16 @@ impl ApplicationHandler for App {
         let renderer = pollster::block_on(Renderer::new(
             window.clone(),
             static_inputs,
+            self.noise_image.clone(),
             self.initial_camera_center,
             self.renderer_options,
         ))
         .expect("create renderer");
         let mut renderer = renderer;
+        let edge_inputs: Vec<EdgeSpriteInput> = self.edge_sprites.drain(..).collect();
+        renderer
+            .set_static_edge_sprites(edge_inputs)
+            .expect("set static edge sprites");
         self.base_dynamic_inputs.clear();
         self.pawn_node_textures.clear();
         self.overlay_texture_id = Some(renderer.register_texture(self.overlay_image.clone()));

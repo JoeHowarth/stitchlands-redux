@@ -7,14 +7,21 @@ use log::warn;
 use crate::assets::AssetResolver;
 use crate::cell::Cell;
 use crate::defs::ThingDef;
-use crate::linking::{LinkDrawerType, LinkFlags, atlas_uv_rect, corner_filler_positions, link_index};
-use crate::renderer::SpriteParams;
+use crate::linking::{
+    LinkDrawerType, LinkFlags, TerrainEdgeType, atlas_uv_rect, corner_filler_positions, link_index,
+};
+use crate::renderer::{EdgeSpriteInput, EdgeSpriteParams, EdgeType, SpriteParams};
 use crate::viewer::RenderSprite;
 use crate::world::{
-    DEPTH_WALL, DEPTH_WALL_CORNER, ThingState, WorldState, cardinal_neighbors, diagonal_neighbors,
+    DEPTH_TERRAIN_EDGE, DEPTH_WALL, DEPTH_WALL_CORNER, ThingState, WorldState, cardinal_neighbors,
+    diagonal_neighbors,
 };
 
 use super::common::DefSet;
+
+/// Step size for per-cell noise-seed offsets. Small irrational increments stop
+/// the RoughAlphaAdd sampler from tiling visibly across cells.
+const EDGE_NOISE_STEP: f32 = 0.31;
 
 /// RimWorld's `Graphic_LinkedCornerFiller` samples a single point (0.5, 0.6)
 /// from the atlas for every corner-quad vertex — degenerate UVs give a
@@ -218,10 +225,143 @@ fn merged_link_flags_at(defs: &DefSet<'_>, world: &WorldState, cell: Cell) -> Li
     merged
 }
 
+/// Pure emission logic: for each cell, collect one contribution per unique
+/// neighboring terrain whose `render_precedence` is strictly greater than the
+/// cell's own. Neighbors with `edge_type == None` are skipped. When the same
+/// neighbor terrain touches multiple cardinal sides, their per-side strengths
+/// are merged into a single contribution's `edge_mask` (N, E, S, W).
+///
+/// Extracted as a pure function so emission tests don't need an asset resolver.
+pub(crate) struct TerrainEdgeContribution {
+    pub cell: Cell,
+    pub neighbor_def_name: String,
+    pub neighbor_texture_path: String,
+    pub edge_mask: [f32; 4],
+    pub edge_type: EdgeType,
+}
+
+pub(crate) fn compute_terrain_edge_contributions(
+    defs: &DefSet<'_>,
+    world: &WorldState,
+) -> Result<Vec<TerrainEdgeContribution>> {
+    let mut out = Vec::new();
+    for z in 0..world.height() {
+        for x in 0..world.width() {
+            let cell = Cell::new(x as i32, z as i32);
+            let Some(self_tile) = world.terrain_at(cell) else {
+                continue;
+            };
+            let self_def = defs
+                .terrain_defs
+                .get(&self_tile.terrain_def)
+                .with_context(|| format!("missing TerrainDef '{}'", self_tile.terrain_def))?;
+
+            let mut accum: Vec<TerrainEdgeContribution> = Vec::new();
+            for (i, neighbor_cell) in cardinal_neighbors(cell).iter().enumerate() {
+                let Some(neighbor_tile) = world.terrain_at(*neighbor_cell) else {
+                    continue;
+                };
+                let neighbor_def = defs
+                    .terrain_defs
+                    .get(&neighbor_tile.terrain_def)
+                    .with_context(|| {
+                        format!("missing TerrainDef '{}'", neighbor_tile.terrain_def)
+                    })?;
+                let edge_type = match neighbor_def.edge_type {
+                    TerrainEdgeType::None => continue,
+                    TerrainEdgeType::Hard => EdgeType::Hard,
+                    TerrainEdgeType::FadeRough => EdgeType::FadeRough,
+                    TerrainEdgeType::Water => EdgeType::Water,
+                };
+                if neighbor_def.render_precedence <= self_def.render_precedence {
+                    continue;
+                }
+                match accum
+                    .iter_mut()
+                    .find(|c| c.neighbor_def_name == neighbor_def.def_name)
+                {
+                    Some(existing) => {
+                        existing.edge_mask[i] = 1.0;
+                    }
+                    None => {
+                        let mut mask = [0.0; 4];
+                        mask[i] = 1.0;
+                        accum.push(TerrainEdgeContribution {
+                            cell,
+                            neighbor_def_name: neighbor_def.def_name.clone(),
+                            neighbor_texture_path: neighbor_def.texture_path.clone(),
+                            edge_mask: mask,
+                            edge_type,
+                        });
+                    }
+                }
+            }
+            out.extend(accum);
+        }
+    }
+    Ok(out)
+}
+
+/// For each cell, emit one overlay sprite per unique neighboring terrain whose
+/// `render_precedence` is strictly greater than the cell's own.
+pub fn emit_terrain_edge_sprites(
+    data_dir: &Path,
+    asset_resolver: &mut AssetResolver,
+    defs: &DefSet<'_>,
+    world: &WorldState,
+    strict_missing: bool,
+) -> Result<Vec<EdgeSpriteInput>> {
+    let contributions = compute_terrain_edge_contributions(defs, world)?;
+    let mut out = Vec::with_capacity(contributions.len());
+    for contribution in contributions {
+        let resolved = asset_resolver
+            .resolve_texture_path(data_dir, &contribution.neighbor_texture_path)
+            .with_context(|| {
+                format!(
+                    "resolving terrain edge texture '{}' for '{}'",
+                    contribution.neighbor_texture_path, contribution.neighbor_def_name
+                )
+            })?;
+        if strict_missing && resolved.sprite.used_fallback {
+            anyhow::bail!(
+                "missing terrain edge texture '{}' for '{}'",
+                contribution.neighbor_texture_path,
+                contribution.neighbor_def_name
+            );
+        }
+        out.push(EdgeSpriteInput {
+            image: resolved.sprite.image,
+            params: EdgeSpriteParams {
+                world_pos: Vec3::new(
+                    contribution.cell.x as f32 + 0.5,
+                    contribution.cell.z as f32 + 0.5,
+                    DEPTH_TERRAIN_EDGE,
+                ),
+                size: Vec2::new(1.0, 1.0),
+                tint: [1.0, 1.0, 1.0, 1.0],
+                edge_mask: contribution.edge_mask,
+                noise_seed: [
+                    contribution.cell.x as f32 * EDGE_NOISE_STEP,
+                    contribution.cell.z as f32 * EDGE_NOISE_STEP,
+                ],
+                edge_type: contribution.edge_type,
+            },
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
-    use crate::defs::{GraphicData, RgbaColor};
+    use crate::defs::{
+        ApparelDef, BeardDefRender, BodyTypeDefRender, GraphicData, HairDefRender,
+        HeadTypeDefRender, RgbaColor, TerrainDef,
+    };
+    use crate::fixtures::{MapSpec, SceneFixture, TerrainCell};
+    use crate::world::world_from_fixture;
 
     fn make_def(def_name: &str, tex_path: &str, graphic_class: Option<&str>) -> ThingDef {
         ThingDef {
@@ -272,5 +412,193 @@ mod tests {
 
         def.graphic_data.link_type = LinkDrawerType::None;
         assert_eq!(effective_link_type(&def), LinkDrawerType::Basic);
+    }
+
+    fn make_terrain(
+        def_name: &str,
+        edge_type: TerrainEdgeType,
+        render_precedence: i32,
+    ) -> TerrainDef {
+        TerrainDef {
+            def_name: def_name.to_string(),
+            texture_path: format!("Terrain/{def_name}"),
+            edge_texture_path: None,
+            edge_type,
+            render_precedence,
+        }
+    }
+
+    fn build_world(width: usize, height: usize, tiles: &[&str]) -> WorldState {
+        assert_eq!(tiles.len(), width * height);
+        world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width,
+                height,
+                terrain: tiles
+                    .iter()
+                    .map(|name| TerrainCell {
+                        terrain_def: (*name).to_string(),
+                    })
+                    .collect(),
+            },
+            things: Vec::new(),
+            pawns: Vec::new(),
+            camera: None,
+        })
+    }
+
+    fn def_set<'a>(
+        thing_defs: &'a HashMap<String, ThingDef>,
+        terrain_defs: &'a HashMap<String, TerrainDef>,
+        apparel_defs: &'a HashMap<String, ApparelDef>,
+        body_type_defs: &'a HashMap<String, BodyTypeDefRender>,
+        head_type_defs: &'a HashMap<String, HeadTypeDefRender>,
+        beard_defs: &'a HashMap<String, BeardDefRender>,
+        hair_defs: &'a HashMap<String, HairDefRender>,
+    ) -> DefSet<'a> {
+        DefSet {
+            thing_defs,
+            terrain_defs,
+            apparel_defs,
+            body_type_defs,
+            head_type_defs,
+            beard_defs,
+            hair_defs,
+        }
+    }
+
+    fn contributions(
+        terrain_defs: &HashMap<String, TerrainDef>,
+        world: &WorldState,
+    ) -> Vec<TerrainEdgeContribution> {
+        let thing_defs = HashMap::new();
+        let apparel_defs = HashMap::new();
+        let body_type_defs = HashMap::new();
+        let head_type_defs = HashMap::new();
+        let beard_defs = HashMap::new();
+        let hair_defs = HashMap::new();
+        let defs = def_set(
+            &thing_defs,
+            terrain_defs,
+            &apparel_defs,
+            &body_type_defs,
+            &head_type_defs,
+            &beard_defs,
+            &hair_defs,
+        );
+        compute_terrain_edge_contributions(&defs, world).expect("contributions")
+    }
+
+    #[test]
+    fn higher_precedence_neighbor_emits_onto_lower() {
+        // 3x3 Soil with a single Concrete in the center (70 > 340 is false, so
+        // Concrete is LOWER than Soil; flip the other way).
+        // Actually: Soil=340 FadeRough, Concrete=70 Hard. Soil fades onto
+        // Concrete. Here we put Concrete in center (precedence 70), ring of
+        // Soil — Soil should emit onto Concrete (which has lower precedence).
+        let mut defs = HashMap::new();
+        defs.insert("Soil".to_string(), make_terrain("Soil", TerrainEdgeType::FadeRough, 340));
+        defs.insert("Concrete".to_string(), make_terrain("Concrete", TerrainEdgeType::Hard, 70));
+
+        let world = build_world(
+            3,
+            3,
+            &[
+                "Soil", "Soil", "Soil", //
+                "Soil", "Concrete", "Soil", //
+                "Soil", "Soil", "Soil",
+            ],
+        );
+
+        let contribs = contributions(&defs, &world);
+        // Only the center cell (Concrete) sees a higher-precedence neighbor —
+        // Soil on all 4 cardinals. All four are the same def "Soil", so they
+        // collapse into a single contribution with mask=[1,1,1,1].
+        assert_eq!(contribs.len(), 1);
+        let c = &contribs[0];
+        assert_eq!(c.cell, Cell::new(1, 1));
+        assert_eq!(c.neighbor_def_name, "Soil");
+        assert_eq!(c.edge_mask, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(c.edge_type, EdgeType::FadeRough);
+    }
+
+    #[test]
+    fn equal_precedence_emits_no_edges() {
+        let mut defs = HashMap::new();
+        defs.insert(
+            "Soil".to_string(),
+            make_terrain("Soil", TerrainEdgeType::FadeRough, 340),
+        );
+        // Two distinct defs sharing the same precedence.
+        defs.insert(
+            "Sand".to_string(),
+            make_terrain("Sand", TerrainEdgeType::FadeRough, 340),
+        );
+
+        let world = build_world(2, 1, &["Soil", "Sand"]);
+        assert!(contributions(&defs, &world).is_empty());
+    }
+
+    #[test]
+    fn neighbor_with_edge_type_none_skipped() {
+        let mut defs = HashMap::new();
+        defs.insert(
+            "Underwall".to_string(),
+            make_terrain("Underwall", TerrainEdgeType::None, 0),
+        );
+        defs.insert(
+            "Soil".to_string(),
+            make_terrain("Soil", TerrainEdgeType::FadeRough, 340),
+        );
+        let world = build_world(2, 1, &["Underwall", "Soil"]);
+        // Soil (340) > Underwall (0), but Soil touching Underwall emits onto
+        // Underwall (precedence 0). Soil has edge_type FadeRough, so the
+        // Underwall cell (0,0) sees a higher-precedence Soil neighbor E ->
+        // emit. Symmetric direction (Soil sees Underwall with edge_type None
+        // on W): nothing emitted.
+        let contribs = contributions(&defs, &world);
+        assert_eq!(contribs.len(), 1);
+        assert_eq!(contribs[0].cell, Cell::new(0, 0));
+        assert_eq!(contribs[0].neighbor_def_name, "Soil");
+        // Only E is set (index 1).
+        assert_eq!(contribs[0].edge_mask, [0.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn distinct_neighbor_defs_produce_separate_contributions() {
+        let mut defs = HashMap::new();
+        defs.insert(
+            "Concrete".to_string(),
+            make_terrain("Concrete", TerrainEdgeType::Hard, 70),
+        );
+        defs.insert(
+            "Soil".to_string(),
+            make_terrain("Soil", TerrainEdgeType::FadeRough, 340),
+        );
+        defs.insert(
+            "Water".to_string(),
+            make_terrain("Water", TerrainEdgeType::Water, 394),
+        );
+        // 3x1: Soil | Concrete | Water. Concrete is center; Soil (340) > 70
+        // and Water (394) > 70, both emit separate contributions onto it.
+        let world = build_world(3, 1, &["Soil", "Concrete", "Water"]);
+        let contribs = contributions(&defs, &world);
+        assert_eq!(contribs.len(), 2);
+        let mut seen: Vec<_> = contribs
+            .iter()
+            .map(|c| (c.cell, c.neighbor_def_name.as_str(), c.edge_mask, c.edge_type))
+            .collect();
+        seen.sort_by(|a, b| a.1.cmp(b.1));
+        // Soil neighbor on W of Concrete (1,0): mask[3]=1.0 (W index).
+        assert_eq!(seen[0].0, Cell::new(1, 0));
+        assert_eq!(seen[0].1, "Soil");
+        assert_eq!(seen[0].2, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(seen[0].3, EdgeType::FadeRough);
+        // Water neighbor on E of Concrete (1,0): mask[1]=1.0 (E index).
+        assert_eq!(seen[1].0, Cell::new(1, 0));
+        assert_eq!(seen[1].1, "Water");
+        assert_eq!(seen[1].2, [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(seen[1].3, EdgeType::Water);
     }
 }

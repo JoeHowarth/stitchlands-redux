@@ -2,8 +2,9 @@ use crate::cell::Cell;
 
 #[cfg(test)]
 use super::ThingState;
-use super::WorldState;
+use super::{TerrainTile, WorldState};
 
+pub const DEPTH_TERRAIN_EDGE: f32 = -0.95;
 pub const DEPTH_WALL: f32 = -0.70;
 pub const DEPTH_WALL_CORNER: f32 = -0.69;
 
@@ -42,6 +43,10 @@ impl WorldState {
             Some(idx) => &self.thing_grid[idx],
             None => &[],
         }
+    }
+
+    pub fn terrain_at(&self, cell: Cell) -> Option<&TerrainTile> {
+        self.cell_index(cell).map(|idx| &self.terrain[idx])
     }
 
     #[cfg(test)]
