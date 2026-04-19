@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use log::info;
+use log::{info, warn};
 use unity_asset::environment::EnvironmentObjectRef;
 use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
@@ -37,27 +37,29 @@ impl PackedTextureIndex {
         }
 
         let built = Self::build(roots, typetree_registries, signature)?;
-        built.save(cache_path)?;
-        info!(
-            "rebuilt packed texture index cache: {} (names={} container={})",
-            cache_path.display(),
-            built.names.len(),
-            built.container_paths.len()
-        );
+        match built.save(cache_path) {
+            Ok(()) => info!(
+                "rebuilt packed texture index cache: {} (names={} container={})",
+                cache_path.display(),
+                built.names.len(),
+                built.container_paths.len()
+            ),
+            Err(err) => warn!(
+                "rebuilt packed texture index in memory but failed to save cache {}: {err}",
+                cache_path.display()
+            ),
+        }
         Ok(built)
     }
 
     pub fn search_names(&self, query: &str, limit: usize) -> Vec<String> {
         let needle = query.to_ascii_lowercase();
-        let mut matches: Vec<String> = self
-            .names
+        self.names
             .iter()
             .filter(|name| name.contains(&needle))
             .take(limit)
             .cloned()
-            .collect();
-        matches.sort();
-        matches
+            .collect()
     }
 
     pub fn maybe_contains(&self, tex_path: &str) -> bool {
@@ -83,8 +85,8 @@ impl PackedTextureIndex {
 
     pub fn maybe_contains_folder(&self, tex_path: &str) -> bool {
         crate::assets::variants::variants_for(tex_path, crate::defs::GraphicKind::Random)
-            .folder_prefix()
-            .is_some_and(|path| self.container_paths.contains(path.trim_end_matches('/')))
+            .folder_key()
+            .is_some_and(|path| self.container_paths.contains(&path))
     }
 
     #[cfg(test)]
@@ -405,6 +407,23 @@ mod tests {
             ],
         );
         assert!(index.maybe_contains_folder("Things/Item/Chunk/ChunkSlag"));
+    }
+
+    #[test]
+    fn load_or_build_succeeds_when_cache_save_fails() {
+        let root = std::env::temp_dir().join(format!(
+            "stitchlands-packed-index-save-failure-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let index =
+            PackedTextureIndex::load_or_build(std::slice::from_ref(&root), &[], &root, false)
+                .unwrap();
+        assert!(index.search_names("steel", 5).is_empty());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

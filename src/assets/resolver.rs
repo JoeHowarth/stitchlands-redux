@@ -21,7 +21,7 @@ impl AssetResolver {
         texture_roots: Vec<PathBuf>,
         packed_roots: Vec<PathBuf>,
         typetree_registries: Vec<PathBuf>,
-        packed_index: Option<PackedTextureIndex>,
+        packed_index: PackedTextureIndex,
     ) -> Self {
         Self {
             loose: LooseFiles::new(core_data_dir, texture_roots),
@@ -72,7 +72,7 @@ impl AssetResolver {
         self.resolve(TextureQuery::for_thing(thing_def, variant_index))
     }
 
-    pub fn search_packed_names(&self, query: &str, limit: usize) -> Option<Vec<String>> {
+    pub fn search_packed_names(&self, query: &str, limit: usize) -> Vec<String> {
         self.packed.search_names(query, limit)
     }
 
@@ -127,7 +127,7 @@ pub struct PackedDecodeProbeOutcome {
 pub struct PackedCatalog {
     packed_roots: Vec<PathBuf>,
     typetree_registries: Vec<PathBuf>,
-    index: Option<PackedTextureIndex>,
+    index: PackedTextureIndex,
     resolver: Option<PackedTextureResolver>,
     build_attempted: bool,
     build_fn: Box<BuildPackedResolverFn>,
@@ -146,7 +146,7 @@ impl PackedCatalog {
     fn new(
         packed_roots: Vec<PathBuf>,
         typetree_registries: Vec<PathBuf>,
-        index: Option<PackedTextureIndex>,
+        index: PackedTextureIndex,
     ) -> Self {
         Self {
             packed_roots,
@@ -167,7 +167,7 @@ impl PackedCatalog {
         Self {
             packed_roots,
             typetree_registries,
-            index: None,
+            index: PackedTextureIndex::from_parts(&[], &[]),
             resolver: None,
             build_attempted: false,
             build_fn,
@@ -182,27 +182,19 @@ impl PackedCatalog {
         &self.typetree_registries
     }
 
-    fn search_names(&self, query: &str, limit: usize) -> Option<Vec<String>> {
-        self.index
-            .as_ref()
-            .map(|index| index.search_names(query, limit))
+    fn search_names(&self, query: &str, limit: usize) -> Vec<String> {
+        self.index.search_names(query, limit)
     }
 
     fn can_try(&self, tex_path: &str) -> bool {
-        self.index
-            .as_ref()
-            .map(|index| index.maybe_contains(tex_path))
-            .unwrap_or(true)
+        self.index.maybe_contains(tex_path)
     }
 
     fn can_try_query(&self, query: &TextureQuery) -> bool {
-        self.index
-            .as_ref()
-            .map(|index| match Self::prefilter_for(query) {
-                PackedPrefilter::Folder => index.maybe_contains_folder(query.tex_path),
-                PackedPrefilter::Texture => index.maybe_contains(query.tex_path),
-            })
-            .unwrap_or(true)
+        match Self::prefilter_for(query) {
+            PackedPrefilter::Folder => self.index.maybe_contains_folder(query.tex_path),
+            PackedPrefilter::Texture => self.index.maybe_contains(query.tex_path),
+        }
     }
 
     fn prefilter_for(query: &TextureQuery) -> PackedPrefilter {
@@ -430,10 +422,8 @@ mod tests {
     #[test]
     fn can_try_query_respects_selected_prefilter() {
         let mut catalog = PackedCatalog::with_builder(vec![], vec![], Box::new(|_, _| Ok(None)));
-        catalog.index = Some(PackedTextureIndex::from_parts(
-            &["steel_a"],
-            &["textures/things/item/chunk/chunkslag"],
-        ));
+        catalog.index =
+            PackedTextureIndex::from_parts(&["steel_a"], &["textures/things/item/chunk/chunkslag"]);
 
         assert!(catalog.can_try_query(&TextureQuery {
             tex_path: "Things/Item/Chunk/ChunkSlag",

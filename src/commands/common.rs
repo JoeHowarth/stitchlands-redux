@@ -39,14 +39,11 @@ pub fn run_extract_packed_textures(
 }
 
 pub fn print_packed_texture_search(resolver: &AssetResolver, query: &str, limit: usize) {
-    if let Some(matches) = resolver.search_packed_names(query, limit) {
-        for name in &matches {
-            println!("{name}");
-        }
-        println!("matched {} packed texture names", matches.len());
-    } else {
-        println!("no packed texture index loaded");
+    let matches = resolver.search_packed_names(query, limit);
+    for name in &matches {
+        println!("{name}");
     }
+    println!("matched {} packed texture names", matches.len());
 }
 
 pub fn diagnose_textures(data_dir: &Path, texture_roots: &[PathBuf], packed_roots: &[PathBuf]) {
@@ -464,4 +461,3 @@ pub(crate) fn build_full_apparel_layer_override(
         }
     })
 }
-

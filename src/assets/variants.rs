@@ -49,8 +49,12 @@ impl<'a> TextureVariants<'a> {
     }
 
     pub fn folder_prefix(&self) -> Option<String> {
+        self.folder_key().map(|key| format!("{key}/"))
+    }
+
+    pub fn folder_key(&self) -> Option<String> {
         if self.kind.is_random() {
-            Some(format!("{}/", self.prefixed_lower()))
+            Some(self.prefixed_lower())
         } else {
             None
         }
@@ -91,10 +95,15 @@ mod tests {
     fn folder_prefix_only_for_random() {
         let s = variants_for("Things/Item/Chunk/ChunkSlag", GraphicKind::Single);
         assert_eq!(s.folder_prefix(), None);
+        assert_eq!(s.folder_key(), None);
         let r = variants_for("Things/Item/Chunk/ChunkSlag", GraphicKind::Random);
         assert_eq!(
             r.folder_prefix().as_deref(),
             Some("textures/things/item/chunk/chunkslag/")
+        );
+        assert_eq!(
+            r.folder_key().as_deref(),
+            Some("textures/things/item/chunk/chunkslag")
         );
     }
 }

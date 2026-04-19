@@ -31,7 +31,6 @@ pub struct AssetSetupOptions {
     pub auto_typetree: bool,
     pub packed_index_path: Option<PathBuf>,
     pub rebuild_packed_index: bool,
-    pub disable_packed_index: bool,
 }
 
 pub fn prepare_asset_setup(options: AssetSetupOptions) -> Result<AssetSetup> {
@@ -59,19 +58,15 @@ pub fn prepare_asset_setup(options: AssetSetupOptions) -> Result<AssetSetup> {
         options.auto_typetree,
     );
 
-    let packed_index = if options.disable_packed_index {
-        None
-    } else {
-        let cache_path = options
-            .packed_index_path
-            .unwrap_or_else(default_packed_index_path);
-        Some(packed_index::PackedTextureIndex::load_or_build(
-            &packed_roots,
-            &typetree_registries,
-            &cache_path,
-            options.rebuild_packed_index,
-        )?)
-    };
+    let cache_path = options
+        .packed_index_path
+        .unwrap_or_else(default_packed_index_path);
+    let packed_index = packed_index::PackedTextureIndex::load_or_build(
+        &packed_roots,
+        &typetree_registries,
+        &cache_path,
+        options.rebuild_packed_index,
+    )?;
 
     let resolver = AssetResolver::new(
         data_dir.clone(),
