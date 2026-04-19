@@ -115,7 +115,9 @@ impl TerrainEdgeType {
 
 /// 4×4 atlas layout: each subimage is 3/16 wide with a 1/32 margin inside its
 /// 1/4 quarter of the texture. Index 0 = bottom-left (Unity UV origin); index
-/// 15 = top-right.
+/// 15 = top-right. RimWorld's PNG is authored with Unity's bottom-left UV
+/// origin, but our sampler uses top-left origin (image-crate row-0-first +
+/// quad `uv.y=0` at north), so the v row is flipped on lookup.
 pub const ATLAS_SUBIMAGE_SIZE: f32 = 0.1875; // 3 / 16
 pub const ATLAS_SUBIMAGE_MARGIN: f32 = 0.03125; // 1 / 32
 
@@ -126,7 +128,7 @@ pub fn atlas_uv_rect(index: u8) -> [f32; 4] {
     let col = (index % 4) as f32;
     let row = (index / 4) as f32;
     let u_min = col * 0.25 + ATLAS_SUBIMAGE_MARGIN;
-    let v_min = row * 0.25 + ATLAS_SUBIMAGE_MARGIN;
+    let v_min = (3.0 - row) * 0.25 + ATLAS_SUBIMAGE_MARGIN;
     [
         u_min,
         v_min,
@@ -228,16 +230,19 @@ mod tests {
 
     #[test]
     fn atlas_uv_rect_has_expected_size_and_margin() {
+        // Index 0 = bottom-left visually = Unity row 0 = PNG's *bottom* row,
+        // which in our top-left-origin UV space lives at v_min = 0.75 + margin.
         let rect = atlas_uv_rect(0);
         assert!((rect[0] - ATLAS_SUBIMAGE_MARGIN).abs() < 1e-6);
-        assert!((rect[1] - ATLAS_SUBIMAGE_MARGIN).abs() < 1e-6);
+        assert!((rect[1] - (0.75 + ATLAS_SUBIMAGE_MARGIN)).abs() < 1e-6);
         assert!((rect[2] - rect[0] - ATLAS_SUBIMAGE_SIZE).abs() < 1e-6);
         assert!((rect[3] - rect[1] - ATLAS_SUBIMAGE_SIZE).abs() < 1e-6);
 
-        // Index 15 is top-right in a 4x4 grid (col=3, row=3).
+        // Index 15 = top-right visually = Unity row 3 = PNG's *top* row,
+        // which in our top-left-origin UV space lives at v_min = margin.
         let last = atlas_uv_rect(15);
         assert!((last[0] - (0.75 + ATLAS_SUBIMAGE_MARGIN)).abs() < 1e-6);
-        assert!((last[1] - (0.75 + ATLAS_SUBIMAGE_MARGIN)).abs() < 1e-6);
+        assert!((last[1] - ATLAS_SUBIMAGE_MARGIN).abs() < 1e-6);
     }
 
     #[test]
