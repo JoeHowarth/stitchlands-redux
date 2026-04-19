@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use glam::Vec2;
 
 use crate::cell::Cell;
-use crate::renderer::{SpriteInstance, SpriteParams, TextureId};
+use crate::renderer::{FULL_UV_RECT, SpriteInstance, SpriteParams, TextureId};
 
 use super::V2FrameOutput;
 
@@ -38,6 +38,7 @@ pub fn compose_dynamic_sprites(
                 world_pos: glam::Vec3::new(cell.x as f32 + 0.5, cell.z as f32 + 0.5, -0.23),
                 size: Vec2::new(0.36, 0.36),
                 tint: [0.35, 1.00, 0.45, 0.65],
+                uv_rect: FULL_UV_RECT,
             },
         });
     }
@@ -49,6 +50,7 @@ pub fn compose_dynamic_sprites(
                 world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.22),
                 size: Vec2::new(1.04, 1.04),
                 tint: [0.20, 0.90, 1.00, 0.28],
+                uv_rect: FULL_UV_RECT,
             },
         });
     }
@@ -60,6 +62,7 @@ pub fn compose_dynamic_sprites(
                 world_pos: glam::Vec3::new(selected_pos.x, selected_pos.y, -0.21),
                 size: Vec2::new(1.16, 1.16),
                 tint: [1.00, 0.90, 0.20, 0.30],
+                uv_rect: FULL_UV_RECT,
             },
         });
     } else if let Some(Cell { x, z }) = frame.selected_cell {
@@ -69,6 +72,7 @@ pub fn compose_dynamic_sprites(
                 world_pos: glam::Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.21),
                 size: Vec2::new(1.10, 1.10),
                 tint: [1.00, 0.90, 0.20, 0.30],
+                uv_rect: FULL_UV_RECT,
             },
         });
     }

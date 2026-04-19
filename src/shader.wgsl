@@ -17,6 +17,7 @@ struct VsIn {
   @location(2) world_pos: vec3<f32>,
   @location(3) size: vec2<f32>,
   @location(4) tint: vec4<f32>,
+  @location(5) uv_rect: vec4<f32>,
 };
 
 struct VsOut {
@@ -34,7 +35,7 @@ fn vs_main(in: VsIn) -> VsOut {
     in.world_pos.z
   );
   out.clip_pos = camera.view_proj * vec4<f32>(world, 1.0);
-  out.uv = in.uv;
+  out.uv = mix(in.uv_rect.xy, in.uv_rect.zw, in.uv);
   out.tint = in.tint;
   return out;
 }

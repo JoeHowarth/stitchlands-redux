@@ -95,6 +95,7 @@ struct InstanceData {
     size: [f32; 2],
     _pad1: [f32; 2],
     tint: [f32; 4],
+    uv_rect: [f32; 4],
 }
 
 impl InstanceData {
@@ -105,6 +106,7 @@ impl InstanceData {
             size: [params.size.x, params.size.y],
             _pad1: [0.0, 0.0],
             tint: params.tint,
+            uv_rect: params.uv_rect,
         }
     }
 
@@ -126,6 +128,11 @@ impl InstanceData {
                 wgpu::VertexAttribute {
                     offset: 32,
                     shader_location: 4,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 48,
+                    shader_location: 5,
                     format: wgpu::VertexFormat::Float32x4,
                 },
             ],
@@ -819,11 +826,18 @@ pub struct SpriteInstance {
     pub params: SpriteParams,
 }
 
+/// UV sub-rect `(u_min, v_min, u_max, v_max)` covering the full texture.
+/// For atlas-indexed sprites, use `linking::atlas_uv_rect` or similar helpers.
+pub const FULL_UV_RECT: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+
 #[derive(Debug, Clone)]
 pub struct SpriteParams {
     pub world_pos: Vec3,
     pub size: Vec2,
     pub tint: [f32; 4],
+    /// Sub-rect of the texture to sample, as `(u_min, v_min, u_max, v_max)`.
+    /// Use `FULL_UV_RECT` for whole-texture sampling.
+    pub uv_rect: [f32; 4],
 }
 
 #[derive(Debug, Clone, Copy)]

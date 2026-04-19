@@ -13,7 +13,7 @@ use crate::pawn::{
     ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
     PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
 };
-use crate::renderer::SpriteParams;
+use crate::renderer::{FULL_UV_RECT, SpriteParams};
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
 use crate::viewer::RenderSprite;
 use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
@@ -152,6 +152,7 @@ fn build_world_sprites(
                     world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -1.0),
                     size: Vec2::new(1.0, 1.0),
                     tint: [1.0, 1.0, 1.0, 1.0],
+                    uv_rect: FULL_UV_RECT,
                 },
                 used_fallback: resolved.sprite.used_fallback,
                 pawn_id: None,
@@ -200,6 +201,7 @@ fn build_world_sprites(
                     thing_def.graphic_data.color.b,
                     thing_def.graphic_data.color.a,
                 ],
+                uv_rect: FULL_UV_RECT,
             },
             used_fallback: resolved.sprite.used_fallback,
             pawn_id: None,
@@ -311,6 +313,7 @@ fn build_world_sprites(
                     world_pos: node.world_pos,
                     size: node.size,
                     tint: node.tint,
+                    uv_rect: FULL_UV_RECT,
                 },
                 used_fallback: resolved.sprite.used_fallback,
                 pawn_id: Some(pawn.id),
@@ -483,7 +486,7 @@ mod tests {
     use image::{Rgba, RgbaImage};
 
     use super::{RenderSprite, validate_layer_ownership};
-    use crate::renderer::SpriteParams;
+    use crate::renderer::{FULL_UV_RECT, SpriteParams};
 
     fn sprite(def_name: &str) -> RenderSprite {
         RenderSprite {
@@ -493,6 +496,7 @@ mod tests {
                 world_pos: Vec3::new(0.5, 0.5, 0.0),
                 size: Vec2::ONE,
                 tint: [1.0, 1.0, 1.0, 1.0],
+                uv_rect: FULL_UV_RECT,
             },
             used_fallback: false,
             pawn_id: None,

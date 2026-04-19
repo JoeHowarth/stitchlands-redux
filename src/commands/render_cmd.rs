@@ -3,7 +3,7 @@ use glam::Vec3;
 use log::{info, warn};
 
 use crate::cli::RenderCmd;
-use crate::renderer::SpriteParams;
+use crate::renderer::{FULL_UV_RECT, SpriteParams};
 
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
@@ -23,6 +23,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                 world_pos: Vec3::new(render.cell_x + 0.5, render.cell_z + 0.5, 0.0),
                 size: Vec3::new(render.scale, render.scale, 0.0).truncate(),
                 tint: render.tint,
+                uv_rect: FULL_UV_RECT,
             },
             used_fallback: false,
             pawn_id: None,
@@ -197,6 +198,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                 world_pos,
                 size,
                 tint,
+                uv_rect: FULL_UV_RECT,
             },
             used_fallback: resolved.sprite.used_fallback,
             pawn_id: None,
