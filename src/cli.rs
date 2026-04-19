@@ -134,6 +134,15 @@ pub enum DebugCmd {
         #[arg(long, default_value_t = 8)]
         min_attempts: usize,
     },
+    PackedClassProbe {
+        #[arg(long, default_value_t = 5)]
+        sample_limit: usize,
+    },
+    SearchPackedContainer {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        search_limit: usize,
+    },
     ValidateFixture {
         path: PathBuf,
     },

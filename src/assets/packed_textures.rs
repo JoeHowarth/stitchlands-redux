@@ -5,6 +5,7 @@ use anyhow::Result;
 use image::RgbaImage;
 use log::{info, warn};
 use unity_asset::environment::{BinaryObjectKey, Environment, EnvironmentObjectRef};
+use unity_asset_core::UnityValue;
 use unity_asset_core::constants::class_ids;
 use unity_asset_decode::texture::Texture2DConverter;
 use unity_asset_decode::unity_version::UnityVersion;
@@ -103,11 +104,7 @@ impl PackedTextureResolver {
             }
         }
 
-        let container_index: Vec<(String, BinaryObjectKey)> = env
-            .find_binary_object_keys_in_bundle_container("")
-            .into_iter()
-            .map(|(path, key)| (path.to_ascii_lowercase(), key))
-            .collect();
+        let container_index = collect_container_paths(&env);
 
         info!(
             "packed texture index built: {} Texture2D objects, {} named entries, {} container entries",
@@ -221,6 +218,68 @@ impl PackedTextureResolver {
         Ok(None)
     }
 
+    pub fn search_container_paths(&self, query: &str, limit: usize) -> Vec<String> {
+        let q = query.to_ascii_lowercase();
+        self.container_index
+            .iter()
+            .filter(|(path, _)| path.contains(&q))
+            .take(limit)
+            .map(|(path, _)| path.clone())
+            .collect()
+    }
+
+    pub fn run_class_id_probe(&self, sample_limit: usize) {
+        let mut histogram: HashMap<i32, usize> = HashMap::new();
+        for obj in self.env.objects() {
+            let EnvironmentObjectRef::Binary(binary) = obj else {
+                continue;
+            };
+            *histogram.entry(binary.object.class_id()).or_insert(0) += 1;
+        }
+
+        let mut rows: Vec<(i32, usize)> = histogram.into_iter().collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+
+        info!("packed class-id histogram ({} distinct classes):", rows.len());
+        for (class_id, count) in &rows {
+            let name = unity_asset_core::get_class_name_str(*class_id).unwrap_or("Unknown");
+            info!("  class {:>4} ({:<24}) = {}", class_id, name, count);
+        }
+
+        info!("sampling up to {} class-147 (ResourceManager) objects:", sample_limit);
+        let mut sampled = 0usize;
+        for obj in self.env.objects() {
+            let EnvironmentObjectRef::Binary(binary) = obj else {
+                continue;
+            };
+            if binary.object.class_id() != 147 {
+                continue;
+            }
+            sampled += 1;
+            match binary.read() {
+                Ok(parsed) => {
+                    let field_names: Vec<&String> = parsed.class.property_names().collect();
+                    info!("  class-147 #{sampled} fields: {:?}", field_names);
+                    if let Some(UnityValue::Array(items)) = parsed.class.get("m_Container") {
+                        info!("  class-147 #{sampled} m_Container entries: {}", items.len());
+                        for (i, item) in items.iter().take(5).enumerate() {
+                            info!("    [{i}] {:?}", item);
+                        }
+                    } else {
+                        info!("  class-147 #{sampled} has no m_Container field");
+                    }
+                }
+                Err(e) => {
+                    info!("  class-147 #{sampled} read error: {e}");
+                }
+            }
+            if sampled >= sample_limit {
+                break;
+            }
+        }
+        info!("class-147 objects sampled: {}", sampled);
+    }
+
     pub fn decode_health_sample(&self, sample_limit: usize) -> PackedDecodeHealth {
         let mut names: Vec<_> = self.keys_by_name.keys().cloned().collect();
         names.sort();
@@ -325,6 +384,87 @@ impl PackedTextureResolver {
             .map(|(_, path, key)| (path, key))
             .collect()
     }
+}
+
+const RESOURCE_MANAGER_CLASS_ID: i32 = 147;
+
+pub(crate) fn collect_container_paths(env: &Environment) -> Vec<(String, BinaryObjectKey)> {
+    let mut out: Vec<(String, BinaryObjectKey)> = env
+        .find_binary_object_keys_in_bundle_container("")
+        .into_iter()
+        .map(|(path, key)| (path.to_ascii_lowercase(), key))
+        .collect();
+    out.extend(extract_resource_manager_container(env));
+    out
+}
+
+fn extract_resource_manager_container(env: &Environment) -> Vec<(String, BinaryObjectKey)> {
+    let mut out = Vec::new();
+    for obj in env.objects() {
+        let EnvironmentObjectRef::Binary(binary) = obj else {
+            continue;
+        };
+        if binary.object.class_id() != RESOURCE_MANAGER_CLASS_ID {
+            continue;
+        }
+        let parsed = match binary.read() {
+            Ok(p) => p,
+            Err(err) => {
+                warn!("failed to read ResourceManager (class 147) object: {err}");
+                continue;
+            }
+        };
+        let Some(UnityValue::Array(items)) = parsed.class.get("m_Container") else {
+            continue;
+        };
+
+        for item in items {
+            let Some((path, pptr)) = extract_container_pair(item) else {
+                continue;
+            };
+            let Some((file_id, path_id)) = scan_pptr(pptr) else {
+                continue;
+            };
+            if path_id == 0 {
+                continue;
+            }
+            if let Some(key) = env.resolve_binary_pptr(&binary, file_id, path_id) {
+                out.push((path.to_ascii_lowercase(), key));
+            }
+        }
+    }
+    out
+}
+
+fn extract_container_pair(item: &UnityValue) -> Option<(String, &UnityValue)> {
+    match item {
+        UnityValue::Array(pair) if pair.len() == 2 => {
+            let first = pair[0].as_str()?.to_string();
+            Some((first, &pair[1]))
+        }
+        UnityValue::Object(obj) => {
+            let first = obj.get("first").and_then(|v| v.as_str())?.to_string();
+            let second = obj.get("second").or_else(|| obj.get("value"))?;
+            Some((first, second))
+        }
+        _ => None,
+    }
+}
+
+fn scan_pptr(value: &UnityValue) -> Option<(i32, i64)> {
+    let UnityValue::Object(obj) = value else {
+        return None;
+    };
+    let file_id = obj
+        .get("fileID")
+        .or_else(|| obj.get("m_FileID"))
+        .and_then(|v| v.as_i64())
+        .and_then(|v| i32::try_from(v).ok())?;
+    let path_id = obj
+        .get("pathID")
+        .or_else(|| obj.get("m_PathID"))
+        .and_then(|v| v.as_i64())?;
+    Some((file_id, path_id))
 }
 
 pub fn extract_all_packed_textures(

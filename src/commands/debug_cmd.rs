@@ -80,6 +80,28 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             }
             Ok(CommandAction::Done)
         }
+        DebugCmd::SearchPackedContainer {
+            query,
+            search_limit,
+        } => {
+            match ctx.asset_resolver.search_packed_container(&query, search_limit)? {
+                Some(paths) => {
+                    info!("{} container paths match '{query}':", paths.len());
+                    for path in paths {
+                        info!("  {path}");
+                    }
+                }
+                None => warn!("search-packed-container: no packed roots loaded"),
+            }
+            Ok(CommandAction::Done)
+        }
+        DebugCmd::PackedClassProbe { sample_limit } => {
+            let ran = ctx.asset_resolver.run_packed_class_probe(sample_limit)?;
+            if !ran {
+                warn!("packed class probe: no packed roots loaded");
+            }
+            Ok(CommandAction::Done)
+        }
         DebugCmd::ValidateFixture { path } => {
             let fixture = crate::fixtures::load_fixture(&path)?;
             info!(

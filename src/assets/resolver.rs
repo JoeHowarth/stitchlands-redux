@@ -104,6 +104,25 @@ impl AssetResolver {
         Ok(probe)
     }
 
+    pub fn search_packed_container(
+        &mut self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Option<Vec<String>>> {
+        let Some(resolver) = self.packed_resolver_state.get()? else {
+            return Ok(None);
+        };
+        Ok(Some(resolver.search_container_paths(query, limit)))
+    }
+
+    pub fn run_packed_class_probe(&mut self, sample_limit: usize) -> Result<bool> {
+        let Some(resolver) = self.packed_resolver_state.get()? else {
+            return Ok(false);
+        };
+        resolver.run_class_id_probe(sample_limit);
+        Ok(true)
+    }
+
     pub fn run_packed_decode_probe(
         &mut self,
         sample_limit: usize,
