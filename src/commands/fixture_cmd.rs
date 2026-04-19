@@ -25,9 +25,12 @@ use super::linking_sprites::{emit_linked_thing_sprites, emit_terrain_edge_sprite
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
 /// RimWorld ships this noise mask as the shared FadeRough / Water alpha
-/// variation. Texture lives packed; the resolver falls back to a 1x1 gray
-/// image if it can't be found, which degrades the edge to a flat fade.
-const ROUGH_ALPHA_ADD_PATH: &str = "Things/Misc/RoughAlphaAdd";
+/// variation. Path matches `Verse/TexGame.cs:20`
+/// (`ContentFinder<Texture2D>.Get("Other/RoughAlphaAdd")`). The packed
+/// resolver matches on basename so the prefix is not load-bearing, but we
+/// keep the RimWorld-native path to stay searchable against the decompile.
+/// Fallback is a 1x1 gray image; in that case FadeRough edges flatten.
+const ROUGH_ALPHA_ADD_PATH: &str = "Other/RoughAlphaAdd";
 
 pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<CommandAction> {
     let (should_run_renderer, render_options, hide_window) = crate::cli::render_runtime(&cmd.view);
