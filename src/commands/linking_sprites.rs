@@ -467,6 +467,8 @@ mod tests {
             edge_texture_path: None,
             edge_type,
             render_precedence,
+            water_depth_shader: None,
+            water_depth_shader_parameters: Vec::new(),
         }
     }
 

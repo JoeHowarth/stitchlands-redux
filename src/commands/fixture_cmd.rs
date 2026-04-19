@@ -15,6 +15,7 @@ use crate::pawn::{
 use crate::renderer::{FULL_UV_RECT, SpriteParams};
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
 use crate::viewer::RenderSprite;
+use crate::water_assets::WaterAssets;
 use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
 
 use super::common::{
@@ -108,6 +109,8 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
             compose_config: ctx.compose_config.clone(),
         },
     );
+
+    WaterAssets::load(ctx.asset_resolver)?;
 
     if !should_run_renderer {
         let tick_limit = cmd.ticks.unwrap_or(0);

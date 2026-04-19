@@ -12,6 +12,7 @@ mod pawn;
 mod renderer;
 mod runtime;
 mod viewer;
+mod water_assets;
 mod world;
 
 use anyhow::Result;

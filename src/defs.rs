@@ -118,6 +118,8 @@ pub struct TerrainDef {
     pub edge_texture_path: Option<String>,
     pub edge_type: TerrainEdgeType,
     pub render_precedence: i32,
+    pub water_depth_shader: Option<String>,
+    pub water_depth_shader_parameters: Vec<(String, f32)>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -554,6 +556,8 @@ struct RawTerrainDef {
     edge_texture_path: Option<String>,
     edge_type: Option<TerrainEdgeType>,
     render_precedence: Option<i32>,
+    water_depth_shader: Option<String>,
+    water_depth_shader_parameters: Option<Vec<(String, f32)>>,
 }
 
 fn parse_doc_terrain_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawTerrainDef>) {
@@ -572,6 +576,20 @@ fn parse_doc_terrain_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawTerrai
                 }
             }
         });
+        let water_depth_shader_parameters = node
+            .children()
+            .find(|child| child.has_tag_name("waterDepthShaderParameters"))
+            .map(|container| {
+                container
+                    .children()
+                    .filter(Node::is_element)
+                    .filter_map(|param| {
+                        let name = param.tag_name().name().to_string();
+                        let value = param.text()?.trim().parse::<f32>().ok()?;
+                        Some((name, value))
+                    })
+                    .collect::<Vec<_>>()
+            });
         let record = RawTerrainDef {
             parent_name: node.attribute("ParentName").map(str::to_string),
             def_name,
@@ -588,6 +606,8 @@ fn parse_doc_terrain_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawTerrai
             edge_type,
             render_precedence: child_text(node, "renderPrecedence")
                 .and_then(|value| value.parse::<i32>().ok()),
+            water_depth_shader: child_text(node, "waterDepthShader").map(str::to_string),
+            water_depth_shader_parameters,
         };
         raw.insert(key, record);
     }
@@ -645,6 +665,17 @@ fn resolve_terrain_defs_from_raw(
             render_precedence: raw
                 .render_precedence
                 .or_else(|| parent.as_ref().and_then(|p| p.render_precedence)),
+            water_depth_shader: raw
+                .water_depth_shader
+                .clone()
+                .or_else(|| parent.as_ref().and_then(|p| p.water_depth_shader.clone())),
+            water_depth_shader_parameters: raw.water_depth_shader_parameters.clone().or_else(
+                || {
+                    parent
+                        .as_ref()
+                        .and_then(|p| p.water_depth_shader_parameters.clone())
+                },
+            ),
         };
         stack.pop();
         cache.insert(key.to_string(), merged.clone());
@@ -675,6 +706,10 @@ fn resolve_terrain_defs_from_raw(
                 edge_texture_path: merged.edge_texture_path,
                 edge_type: merged.edge_type.unwrap_or_default(),
                 render_precedence: merged.render_precedence.unwrap_or(0),
+                water_depth_shader: merged.water_depth_shader,
+                water_depth_shader_parameters: merged
+                    .water_depth_shader_parameters
+                    .unwrap_or_default(),
             },
         );
     }
@@ -1307,6 +1342,47 @@ mod tests {
         );
         let orphan = defs.get("Orphan").unwrap();
         assert_eq!(orphan.texture_path, "Terrain/Orphan");
+    }
+
+    #[test]
+    fn parses_water_depth_shader_and_parameters() {
+        // WaterMovingChestDeep in the real XML inherits waterDepthShader from
+        // WaterChestDeepBase and sets _UseWaterOffset=1 on its own node. The
+        // resolver should carry the parent shader string and the child's own
+        // parameter list through to the leaf.
+        let defs = parse_terrain_xml(
+            r#"
+        <Defs>
+            <TerrainDef Abstract="True" Name="WaterChestDeepBase">
+                <waterDepthShader>Map/WaterDepth</waterDepthShader>
+                <texturePath>Terrain/Surfaces/WaterChestDeepRamp</texturePath>
+            </TerrainDef>
+            <TerrainDef ParentName="WaterChestDeepBase">
+                <defName>WaterMovingChestDeep</defName>
+                <waterDepthShaderParameters>
+                    <_UseWaterOffset>1</_UseWaterOffset>
+                </waterDepthShaderParameters>
+            </TerrainDef>
+            <TerrainDef>
+                <defName>WaterShallow</defName>
+                <texturePath>Terrain/Surfaces/WaterShallowRamp</texturePath>
+                <waterDepthShader>Map/WaterDepth</waterDepthShader>
+            </TerrainDef>
+        </Defs>
+        "#,
+        );
+        let moving = defs.get("WaterMovingChestDeep").unwrap();
+        assert_eq!(moving.water_depth_shader.as_deref(), Some("Map/WaterDepth"));
+        assert_eq!(
+            moving.water_depth_shader_parameters,
+            vec![("_UseWaterOffset".to_string(), 1.0)]
+        );
+        let shallow = defs.get("WaterShallow").unwrap();
+        assert_eq!(
+            shallow.water_depth_shader.as_deref(),
+            Some("Map/WaterDepth")
+        );
+        assert!(shallow.water_depth_shader_parameters.is_empty());
     }
 
     #[test]

@@ -4,6 +4,7 @@ use log::{info, warn};
 
 use crate::cli::RenderCmd;
 use crate::renderer::{FULL_UV_RECT, SpriteParams};
+use crate::water_assets::WaterAssets;
 
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
@@ -43,6 +44,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             return Ok(CommandAction::Done);
         }
 
+        WaterAssets::load(ctx.asset_resolver)?;
         return Ok(CommandAction::Launch(Box::new(LaunchSpec {
             static_sprites: vec![sprite],
             dynamic_sprites: Vec::new(),
@@ -211,6 +213,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         return Ok(CommandAction::Done);
     }
 
+    WaterAssets::load(ctx.asset_resolver)?;
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: render_sprites,
         dynamic_sprites: Vec::new(),
