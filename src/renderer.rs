@@ -37,7 +37,7 @@ pub struct Renderer {
     texture_images: HashMap<TextureId, RgbaImage>,
     static_instances: Vec<SpriteInstance>,
     dynamic_instances: Vec<SpriteInstance>,
-    edge_instances: Vec<EdgeSpriteInstance>,
+    edge_fans: Vec<EdgeFanInstance>,
     next_texture_id: u32,
     sprite_batches: Vec<SpriteBatch>,
     edge_sprite_batches: Vec<EdgeSpriteBatch>,
@@ -59,8 +59,9 @@ struct SpriteBatch {
 
 struct EdgeSpriteBatch {
     texture_id: TextureId,
-    instance_buffer: wgpu::Buffer,
-    instance_count: u32,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
     min_z: f32,
     first_index: usize,
     texture_hash: u64,
@@ -408,31 +409,25 @@ impl Renderer {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let noise_bind_group = create_noise_bind_group(
-            &device,
-            &queue,
-            &noise_layout,
-            &noise_sampler,
-            &noise_image,
-        );
+        let noise_bind_group =
+            create_noise_bind_group(&device, &queue, &noise_layout, &noise_sampler, &noise_image);
 
         let edge_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("edge-shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("edge_shader.wgsl"))),
         });
-        let edge_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("edge-pipeline-layout"),
-                bind_group_layouts: &[&camera_layout, &texture_layout, &noise_layout],
-                push_constant_ranges: &[],
-            });
+        let edge_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("edge-pipeline-layout"),
+            bind_group_layouts: &[&camera_layout, &texture_layout, &noise_layout],
+            push_constant_ranges: &[],
+        });
         let edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("edge-pipeline"),
             layout: Some(&edge_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &edge_shader,
                 entry_point: "vs_main",
-                buffers: &[Vertex::desc(), EdgeInstanceData::desc()],
+                buffers: &[EdgeVertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -474,7 +469,7 @@ impl Renderer {
             texture_images: HashMap::new(),
             static_instances: Vec::new(),
             dynamic_instances: Vec::new(),
-            edge_instances: Vec::new(),
+            edge_fans: Vec::new(),
             next_texture_id: 1,
             sprite_batches: Vec::new(),
             edge_sprite_batches: Vec::new(),
@@ -604,14 +599,14 @@ impl Renderer {
     }
 
     pub fn set_static_edge_sprites(&mut self, sprites: Vec<EdgeSpriteInput>) -> Result<()> {
-        let instances: Vec<EdgeSpriteInstance> = sprites
+        let fans: Vec<EdgeFanInstance> = sprites
             .into_iter()
-            .map(|sprite| EdgeSpriteInstance {
+            .map(|sprite| EdgeFanInstance {
                 texture_id: self.register_texture(sprite.image),
-                params: sprite.params,
+                fan: sprite.fan,
             })
             .collect();
-        self.edge_instances = instances;
+        self.edge_fans = fans;
         self.rebuild_edge_batches()
     }
 
@@ -696,38 +691,55 @@ impl Renderer {
     }
 
     fn rebuild_edge_batches(&mut self) -> Result<()> {
-        let mut grouped: HashMap<TextureId, Vec<(usize, EdgeInstanceData)>> = HashMap::new();
-        for (index, sprite) in self.edge_instances.iter().enumerate() {
+        let mut grouped: HashMap<TextureId, Vec<(usize, EdgeFan)>> = HashMap::new();
+        for (index, fan) in self.edge_fans.iter().enumerate() {
             grouped
-                .entry(sprite.texture_id)
+                .entry(fan.texture_id)
                 .or_default()
-                .push((index, EdgeInstanceData::from_params(&sprite.params)));
+                .push((index, fan.fan.clone()));
         }
 
         let mut edge_batches = Vec::with_capacity(grouped.len());
-        for (texture_id, mut instances) in grouped {
-            instances.sort_by(|a, b| {
-                a.1.world_pos[2]
-                    .total_cmp(&b.1.world_pos[2])
+        for (texture_id, mut fans) in grouped {
+            fans.sort_by(|a, b| {
+                a.1.vertices[0].world_pos[2]
+                    .total_cmp(&b.1.vertices[0].world_pos[2])
                     .then_with(|| a.0.cmp(&b.0))
             });
-            let min_z = instances
+            let min_z = fans
                 .iter()
-                .map(|(_, instance)| instance.world_pos[2])
+                .map(|(_, f)| f.vertices[0].world_pos[2])
                 .fold(f32::INFINITY, f32::min);
-            let first_index = instances.first().map(|(idx, _)| *idx).unwrap_or(usize::MAX);
-            let packed: Vec<EdgeInstanceData> = instances.into_iter().map(|(_, d)| d).collect();
-            let instance_buffer =
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("edge-instance-buffer"),
-                        contents: bytemuck::cast_slice(&packed),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+            let first_index = fans.first().map(|(idx, _)| *idx).unwrap_or(usize::MAX);
+
+            let mut vertices: Vec<EdgeVertex> = Vec::with_capacity(fans.len() * 9);
+            let mut indices: Vec<u32> = Vec::with_capacity(fans.len() * FAN_TRI_INDICES.len());
+            for (i, (_, fan)) in fans.iter().enumerate() {
+                let base = (i * 9) as u32;
+                vertices.extend_from_slice(&fan.vertices);
+                for &tri in FAN_TRI_INDICES.iter() {
+                    indices.push(base + tri);
+                }
+            }
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("edge-vertex-buffer"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let index_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("edge-index-buffer"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
             edge_batches.push(EdgeSpriteBatch {
                 texture_id,
-                instance_buffer,
-                instance_count: packed.len() as u32,
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
                 min_z,
                 first_index,
                 texture_hash: texture_id.0 as u64,
@@ -821,26 +833,21 @@ impl Renderer {
             });
 
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
             #[derive(Clone, Copy)]
             enum DrawKind {
                 Base,
                 Edge,
             }
-            let mut drawables: Vec<(f32, usize, usize, DrawKind)> = Vec::with_capacity(
-                self.sprite_batches.len() + self.edge_sprite_batches.len(),
-            );
+            let mut drawables: Vec<(f32, usize, usize, DrawKind)> =
+                Vec::with_capacity(self.sprite_batches.len() + self.edge_sprite_batches.len());
             for (i, batch) in self.sprite_batches.iter().enumerate() {
                 drawables.push((batch.min_z, batch.first_index, i, DrawKind::Base));
             }
             for (i, batch) in self.edge_sprite_batches.iter().enumerate() {
                 drawables.push((batch.min_z, batch.first_index, i, DrawKind::Edge));
             }
-            drawables.sort_by(|a, b| {
-                a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1))
-            });
+            drawables.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
             let mut current: Option<DrawKind> = None;
             for (_, _, idx, kind) in drawables {
@@ -850,7 +857,14 @@ impl Renderer {
                 );
                 if need_switch {
                     match kind {
-                        DrawKind::Base => pass.set_pipeline(&self.pipeline),
+                        DrawKind::Base => {
+                            pass.set_pipeline(&self.pipeline);
+                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                            pass.set_index_buffer(
+                                self.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                        }
                         DrawKind::Edge => {
                             pass.set_pipeline(&self.edge_pipeline);
                             pass.set_bind_group(2, &self.noise_bind_group, &[]);
@@ -876,8 +890,12 @@ impl Renderer {
                             .get(&batch.texture_id)
                             .context("missing texture bind group for edge batch")?;
                         pass.set_bind_group(1, texture_bind_group, &[]);
-                        pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
-                        pass.draw_indexed(0..self.num_indices, 0, 0..batch.instance_count);
+                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            batch.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        pass.draw_indexed(0..batch.index_count, 0, 0..1);
                     }
                 }
             }
@@ -1031,100 +1049,93 @@ pub struct SpriteInstance {
 /// For atlas-indexed sprites, use `linking::atlas_uv_rect` or similar helpers.
 pub const FULL_UV_RECT: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
-/// Edge-overlay sprite submitted to the edge pipeline. The image is the
-/// neighbor terrain's base texture; the shader reshapes it with `edge_mask`
-/// fades and an `edge_type`-specific alpha curve (Hard / FadeRough / Water).
+/// Edge-overlay fan submitted to the edge pipeline. The image is the
+/// neighbor terrain's base texture; the fan's per-vertex `alpha` drives a
+/// radial fade from the matching perimeter verts toward the center.
 #[derive(Debug, Clone)]
 pub struct EdgeSpriteInput {
     pub image: RgbaImage,
-    pub params: EdgeSpriteParams,
+    pub fan: EdgeFan,
 }
 
 #[derive(Debug, Clone)]
-pub struct EdgeSpriteInstance {
+pub struct EdgeFanInstance {
     pub texture_id: TextureId,
-    pub params: EdgeSpriteParams,
+    pub fan: EdgeFan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeType {
-    Hard = 0,
     FadeRough = 1,
     Water = 2,
 }
 
+/// Triangle indices (per fan) for the 8 fan triangles (m, (m+1)%8, 8).
+pub const FAN_TRI_INDICES: [u32; 24] = [
+    0, 1, 8, 1, 2, 8, 2, 3, 8, 3, 4, 8, 4, 5, 8, 5, 6, 8, 6, 7, 8, 7, 0, 8,
+];
+
+/// 9-vertex fan for a single overlay contribution. Vertex order is
+/// (0 S mid, 1 SW, 2 W mid, 3 NW, 4 N mid, 5 NE, 6 E mid, 7 SE, 8 center).
+/// Center alpha is always 0.
 #[derive(Debug, Clone)]
-pub struct EdgeSpriteParams {
-    pub world_pos: Vec3,
-    pub size: Vec2,
-    pub tint: [f32; 4],
-    /// Per-edge strength in [0, 1] for N, E, S, W in that order.
-    pub edge_mask: [f32; 4],
-    /// World-space seed so adjacent cells sample the noise at different
-    /// offsets and the mask doesn't tile visibly.
-    pub noise_seed: [f32; 2],
-    pub edge_type: EdgeType,
+pub struct EdgeFan {
+    pub vertices: [EdgeVertex; 9],
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct EdgeInstanceData {
-    world_pos: [f32; 3],
-    _pad0: f32,
-    size: [f32; 2],
-    _pad1: [f32; 2],
-    edge_mask: [f32; 4],
-    tint: [f32; 4],
-    edge_params: [f32; 4],
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
+pub struct EdgeVertex {
+    pub world_pos: [f32; 3],
+    pub uv: [f32; 2],
+    pub alpha: f32,
+    pub noise_seed: [f32; 2],
+    pub tint: [f32; 4],
+    pub edge_type: u32,
+    pub _pad: u32,
 }
 
-impl EdgeInstanceData {
-    fn from_params(params: &EdgeSpriteParams) -> Self {
-        Self {
-            world_pos: [params.world_pos.x, params.world_pos.y, params.world_pos.z],
-            _pad0: 0.0,
-            size: [params.size.x, params.size.y],
-            _pad1: [0.0, 0.0],
-            edge_mask: params.edge_mask,
-            tint: params.tint,
-            edge_params: [
-                params.noise_seed[0],
-                params.noise_seed[1],
-                params.edge_type as u32 as f32,
-                0.0,
-            ],
-        }
-    }
-
+impl EdgeVertex {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<EdgeInstanceData>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
+            array_stride: std::mem::size_of::<EdgeVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
+                // world_pos
                 wgpu::VertexAttribute {
                     offset: 0,
-                    shader_location: 2,
+                    shader_location: 0,
                     format: wgpu::VertexFormat::Float32x3,
                 },
+                // uv
                 wgpu::VertexAttribute {
-                    offset: 16,
+                    offset: 12,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                // alpha
+                wgpu::VertexAttribute {
+                    offset: 20,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                // noise_seed
+                wgpu::VertexAttribute {
+                    offset: 24,
                     shader_location: 3,
                     format: wgpu::VertexFormat::Float32x2,
                 },
+                // tint
                 wgpu::VertexAttribute {
                     offset: 32,
                     shader_location: 4,
                     format: wgpu::VertexFormat::Float32x4,
                 },
+                // edge_type
                 wgpu::VertexAttribute {
                     offset: 48,
                     shader_location: 5,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: 64,
-                    shader_location: 6,
-                    format: wgpu::VertexFormat::Float32x4,
+                    format: wgpu::VertexFormat::Uint32,
                 },
             ],
         }

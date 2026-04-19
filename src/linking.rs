@@ -160,10 +160,7 @@ pub fn link_index(self_flags: LinkFlags, neighbor_flags: [Option<LinkFlags>; 4])
 /// neighbors link AND the diagonal cell itself links. Inputs are in the same
 /// orderings as `CARDINAL_OFFSETS` (N, E, S, W) and `DIAGONAL_OFFSETS` (NE,
 /// SE, SW, NW).
-pub fn corner_filler_positions(
-    cardinal_links: [bool; 4],
-    diagonal_links: [bool; 4],
-) -> [bool; 4] {
+pub fn corner_filler_positions(cardinal_links: [bool; 4], diagonal_links: [bool; 4]) -> [bool; 4] {
     // NE needs N(0) & E(1); SE needs S(2) & E(1); SW needs S(2) & W(3); NW needs N(0) & W(3).
     [
         cardinal_links[0] && cardinal_links[1] && diagonal_links[0],
@@ -171,6 +168,38 @@ pub fn corner_filler_positions(
         cardinal_links[2] && cardinal_links[3] && diagonal_links[2],
         cardinal_links[0] && cardinal_links[3] && diagonal_links[3],
     ]
+}
+
+/// Perimeter vertex alphas derived from which of the 8 surrounding cells
+/// match the overlay def. Input order matches
+/// `crate::world::NEIGHBOR_8_OFFSETS` (S, SW, W, NW, N, NE, E, SE). Output
+/// order matches the fan's perimeter vertex layout
+/// (0 S mid, 1 SW, 2 W mid, 3 NW, 4 N mid, 5 NE, 6 E mid, 7 SE).
+///
+/// Mirrors `Verse/SectionLayer_Terrain.cs:112-127`: a cardinal match
+/// lights the cardinal midpoint plus both flanking corners (3 verts); a
+/// diagonal match lights only its corner.
+pub fn perimeter_alphas_from_neighbor_matches(matches: [bool; 8]) -> [f32; 8] {
+    let mut lit = [false; 8];
+    for (k, &m) in matches.iter().enumerate() {
+        if !m {
+            continue;
+        }
+        if k % 2 == 0 {
+            lit[(k + 7) % 8] = true;
+            lit[k] = true;
+            lit[(k + 1) % 8] = true;
+        } else {
+            lit[k] = true;
+        }
+    }
+    let mut out = [0.0f32; 8];
+    for i in 0..8 {
+        if lit[i] {
+            out[i] = 1.0;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -201,8 +230,14 @@ mod tests {
 
     #[test]
     fn link_drawer_type_parse() {
-        assert_eq!(LinkDrawerType::from_token("None"), Some(LinkDrawerType::None));
-        assert_eq!(LinkDrawerType::from_token("Basic"), Some(LinkDrawerType::Basic));
+        assert_eq!(
+            LinkDrawerType::from_token("None"),
+            Some(LinkDrawerType::None)
+        );
+        assert_eq!(
+            LinkDrawerType::from_token("Basic"),
+            Some(LinkDrawerType::Basic)
+        );
         assert_eq!(
             LinkDrawerType::from_token("CornerFiller"),
             Some(LinkDrawerType::CornerFiller)
@@ -224,7 +259,10 @@ mod tests {
             TerrainEdgeType::from_token("Water"),
             Some(TerrainEdgeType::Water)
         );
-        assert_eq!(TerrainEdgeType::from_token("None"), Some(TerrainEdgeType::None));
+        assert_eq!(
+            TerrainEdgeType::from_token("None"),
+            Some(TerrainEdgeType::None)
+        );
         assert!(TerrainEdgeType::from_token("bogus").is_none());
     }
 
@@ -256,32 +294,17 @@ mod tests {
         let self_flags = LinkFlags::WALL;
         let w = LinkFlags::WALL;
         // No neighbors link.
-        assert_eq!(
-            link_index(self_flags, [Some(LinkFlags::EMPTY); 4]),
-            0
-        );
+        assert_eq!(link_index(self_flags, [Some(LinkFlags::EMPTY); 4]), 0);
         // All four cardinals link -> 0b1111 = 15.
         assert_eq!(link_index(self_flags, [Some(w); 4]), 15);
         // Only N -> 1.
-        assert_eq!(
-            link_index(self_flags, [Some(w), None, None, None]),
-            1
-        );
+        assert_eq!(link_index(self_flags, [Some(w), None, None, None]), 1);
         // Only E -> 2.
-        assert_eq!(
-            link_index(self_flags, [None, Some(w), None, None]),
-            2
-        );
+        assert_eq!(link_index(self_flags, [None, Some(w), None, None]), 2);
         // Only S -> 4.
-        assert_eq!(
-            link_index(self_flags, [None, None, Some(w), None]),
-            4
-        );
+        assert_eq!(link_index(self_flags, [None, None, Some(w), None]), 4);
         // Only W -> 8.
-        assert_eq!(
-            link_index(self_flags, [None, None, None, Some(w)]),
-            8
-        );
+        assert_eq!(link_index(self_flags, [None, None, None, Some(w)]), 8);
     }
 
     #[test]
@@ -296,10 +319,7 @@ mod tests {
     #[test]
     fn link_index_mismatched_flags_dont_link() {
         // Wall next to Sandbags: no overlap -> no link.
-        let idx = link_index(
-            LinkFlags::WALL,
-            [Some(LinkFlags::SANDBAGS); 4],
-        );
+        let idx = link_index(LinkFlags::WALL, [Some(LinkFlags::SANDBAGS); 4]);
         assert_eq!(idx, 0);
 
         // Wall next to Wall|Rock: overlap on WALL -> all link.
@@ -311,12 +331,63 @@ mod tests {
     }
 
     #[test]
+    fn cardinal_south_match_fills_s_mid_and_flanking_corners() {
+        let alphas = perimeter_alphas_from_neighbor_matches([
+            true, false, false, false, false, false, false, false,
+        ]);
+        let mut expected = [0.0; 8];
+        expected[7] = 1.0;
+        expected[0] = 1.0;
+        expected[1] = 1.0;
+        assert_eq!(alphas, expected);
+    }
+
+    #[test]
+    fn diagonal_nw_match_fills_only_nw_corner() {
+        let alphas = perimeter_alphas_from_neighbor_matches([
+            false, false, false, true, false, false, false, false,
+        ]);
+        let mut expected = [0.0; 8];
+        expected[3] = 1.0;
+        assert_eq!(alphas, expected);
+    }
+
+    #[test]
+    fn full_8_ring_match_fills_all_perimeter() {
+        let alphas = perimeter_alphas_from_neighbor_matches([true; 8]);
+        assert_eq!(alphas, [1.0; 8]);
+    }
+
+    #[test]
+    fn two_adjacent_cardinals_fill_shared_corner_once() {
+        // S (k=0) and W (k=2): S lights 7,0,1; W lights 1,2,3.
+        let alphas = perimeter_alphas_from_neighbor_matches([
+            true, false, true, false, false, false, false, false,
+        ]);
+        let mut expected = [0.0; 8];
+        for i in [7, 0, 1, 2, 3] {
+            expected[i] = 1.0;
+        }
+        assert_eq!(alphas, expected);
+    }
+
+    #[test]
+    fn isolated_diagonal_without_cardinals_leaves_cardinal_slot_clear() {
+        // NE (k=5) only: lights vert 5. N mid (4) and E mid (6) stay clear.
+        let alphas = perimeter_alphas_from_neighbor_matches([
+            false, false, false, false, false, true, false, false,
+        ]);
+        let mut expected = [0.0; 8];
+        expected[5] = 1.0;
+        assert_eq!(alphas, expected);
+        assert_eq!(alphas[4], 0.0);
+        assert_eq!(alphas[6], 0.0);
+    }
+
+    #[test]
     fn corner_filler_all_four_when_plus_surrounded() {
         // N, E, S, W all link, and all four diagonals link -> all four corners fill.
-        assert_eq!(
-            corner_filler_positions([true; 4], [true; 4]),
-            [true; 4]
-        );
+        assert_eq!(corner_filler_positions([true; 4], [true; 4]), [true; 4]);
     }
 
     #[test]
@@ -333,9 +404,6 @@ mod tests {
             [false, true, true, true]
         );
         // No orthogonals link -> no corner fills even with diagonals present.
-        assert_eq!(
-            corner_filler_positions([false; 4], [true; 4]),
-            [false; 4]
-        );
+        assert_eq!(corner_filler_positions([false; 4], [true; 4]), [false; 4]);
     }
 }

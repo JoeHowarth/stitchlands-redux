@@ -15,12 +15,29 @@ const CARDINAL_OFFSETS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
 /// Order: NE, SE, SW, NW.
 const DIAGONAL_OFFSETS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, -1), (-1, 1)];
 
+/// 8-neighbor offsets in RimWorld's `GenAdj.AdjacentCellsAroundBottom` order:
+/// S, SW, W, NW, N, NE, E, SE. See `Verse/SectionLayer_Terrain.cs:71-90`.
+pub const NEIGHBOR_8_OFFSETS: [(i32, i32); 8] = [
+    (0, -1),
+    (-1, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, 1),
+    (1, 1),
+    (1, 0),
+    (1, -1),
+];
+
 pub fn cardinal_neighbors(cell: Cell) -> [Cell; 4] {
     CARDINAL_OFFSETS.map(|(dx, dz)| Cell::new(cell.x + dx, cell.z + dz))
 }
 
 pub fn diagonal_neighbors(cell: Cell) -> [Cell; 4] {
     DIAGONAL_OFFSETS.map(|(dx, dz)| Cell::new(cell.x + dx, cell.z + dz))
+}
+
+pub fn neighbors_8(cell: Cell) -> [Cell; 8] {
+    NEIGHBOR_8_OFFSETS.map(|(dx, dz)| Cell::new(cell.x + dx, cell.z + dz))
 }
 
 impl WorldState {

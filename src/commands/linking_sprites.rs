@@ -9,12 +9,13 @@ use crate::cell::Cell;
 use crate::defs::ThingDef;
 use crate::linking::{
     LinkDrawerType, LinkFlags, TerrainEdgeType, atlas_uv_rect, corner_filler_positions, link_index,
+    perimeter_alphas_from_neighbor_matches,
 };
-use crate::renderer::{EdgeSpriteInput, EdgeSpriteParams, EdgeType, SpriteParams};
+use crate::renderer::{EdgeFan, EdgeSpriteInput, EdgeType, EdgeVertex, SpriteParams};
 use crate::viewer::RenderSprite;
 use crate::world::{
     DEPTH_TERRAIN_EDGE, DEPTH_WALL, DEPTH_WALL_CORNER, ThingState, WorldState, cardinal_neighbors,
-    diagonal_neighbors,
+    diagonal_neighbors, neighbors_8,
 };
 
 use super::common::DefSet;
@@ -226,17 +227,17 @@ fn merged_link_flags_at(defs: &DefSet<'_>, world: &WorldState, cell: Cell) -> Li
 }
 
 /// Pure emission logic: for each cell, collect one contribution per unique
-/// neighboring terrain whose `render_precedence` is strictly greater than the
-/// cell's own. Neighbors with `edge_type == None` are skipped. When the same
-/// neighbor terrain touches multiple cardinal sides, their per-side strengths
-/// are merged into a single contribution's `edge_mask` (N, E, S, W).
+/// neighboring terrain whose `render_precedence >= self.render_precedence`
+/// (matching RimWorld's `Verse/SectionLayer_Terrain.cs:86`) and whose
+/// `edge_type` is not `None` or `Hard`. Multiple neighbor slots sharing the
+/// same def merge into a single contribution.
 ///
 /// Extracted as a pure function so emission tests don't need an asset resolver.
 pub(crate) struct TerrainEdgeContribution {
     pub cell: Cell,
     pub neighbor_def_name: String,
     pub neighbor_texture_path: String,
-    pub edge_mask: [f32; 4],
+    pub perimeter_alphas: [f32; 8],
     pub edge_type: EdgeType,
 }
 
@@ -244,6 +245,13 @@ pub(crate) fn compute_terrain_edge_contributions(
     defs: &DefSet<'_>,
     world: &WorldState,
 ) -> Result<Vec<TerrainEdgeContribution>> {
+    struct Accum {
+        neighbor_def_name: String,
+        neighbor_texture_path: String,
+        edge_type: EdgeType,
+        matches: [bool; 8],
+    }
+
     let mut out = Vec::new();
     for z in 0..world.height() {
         for x in 0..world.width() {
@@ -256,8 +264,8 @@ pub(crate) fn compute_terrain_edge_contributions(
                 .get(&self_tile.terrain_def)
                 .with_context(|| format!("missing TerrainDef '{}'", self_tile.terrain_def))?;
 
-            let mut accum: Vec<TerrainEdgeContribution> = Vec::new();
-            for (i, neighbor_cell) in cardinal_neighbors(cell).iter().enumerate() {
+            let mut accum: Vec<Accum> = Vec::new();
+            for (i, neighbor_cell) in neighbors_8(cell).iter().enumerate() {
                 let Some(neighbor_tile) = world.terrain_at(*neighbor_cell) else {
                     continue;
                 };
@@ -267,13 +275,15 @@ pub(crate) fn compute_terrain_edge_contributions(
                     .with_context(|| {
                         format!("missing TerrainDef '{}'", neighbor_tile.terrain_def)
                     })?;
+                if neighbor_def.def_name == self_def.def_name {
+                    continue;
+                }
                 let edge_type = match neighbor_def.edge_type {
-                    TerrainEdgeType::None => continue,
-                    TerrainEdgeType::Hard => EdgeType::Hard,
+                    TerrainEdgeType::None | TerrainEdgeType::Hard => continue,
                     TerrainEdgeType::FadeRough => EdgeType::FadeRough,
                     TerrainEdgeType::Water => EdgeType::Water,
                 };
-                if neighbor_def.render_precedence <= self_def.render_precedence {
+                if neighbor_def.render_precedence < self_def.render_precedence {
                     continue;
                 }
                 match accum
@@ -281,29 +291,51 @@ pub(crate) fn compute_terrain_edge_contributions(
                     .find(|c| c.neighbor_def_name == neighbor_def.def_name)
                 {
                     Some(existing) => {
-                        existing.edge_mask[i] = 1.0;
+                        existing.matches[i] = true;
                     }
                     None => {
-                        let mut mask = [0.0; 4];
-                        mask[i] = 1.0;
-                        accum.push(TerrainEdgeContribution {
-                            cell,
+                        let mut matches = [false; 8];
+                        matches[i] = true;
+                        accum.push(Accum {
                             neighbor_def_name: neighbor_def.def_name.clone(),
                             neighbor_texture_path: neighbor_def.texture_path.clone(),
-                            edge_mask: mask,
                             edge_type,
+                            matches,
                         });
                     }
                 }
             }
-            out.extend(accum);
+            for a in accum {
+                out.push(TerrainEdgeContribution {
+                    cell,
+                    neighbor_def_name: a.neighbor_def_name,
+                    neighbor_texture_path: a.neighbor_texture_path,
+                    perimeter_alphas: perimeter_alphas_from_neighbor_matches(a.matches),
+                    edge_type: a.edge_type,
+                });
+            }
         }
     }
     Ok(out)
 }
 
-/// For each cell, emit one overlay sprite per unique neighboring terrain whose
-/// `render_precedence` is strictly greater than the cell's own.
+/// Cell-local positions of the 9 fan vertices. Index layout matches
+/// `crate::linking::perimeter_alphas_from_neighbor_matches`:
+/// 0 S mid, 1 SW, 2 W mid, 3 NW, 4 N mid, 5 NE, 6 E mid, 7 SE, 8 center.
+const FAN_LOCAL_XY: [(f32, f32); 9] = [
+    (0.5, 0.0),
+    (0.0, 0.0),
+    (0.0, 0.5),
+    (0.0, 1.0),
+    (0.5, 1.0),
+    (1.0, 1.0),
+    (1.0, 0.5),
+    (1.0, 0.0),
+    (0.5, 0.5),
+];
+
+/// For each cell, emit one fan per unique neighboring terrain whose
+/// `render_precedence >= self.render_precedence`.
 pub fn emit_terrain_edge_sprites(
     data_dir: &Path,
     asset_resolver: &mut AssetResolver,
@@ -329,23 +361,32 @@ pub fn emit_terrain_edge_sprites(
                 contribution.neighbor_def_name
             );
         }
+        let cell_x = contribution.cell.x as f32;
+        let cell_z = contribution.cell.z as f32;
+        let noise_seed = [cell_x * EDGE_NOISE_STEP, cell_z * EDGE_NOISE_STEP];
+        let edge_type = contribution.edge_type as u32;
+        let tint = [1.0, 1.0, 1.0, 1.0];
+
+        let mut vertices = [EdgeVertex::default(); 9];
+        for (i, &(lx, ly)) in FAN_LOCAL_XY.iter().enumerate() {
+            let alpha = if i < 8 {
+                contribution.perimeter_alphas[i]
+            } else {
+                0.0
+            };
+            vertices[i] = EdgeVertex {
+                world_pos: [cell_x + lx, cell_z + ly, DEPTH_TERRAIN_EDGE],
+                uv: [lx, 1.0 - ly],
+                alpha,
+                noise_seed,
+                tint,
+                edge_type,
+                _pad: 0,
+            };
+        }
         out.push(EdgeSpriteInput {
             image: resolved.sprite.image,
-            params: EdgeSpriteParams {
-                world_pos: Vec3::new(
-                    contribution.cell.x as f32 + 0.5,
-                    contribution.cell.z as f32 + 0.5,
-                    DEPTH_TERRAIN_EDGE,
-                ),
-                size: Vec2::new(1.0, 1.0),
-                tint: [1.0, 1.0, 1.0, 1.0],
-                edge_mask: contribution.edge_mask,
-                noise_seed: [
-                    contribution.cell.x as f32 * EDGE_NOISE_STEP,
-                    contribution.cell.z as f32 * EDGE_NOISE_STEP,
-                ],
-                edge_type: contribution.edge_type,
-            },
+            fan: EdgeFan { vertices },
         });
     }
     Ok(out)
@@ -490,6 +531,14 @@ mod tests {
         compute_terrain_edge_contributions(&defs, world).expect("contributions")
     }
 
+    fn opaque(indices: &[usize]) -> [f32; 8] {
+        let mut a = [0.0; 8];
+        for &i in indices {
+            a[i] = 1.0;
+        }
+        a
+    }
+
     #[test]
     fn higher_precedence_neighbor_emits_onto_lower() {
         // 3x3 Soil with a single Concrete in the center (70 > 340 is false, so
@@ -498,8 +547,14 @@ mod tests {
         // Concrete. Here we put Concrete in center (precedence 70), ring of
         // Soil — Soil should emit onto Concrete (which has lower precedence).
         let mut defs = HashMap::new();
-        defs.insert("Soil".to_string(), make_terrain("Soil", TerrainEdgeType::FadeRough, 340));
-        defs.insert("Concrete".to_string(), make_terrain("Concrete", TerrainEdgeType::Hard, 70));
+        defs.insert(
+            "Soil".to_string(),
+            make_terrain("Soil", TerrainEdgeType::FadeRough, 340),
+        );
+        defs.insert(
+            "Concrete".to_string(),
+            make_terrain("Concrete", TerrainEdgeType::Hard, 70),
+        );
 
         let world = build_world(
             3,
@@ -512,32 +567,45 @@ mod tests {
         );
 
         let contribs = contributions(&defs, &world);
-        // Only the center cell (Concrete) sees a higher-precedence neighbor —
-        // Soil on all 4 cardinals. All four are the same def "Soil", so they
-        // collapse into a single contribution with mask=[1,1,1,1].
+        // Concrete center sees all 8 Soil neighbors; self-def Soil cells in
+        // the ring don't emit (same def as their Soil neighbors, Concrete is
+        // Hard so it's skipped). One contribution, fully-lit perimeter.
         assert_eq!(contribs.len(), 1);
         let c = &contribs[0];
         assert_eq!(c.cell, Cell::new(1, 1));
         assert_eq!(c.neighbor_def_name, "Soil");
-        assert_eq!(c.edge_mask, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(c.perimeter_alphas, [1.0; 8]);
         assert_eq!(c.edge_type, EdgeType::FadeRough);
     }
 
     #[test]
-    fn equal_precedence_emits_no_edges() {
+    fn equal_precedence_cross_emits() {
         let mut defs = HashMap::new();
         defs.insert(
             "Soil".to_string(),
             make_terrain("Soil", TerrainEdgeType::FadeRough, 340),
         );
-        // Two distinct defs sharing the same precedence.
+        // Two distinct defs sharing the same precedence — RimWorld's `>=`
+        // rule means they cross-emit onto each other.
         defs.insert(
             "Sand".to_string(),
             make_terrain("Sand", TerrainEdgeType::FadeRough, 340),
         );
 
         let world = build_world(2, 1, &["Soil", "Sand"]);
-        assert!(contributions(&defs, &world).is_empty());
+        let contribs = contributions(&defs, &world);
+        assert_eq!(contribs.len(), 2);
+        // Sort by cell for determinism.
+        let mut by_cell: Vec<_> = contribs.iter().collect();
+        by_cell.sort_by_key(|c| (c.cell.x, c.cell.z));
+        // Soil at (0,0) has E neighbor Sand: k=6 cardinal lights 5,6,7.
+        assert_eq!(by_cell[0].cell, Cell::new(0, 0));
+        assert_eq!(by_cell[0].neighbor_def_name, "Sand");
+        assert_eq!(by_cell[0].perimeter_alphas, opaque(&[5, 6, 7]));
+        // Sand at (1,0) has W neighbor Soil: k=2 cardinal lights 1,2,3.
+        assert_eq!(by_cell[1].cell, Cell::new(1, 0));
+        assert_eq!(by_cell[1].neighbor_def_name, "Soil");
+        assert_eq!(by_cell[1].perimeter_alphas, opaque(&[1, 2, 3]));
     }
 
     #[test]
@@ -561,8 +629,8 @@ mod tests {
         assert_eq!(contribs.len(), 1);
         assert_eq!(contribs[0].cell, Cell::new(0, 0));
         assert_eq!(contribs[0].neighbor_def_name, "Soil");
-        // Only E is set (index 1).
-        assert_eq!(contribs[0].edge_mask, [0.0, 1.0, 0.0, 0.0]);
+        // E neighbor (k=6 cardinal) lights verts 5, 6, 7.
+        assert_eq!(contribs[0].perimeter_alphas, opaque(&[5, 6, 7]));
     }
 
     #[test]
@@ -587,18 +655,58 @@ mod tests {
         assert_eq!(contribs.len(), 2);
         let mut seen: Vec<_> = contribs
             .iter()
-            .map(|c| (c.cell, c.neighbor_def_name.as_str(), c.edge_mask, c.edge_type))
+            .map(|c| {
+                (
+                    c.cell,
+                    c.neighbor_def_name.as_str(),
+                    c.perimeter_alphas,
+                    c.edge_type,
+                )
+            })
             .collect();
         seen.sort_by(|a, b| a.1.cmp(b.1));
-        // Soil neighbor on W of Concrete (1,0): mask[3]=1.0 (W index).
+        // Soil neighbor on W of Concrete (1,0): k=2 cardinal lights 1,2,3.
         assert_eq!(seen[0].0, Cell::new(1, 0));
         assert_eq!(seen[0].1, "Soil");
-        assert_eq!(seen[0].2, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(seen[0].2, opaque(&[1, 2, 3]));
         assert_eq!(seen[0].3, EdgeType::FadeRough);
-        // Water neighbor on E of Concrete (1,0): mask[1]=1.0 (E index).
+        // Water neighbor on E of Concrete (1,0): k=6 cardinal lights 5,6,7.
         assert_eq!(seen[1].0, Cell::new(1, 0));
         assert_eq!(seen[1].1, "Water");
-        assert_eq!(seen[1].2, [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(seen[1].2, opaque(&[5, 6, 7]));
         assert_eq!(seen[1].3, EdgeType::Water);
+    }
+
+    #[test]
+    fn convex_corner_produces_corner_only_alpha() {
+        // 3x3 base Soil (precedence 340) with a single Ice cell at the NE
+        // corner (precedence 380). The base cell (1,1) sees Ice only on its
+        // NE diagonal slot — no cardinal matches.
+        let mut defs = HashMap::new();
+        defs.insert(
+            "Soil".to_string(),
+            make_terrain("Soil", TerrainEdgeType::FadeRough, 340),
+        );
+        defs.insert(
+            "Ice".to_string(),
+            make_terrain("Ice", TerrainEdgeType::FadeRough, 380),
+        );
+        let world = build_world(
+            3,
+            3,
+            &[
+                "Soil", "Soil", "Soil", //
+                "Soil", "Soil", "Soil", //
+                "Soil", "Soil", "Ice",
+            ],
+        );
+        let contribs = contributions(&defs, &world);
+        let base = contribs
+            .iter()
+            .find(|c| c.cell == Cell::new(1, 1))
+            .expect("base cell contribution");
+        assert_eq!(base.neighbor_def_name, "Ice");
+        // NE is k=5 diagonal — lights only vertex 5.
+        assert_eq!(base.perimeter_alphas, opaque(&[5]));
     }
 }

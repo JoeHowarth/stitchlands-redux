@@ -36,10 +36,12 @@ surrounding systems are built out.
   distortion is the next step after the two-pass basics work.
 - **Door-linking via `asymmetricLink.linkToDoors`** — doors aren't
   drawn yet.
-- **RimWorld's 9-vertex edge mesh + section batching** — the current
-  overlay-quad emission is O(map_cells × neighbor_defs). At our ≤24×16
-  fixture scale it's fine. The scale ceiling is ~100 cells per side
-  before per-cell quad count becomes the long pole.
+- **Section batching for edge overlays** — 9-vertex fan emission landed
+  in `feat/terrain-edges-9vert`; batching the per-cell fans into
+  section-sized vertex buffers is still deferred. The current emission
+  is O(map_cells × neighbor_defs). At our ≤24×16 fixture scale it's
+  fine. The scale ceiling is ~100 cells per side before per-cell fan
+  count becomes the long pole.
 - **`Custom1..10` link flags** — unused in Core; add on demand.
 
 ## Adjacent bugs noticed during this work
