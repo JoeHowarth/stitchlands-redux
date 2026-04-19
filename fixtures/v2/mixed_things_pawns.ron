@@ -17,8 +17,8 @@
   things: [
     (def_name: "Steel", cell_x: 2, cell_z: 2, blocks_movement: false),
     (def_name: "WoodLog", cell_x: 3, cell_z: 3, blocks_movement: false),
-    (def_name: "ChunkSlagSteel", cell_x: 8, cell_z: 2, blocks_movement: true),
-    (def_name: "ChunkSlagSteel", cell_x: 8, cell_z: 3, blocks_movement: true),
+    (def_name: "WoodLog", cell_x: 8, cell_z: 2, blocks_movement: true),
+    (def_name: "WoodLog", cell_x: 8, cell_z: 3, blocks_movement: true),
   ],
   pawns: [
     (label: "Alpha", cell_x: 1, cell_z: 6, facing: north, apparel_defs: ["Apparel_Duster"]),

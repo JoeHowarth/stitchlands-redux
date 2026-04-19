@@ -15,10 +15,10 @@
     ],
   ),
   things: [
-    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 2, blocks_movement: true),
-    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 3, blocks_movement: true),
-    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 4, blocks_movement: true),
-    (def_name: "ChunkSlagSteel", cell_x: 4, cell_z: 5, blocks_movement: true),
+    (def_name: "WoodLog", cell_x: 4, cell_z: 2, blocks_movement: true),
+    (def_name: "WoodLog", cell_x: 4, cell_z: 3, blocks_movement: true),
+    (def_name: "WoodLog", cell_x: 4, cell_z: 4, blocks_movement: true),
+    (def_name: "WoodLog", cell_x: 4, cell_z: 5, blocks_movement: true),
   ],
   pawns: [
     (label: "RunnerA", cell_x: 1, cell_z: 1, facing: east),
