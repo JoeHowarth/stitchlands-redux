@@ -136,6 +136,12 @@ pub struct PackedCatalog {
 type BuildPackedResolverFn =
     dyn FnMut(&[PathBuf], &[PathBuf]) -> Result<Option<PackedTextureResolver>>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackedPrefilter {
+    Texture,
+    Folder,
+}
+
 impl PackedCatalog {
     fn new(
         packed_roots: Vec<PathBuf>,
@@ -189,6 +195,24 @@ impl PackedCatalog {
             .unwrap_or(true)
     }
 
+    fn can_try_query(&self, query: &TextureQuery) -> bool {
+        self.index
+            .as_ref()
+            .map(|index| match Self::prefilter_for(query) {
+                PackedPrefilter::Folder => index.maybe_contains_folder(query.tex_path),
+                PackedPrefilter::Texture => index.maybe_contains(query.tex_path),
+            })
+            .unwrap_or(true)
+    }
+
+    fn prefilter_for(query: &TextureQuery) -> PackedPrefilter {
+        if query.kind.is_random() {
+            PackedPrefilter::Folder
+        } else {
+            PackedPrefilter::Texture
+        }
+    }
+
     fn get(&mut self) -> Result<Option<&PackedTextureResolver>> {
         if !self.build_attempted {
             self.resolver = (self.build_fn)(&self.packed_roots, &self.typetree_registries)?;
@@ -235,11 +259,7 @@ impl PackedCatalog {
         }
     }
 
-    fn search_container_paths(
-        &mut self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Option<Vec<String>>> {
+    fn search_container_paths(&mut self, query: &str, limit: usize) -> Result<Option<Vec<String>>> {
         let Some(resolver) = self.get()? else {
             return Ok(None);
         };
@@ -286,7 +306,7 @@ impl PackedCatalog {
 
 impl TextureBackend for PackedCatalog {
     fn lookup(&mut self, query: &TextureQuery) -> Result<BackendLookup> {
-        if !self.can_try(query.tex_path) {
+        if !self.can_try_query(query) {
             return Ok(BackendLookup::Miss {
                 attempted: Vec::new(),
             });
@@ -326,7 +346,10 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::PackedCatalog;
+    use super::{PackedCatalog, PackedPrefilter};
+    use crate::assets::backend::TextureQuery;
+    use crate::assets::packed_index::PackedTextureIndex;
+    use crate::defs::GraphicKind;
 
     #[test]
     fn lazy_builder_runs_once_when_result_is_none() {
@@ -362,5 +385,70 @@ mod tests {
         catalog.disable();
         let _ = catalog.get().unwrap();
         assert_eq!(*calls.borrow(), 0);
+    }
+
+    #[test]
+    fn random_queries_select_folder_prefilter() {
+        assert_eq!(
+            PackedCatalog::prefilter_for(&TextureQuery {
+                tex_path: "Things/Item/Chunk/ChunkSlag",
+                kind: GraphicKind::Random,
+                variant_index: 0,
+            }),
+            PackedPrefilter::Folder
+        );
+        assert_eq!(
+            PackedCatalog::prefilter_for(&TextureQuery {
+                tex_path: "Things/Item/Chunk/ChunkSlag",
+                kind: GraphicKind::RandomRotated,
+                variant_index: 0,
+            }),
+            PackedPrefilter::Folder
+        );
+    }
+
+    #[test]
+    fn single_queries_select_texture_prefilter() {
+        assert_eq!(
+            PackedCatalog::prefilter_for(&TextureQuery {
+                tex_path: "Things/Item/Chunk/ChunkSlag",
+                kind: GraphicKind::Single,
+                variant_index: 0,
+            }),
+            PackedPrefilter::Texture
+        );
+        assert_eq!(
+            PackedCatalog::prefilter_for(&TextureQuery {
+                tex_path: "Things/Item/Resource/Steel",
+                kind: GraphicKind::Multi,
+                variant_index: 0,
+            }),
+            PackedPrefilter::Texture
+        );
+    }
+
+    #[test]
+    fn can_try_query_respects_selected_prefilter() {
+        let mut catalog = PackedCatalog::with_builder(vec![], vec![], Box::new(|_, _| Ok(None)));
+        catalog.index = Some(PackedTextureIndex::from_parts(
+            &["steel_a"],
+            &["textures/things/item/chunk/chunkslag"],
+        ));
+
+        assert!(catalog.can_try_query(&TextureQuery {
+            tex_path: "Things/Item/Chunk/ChunkSlag",
+            kind: GraphicKind::Random,
+            variant_index: 0,
+        }));
+        assert!(catalog.can_try_query(&TextureQuery {
+            tex_path: "Things/Item/Resource/Steel",
+            kind: GraphicKind::Single,
+            variant_index: 0,
+        }));
+        assert!(!catalog.can_try_query(&TextureQuery {
+            tex_path: "Things/Item/Resource/Gold",
+            kind: GraphicKind::Random,
+            variant_index: 0,
+        }));
     }
 }

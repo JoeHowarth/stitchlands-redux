@@ -61,12 +61,6 @@ impl PackedTextureIndex {
     }
 
     pub fn maybe_contains(&self, tex_path: &str) -> bool {
-        // Fail open if the index is effectively empty; this avoids false negatives
-        // from stripped-name Unity layouts where metadata extraction is incomplete.
-        if self.is_empty() {
-            return true;
-        }
-
         let basename = tex_path
             .rsplit('/')
             .next()
@@ -87,8 +81,30 @@ impl PackedTextureIndex {
         false
     }
 
+    pub fn maybe_contains_folder(&self, tex_path: &str) -> bool {
+        crate::assets::variants::variants_for(tex_path, crate::defs::GraphicKind::Random)
+            .folder_prefix()
+            .is_some_and(|path| self.container_paths.contains(path.trim_end_matches('/')))
+    }
+
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.names.is_empty() && self.container_paths.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_parts(names: &[&str], container_paths: &[&str]) -> Self {
+        let mut names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        names.sort();
+        let container_paths = container_paths
+            .iter()
+            .map(|path| path.to_string())
+            .collect();
+        Self {
+            signature: String::new(),
+            names,
+            container_paths,
+        }
     }
 
     fn has_prefix_match(&self, basename: &str) -> bool {
@@ -265,7 +281,6 @@ fn insert_with_ancestors(set: &mut HashSet<String>, path: &str) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::fs;
 
     use super::PackedTextureIndex;
@@ -356,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_index_fails_open_for_lookup() {
+    fn empty_index_misses_lookup() {
         let root = std::env::temp_dir().join(format!(
             "stitchlands-packed-index-empty-{}",
             std::process::id()
@@ -370,21 +385,26 @@ mod tests {
 
         let index = PackedTextureIndex::load(&cache_path).unwrap();
         assert!(index.is_empty());
-        assert!(index.maybe_contains("Things/Item/Resource/DefinitelyMissing"));
+        assert!(!index.maybe_contains("Things/Item/Resource/DefinitelyMissing"));
+        assert!(!index.maybe_contains_folder("Things/Item/Chunk/ChunkSlag"));
 
         let _ = fs::remove_dir_all(root);
     }
 
     fn index_with_names(names: &[&str]) -> PackedTextureIndex {
-        PackedTextureIndex {
-            signature: String::new(),
-            names: {
-                let mut v: Vec<String> = names.iter().map(|s| s.to_string()).collect();
-                v.sort();
-                v
-            },
-            container_paths: HashSet::new(),
-        }
+        PackedTextureIndex::from_parts(names, &[])
+    }
+
+    #[test]
+    fn maybe_contains_folder_uses_ancestor_entries() {
+        let index = PackedTextureIndex::from_parts(
+            &[],
+            &[
+                "textures/things/item/chunk/chunkslag",
+                "textures/things/item/chunk/chunkslag/chunkslag_a.png",
+            ],
+        );
+        assert!(index.maybe_contains_folder("Things/Item/Chunk/ChunkSlag"));
     }
 
     #[test]
