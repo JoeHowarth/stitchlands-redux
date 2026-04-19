@@ -6,6 +6,7 @@ mod commands;
 mod defs;
 mod fixtures;
 mod interaction;
+mod linking;
 mod path;
 mod pawn;
 mod renderer;

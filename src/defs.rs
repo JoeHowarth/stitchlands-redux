@@ -4,8 +4,11 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use glam::{Vec2, Vec3};
+use log::warn;
 use roxmltree::{Document, Node};
 use walkdir::WalkDir;
+
+use crate::linking::{LinkDrawerType, LinkFlags, TerrainEdgeType};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RgbaColor {
@@ -31,6 +34,8 @@ pub struct GraphicData {
     pub color: RgbaColor,
     pub draw_size: Vec2,
     pub draw_offset: Vec3,
+    pub link_type: LinkDrawerType,
+    pub link_flags: LinkFlags,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +49,8 @@ pub struct TerrainDef {
     pub def_name: String,
     pub texture_path: String,
     pub edge_texture_path: Option<String>,
+    pub edge_type: TerrainEdgeType,
+    pub render_precedence: i32,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -505,11 +512,25 @@ fn parse_terrain_def(node: Node<'_, '_>) -> Option<TerrainDef> {
     let edge_texture_path = child_text(node, "edgePath")
         .or_else(|| child_text(node, "edgeTexturePath"))
         .map(str::to_string);
+    let edge_type = child_text(node, "edgeType")
+        .and_then(|value| match TerrainEdgeType::from_token(value) {
+            Some(parsed) => Some(parsed),
+            None => {
+                warn!("unknown edgeType '{value}' for terrain '{def_name}'");
+                None
+            }
+        })
+        .unwrap_or_default();
+    let render_precedence = child_text(node, "renderPrecedence")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
 
     Some(TerrainDef {
         def_name,
         texture_path,
         edge_texture_path,
+        edge_type,
+        render_precedence,
     })
 }
 
@@ -592,6 +613,18 @@ fn parse_graphic_data(node: Node<'_, '_>) -> Option<GraphicData> {
     let draw_offset = child_node(node, "drawOffset")
         .map(parse_vec3)
         .unwrap_or(Vec3::ZERO);
+    let link_type = child_text(node, "linkType")
+        .and_then(|value| match LinkDrawerType::from_token(value) {
+            Some(parsed) => Some(parsed),
+            None => {
+                warn!("unknown linkType '{value}' for '{tex_path}'");
+                None
+            }
+        })
+        .unwrap_or_default();
+    let link_flags = child_node(node, "linkFlags")
+        .map(|flags_node| parse_link_flags(flags_node, &tex_path))
+        .unwrap_or_default();
 
     Some(GraphicData {
         tex_path,
@@ -599,7 +632,20 @@ fn parse_graphic_data(node: Node<'_, '_>) -> Option<GraphicData> {
         color,
         draw_size,
         draw_offset,
+        link_type,
+        link_flags,
     })
+}
+
+fn parse_link_flags(node: Node<'_, '_>, context: &str) -> LinkFlags {
+    let mut flags = LinkFlags::EMPTY;
+    for token in list_text_values(node) {
+        match LinkFlags::from_token(token) {
+            Some(value) => flags |= value,
+            None => warn!("unknown linkFlags token '{token}' for '{context}'"),
+        }
+    }
+    flags
 }
 
 fn child_text<'a>(node: Node<'a, 'a>, tag: &str) -> Option<&'a str> {
@@ -789,6 +835,7 @@ fn parse_bool(input: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linking::{LinkDrawerType, LinkFlags, TerrainEdgeType};
 
     #[test]
     fn parses_color_formats() {
@@ -860,6 +907,120 @@ mod tests {
             terrain.edge_texture_path.as_deref(),
             Some("Terrain/Edges/Soil")
         );
+        assert_eq!(terrain.edge_type, TerrainEdgeType::None);
+        assert_eq!(terrain.render_precedence, 0);
+    }
+
+    #[test]
+    fn parses_wall_link_fields() {
+        let xml = r#"
+        <Defs>
+            <ThingDef>
+                <defName>Wall</defName>
+                <graphicData>
+                    <texPath>Things/Building/Linked/Wall</texPath>
+                    <graphicClass>Graphic_Appearances</graphicClass>
+                    <linkType>CornerFiller</linkType>
+                    <linkFlags>
+                        <li>Wall</li>
+                        <li>Rock</li>
+                    </linkFlags>
+                </graphicData>
+            </ThingDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut defs = HashMap::new();
+        parse_doc_thing_defs(&doc, &mut defs);
+        let wall = defs.get("Wall").unwrap();
+        assert_eq!(wall.graphic_data.link_type, LinkDrawerType::CornerFiller);
+        assert!(wall.graphic_data.link_flags.contains(LinkFlags::WALL));
+        assert!(wall.graphic_data.link_flags.contains(LinkFlags::ROCK));
+        assert!(!wall.graphic_data.link_flags.contains(LinkFlags::SANDBAGS));
+    }
+
+    #[test]
+    fn parses_rock_mapedge_link() {
+        let xml = r#"
+        <Defs>
+            <ThingDef>
+                <defName>Rock</defName>
+                <graphicData>
+                    <texPath>Things/Building/Linked/Rock</texPath>
+                    <linkType>CornerFiller</linkType>
+                    <linkFlags>
+                        <li>Rock</li>
+                        <li>MapEdge</li>
+                    </linkFlags>
+                </graphicData>
+            </ThingDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut defs = HashMap::new();
+        parse_doc_thing_defs(&doc, &mut defs);
+        let rock = defs.get("Rock").unwrap();
+        assert!(rock.graphic_data.link_flags.contains(LinkFlags::MAP_EDGE));
+        assert!(rock.graphic_data.link_flags.contains(LinkFlags::ROCK));
+    }
+
+    #[test]
+    fn parses_terrain_edge_and_precedence() {
+        let xml = r#"
+        <Defs>
+            <TerrainDef>
+                <defName>WaterShallow</defName>
+                <texturePath>Terrain/Surfaces/WaterShallow</texturePath>
+                <edgeType>Water</edgeType>
+                <renderPrecedence>394</renderPrecedence>
+            </TerrainDef>
+            <TerrainDef>
+                <defName>Soil</defName>
+                <texturePath>Terrain/Surfaces/Soil</texturePath>
+                <edgeType>FadeRough</edgeType>
+                <renderPrecedence>340</renderPrecedence>
+            </TerrainDef>
+            <TerrainDef>
+                <defName>Concrete</defName>
+                <texturePath>Terrain/Surfaces/Concrete</texturePath>
+                <edgeType>Hard</edgeType>
+                <renderPrecedence>70</renderPrecedence>
+            </TerrainDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut defs = HashMap::new();
+        parse_doc_terrain_defs(&doc, &mut defs);
+        let water = defs.get("WaterShallow").unwrap();
+        assert_eq!(water.edge_type, TerrainEdgeType::Water);
+        assert_eq!(water.render_precedence, 394);
+        assert_eq!(defs.get("Soil").unwrap().edge_type, TerrainEdgeType::FadeRough);
+        assert_eq!(defs.get("Concrete").unwrap().edge_type, TerrainEdgeType::Hard);
+    }
+
+    #[test]
+    fn unknown_link_flag_token_is_ignored() {
+        let xml = r#"
+        <Defs>
+            <ThingDef>
+                <defName>Weird</defName>
+                <graphicData>
+                    <texPath>Things/Weird</texPath>
+                    <linkType>Basic</linkType>
+                    <linkFlags>
+                        <li>Wall</li>
+                        <li>Bogus</li>
+                    </linkFlags>
+                </graphicData>
+            </ThingDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut defs = HashMap::new();
+        parse_doc_thing_defs(&doc, &mut defs);
+        let weird = defs.get("Weird").unwrap();
+        assert!(weird.graphic_data.link_flags.contains(LinkFlags::WALL));
+        assert_eq!(weird.graphic_data.link_type, LinkDrawerType::Basic);
     }
 
     #[test]

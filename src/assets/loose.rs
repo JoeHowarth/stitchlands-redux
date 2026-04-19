@@ -263,6 +263,8 @@ mod tests {
                 color: RgbaColor::WHITE,
                 draw_size: Vec2::new(1.0, 1.0),
                 draw_offset: Vec3::ZERO,
+                link_type: Default::default(),
+                link_flags: Default::default(),
             },
         }
     }
