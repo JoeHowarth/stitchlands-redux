@@ -45,7 +45,6 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             terrain_probe_limit,
         } => {
             super::common::run_terrain_probe(
-                ctx.data_dir,
                 ctx.defs.terrain_defs,
                 ctx.asset_resolver,
                 terrain_probe_limit,
@@ -53,7 +52,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             Ok(CommandAction::Done)
         }
         DebugCmd::ProbeDefs => {
-            super::common::run_defs_probe(ctx.data_dir, &ctx.defs, ctx.asset_resolver)?;
+            super::common::run_defs_probe(&ctx.defs, ctx.asset_resolver)?;
             Ok(CommandAction::Done)
         }
         DebugCmd::PackedDecodeProbe {

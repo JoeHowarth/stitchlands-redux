@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+mod backend;
 mod default_config;
 mod loose;
 pub(crate) mod packed_index;
@@ -11,7 +12,6 @@ mod rimworld_paths;
 mod typetree_registry;
 pub(crate) mod variants;
 
-pub use loose::{SpriteAsset, resolve_sprite, resolve_texture_path};
 pub use packed_textures::{extract_all_packed_textures, infer_packed_data_roots};
 pub use resolver::AssetResolver;
 
@@ -74,6 +74,7 @@ pub fn prepare_asset_setup(options: AssetSetupOptions) -> Result<AssetSetup> {
     };
 
     let resolver = AssetResolver::new(
+        data_dir.clone(),
         texture_roots.clone(),
         packed_roots.clone(),
         typetree_registries.clone(),

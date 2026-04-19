@@ -83,7 +83,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
     for (index, selected) in selected_defs.iter().enumerate() {
         let resolved = ctx
             .asset_resolver
-            .resolve_thing(ctx.data_dir, selected, index)
+            .resolve_thing(selected, index)
             .with_context(|| {
                 format!(
                     "resolving texture for def '{}' path '{}'",
@@ -91,7 +91,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                 )
             })?;
 
-        if resolved.sprite.used_fallback {
+        if resolved.used_fallback() {
             if ctx
                 .asset_resolver
                 .can_try_packed(&selected.graphic_data.tex_path)
@@ -125,13 +125,13 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                 "texture missing for '{}' ({}) - using checker fallback",
                 selected.def_name, selected.graphic_data.tex_path
             );
-            for attempted in resolved.sprite.attempted_paths.iter().take(6) {
+            for attempted in resolved.attempted_paths().iter().take(6) {
                 info!("attempted: {}", attempted.display());
             }
         }
 
-        if let Some(path) = &resolved.sprite.source_path {
-            if resolved.resolved_from_packed {
+        if let Some(path) = resolved.source_path() {
+            if resolved.resolved_from_packed() {
                 info!("resolved texture (packed): {}", path.display());
             } else {
                 info!("resolved texture: {}", path.display());
@@ -154,7 +154,6 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                 export_path.with_file_name(filename)
             };
             resolved
-                .sprite
                 .image
                 .save(&with_suffix)
                 .with_context(|| format!("saving resolved sprite to {}", with_suffix.display()))?;
@@ -188,15 +187,16 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             index, selected.def_name, size.x, size.y, draw_offset.x, draw_offset.y, draw_offset.z
         );
 
+        let used_fallback = resolved.used_fallback();
         render_sprites.push(crate::viewer::RenderSprite {
             def_name: selected.def_name.clone(),
-            image: resolved.sprite.image,
+            image: resolved.image,
             params: SpriteParams {
                 world_pos,
                 size,
                 tint,
             },
-            used_fallback: resolved.sprite.used_fallback,
+            used_fallback,
             pawn_id: None,
         });
     }
