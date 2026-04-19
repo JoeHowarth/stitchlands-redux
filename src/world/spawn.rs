@@ -13,7 +13,7 @@ pub fn world_from_fixture(fixture: &SceneFixture) -> WorldState {
         })
         .collect();
 
-    let things = fixture
+    let things: Vec<ThingState> = fixture
         .things
         .iter()
         .enumerate()
@@ -25,6 +25,19 @@ pub fn world_from_fixture(fixture: &SceneFixture) -> WorldState {
             blocks_movement: thing.blocks_movement,
         })
         .collect();
+
+    let cell_count = fixture.map.width * fixture.map.height;
+    let mut thing_grid: Vec<Vec<usize>> = vec![Vec::new(); cell_count];
+    for (thing_idx, thing) in things.iter().enumerate() {
+        if thing.cell_x < 0 || thing.cell_z < 0 {
+            continue;
+        }
+        let (x, z) = (thing.cell_x as usize, thing.cell_z as usize);
+        if x >= fixture.map.width || z >= fixture.map.height {
+            continue;
+        }
+        thing_grid[z * fixture.map.width + x].push(thing_idx);
+    }
 
     let pawns = fixture
         .pawns
@@ -56,5 +69,6 @@ pub fn world_from_fixture(fixture: &SceneFixture) -> WorldState {
         terrain,
         things,
         pawns,
+        thing_grid,
     }
 }

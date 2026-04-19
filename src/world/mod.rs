@@ -1,3 +1,4 @@
+mod neighbors;
 mod query;
 mod spawn;
 mod state;

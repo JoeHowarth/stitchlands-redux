@@ -7,13 +7,13 @@ use crate::path::{PathGrid, find_path};
 use super::{PathProgress, WorldState};
 
 pub fn build_path_grid(world: &WorldState) -> PathGrid {
-    let mut grid = PathGrid::new(world.width, world.height);
-    for thing in &world.things {
+    let mut grid = PathGrid::new(world.width(), world.height());
+    for thing in world.things() {
         if thing.blocks_movement {
             grid.set_blocked(thing.cell_x, thing.cell_z, true);
         }
     }
-    for pawn in &world.pawns {
+    for pawn in world.pawns() {
         grid.set_blocked(pawn.cell_x, pawn.cell_z, true);
     }
     grid
@@ -44,26 +44,35 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
         .map(|pawn| (Cell::new(pawn.cell_x, pawn.cell_z), pawn.id))
         .collect();
 
-    for pawn in &mut world.pawns {
-        let PathProgress::Following { cells, index } = &mut pawn.path else {
-            continue;
+    for pawn_idx in 0..world.pawns.len() {
+        let (target_cell, pawn_id) = {
+            let pawn = &world.pawns[pawn_idx];
+            let PathProgress::Following { cells, index } = &pawn.path else {
+                continue;
+            };
+            if *index >= cells.len() {
+                continue;
+            }
+            (cells[*index], pawn.id)
         };
-        if *index >= cells.len() {
-            continue;
-        }
 
-        let target_cell = cells[*index];
-        let blocked_by_thing = world.things.iter().any(|thing| {
-            thing.blocks_movement && Cell::new(thing.cell_x, thing.cell_z) == target_cell
-        });
+        let blocked_by_thing = world
+            .things_at(target_cell)
+            .iter()
+            .any(|&idx| world.things[idx].blocks_movement);
         if blocked_by_thing {
             continue;
         }
         if let Some(occupant_id) = occupied_cells.get(&target_cell).copied()
-            && occupant_id != pawn.id
+            && occupant_id != pawn_id
         {
             continue;
         }
+
+        let pawn = &mut world.pawns[pawn_idx];
+        let PathProgress::Following { index, .. } = &mut pawn.path else {
+            continue;
+        };
         let target = Vec2::new(target_cell.x as f32 + 0.5, target_cell.z as f32 + 0.5);
         let to_target = target - pawn.world_pos;
         let distance = to_target.length();
@@ -259,7 +268,7 @@ mod tests {
     fn pawn_does_not_step_into_newly_blocked_thing_cell() {
         let mut world = fixture_world();
         assert!(issue_move_intent(&mut world, 0, Cell::new(5, 4)));
-        world.things.push(ThingState {
+        world.push_thing(ThingState {
             id: 999,
             def_name: "LateBlocker".to_string(),
             cell_x: 5,

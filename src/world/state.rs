@@ -69,6 +69,10 @@ pub struct WorldState {
     pub(super) terrain: Vec<TerrainTile>,
     pub(super) things: Vec<ThingState>,
     pub(super) pawns: Vec<PawnState>,
+    /// Index `z * width + x` -> indices into `things`. Stays in sync with
+    /// `things` because v2 doesn't move things at runtime; rebuild if that
+    /// ever changes.
+    pub(super) thing_grid: Vec<Vec<usize>>,
 }
 
 impl WorldState {
