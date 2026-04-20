@@ -30,20 +30,15 @@ pub enum WaterRampKind {
     ChestDeep = 2,
 }
 
-/// Shader-side parameters derived from a `TerrainDef`. Packed into the
-/// per-instance `tint` vec4 read by both water pipelines:
-/// `tint.r = reflect_strength`, `tint.g = ramp_kind_as_float`,
-/// `tint.b = use_offset`, `tint.a` unused.
-///
-/// `reflect_strength` scales the sky-reflection blend in the surface
-/// shader. Deep water reflects more sky; shallow lets the mud-bed ramp
-/// read through. The depth RT itself is type-independent — it only
-/// encodes shore fade. Per-type depth in the RT would linear-bleed at
-/// shallow↔deep cell boundaries and paint a visible band there via the
-/// ramp UV.
+/// Shader-side parameters derived from a `TerrainDef`. These get packed into
+/// the per-instance `tint` vec4 the water pipelines read in the vertex stage:
+/// `tint.r = depth_const`, `tint.g = ramp_kind_as_float`, `tint.b = use_offset`.
+/// Depth constant is arbitrary per the plan — shallow water writes a smaller
+/// depth value into the offscreen RT than deep, giving the surface shader's
+/// ramp lookup a distinguishable X coordinate.
 #[derive(Debug, Clone, Copy)]
 pub struct WaterShaderParams {
-    pub reflect_strength: f32,
+    pub depth_const: f32,
     pub ramp_kind: WaterRampKind,
     pub use_offset: bool,
 }
@@ -51,7 +46,7 @@ pub struct WaterShaderParams {
 impl WaterShaderParams {
     pub fn to_tint(self) -> [f32; 4] {
         [
-            self.reflect_strength,
+            self.depth_const,
             self.ramp_kind as u32 as f32,
             if self.use_offset { 1.0 } else { 0.0 },
             0.0,
@@ -59,12 +54,12 @@ impl WaterShaderParams {
     }
 }
 
-/// Map a water `TerrainDef` to the per-instance shader parameters.
-/// Reflection strength values are approximations — shallow water should
-/// show the mud bed, deep water should mirror more sky. `_UseWaterOffset`
-/// is read from `water_depth_shader_parameters`. Non-water defs return
-/// `None` — callers shouldn't reach this for dry terrain, but it's nice
-/// not to panic.
+/// Map a water `TerrainDef` to the per-instance shader parameters. The
+/// depth constants are the approximations in
+/// `plans/water-rendering/plan.md` §5 Phase 3; `_UseWaterOffset` is read
+/// from `water_depth_shader_parameters`. Non-water defs return `None` —
+/// callers shouldn't reach this for dry terrain, but it's nice not to
+/// panic.
 pub fn water_shader_params(def: &crate::defs::TerrainDef) -> Option<WaterShaderParams> {
     def.water_depth_shader.as_ref()?;
     let ramp_kind = match def.def_name.as_str() {
@@ -72,17 +67,17 @@ pub fn water_shader_params(def: &crate::defs::TerrainDef) -> Option<WaterShaderP
         "WaterMovingChestDeep" => WaterRampKind::ChestDeep,
         _ => WaterRampKind::Shallow,
     };
-    let reflect_strength = match ramp_kind {
+    let depth_const = match ramp_kind {
         WaterRampKind::Shallow => 0.35,
-        WaterRampKind::Deep => 0.65,
-        WaterRampKind::ChestDeep => 0.75,
+        WaterRampKind::Deep => 0.75,
+        WaterRampKind::ChestDeep => 0.9,
     };
     let use_offset = def
         .water_depth_shader_parameters
         .iter()
         .any(|(name, value)| name == "_UseWaterOffset" && *value > 0.0);
     Some(WaterShaderParams {
-        reflect_strength,
+        depth_const,
         ramp_kind,
         use_offset,
     })
