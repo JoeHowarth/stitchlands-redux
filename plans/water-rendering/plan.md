@@ -382,46 +382,97 @@ plumbing with a smoke-test shader.
 
 ### Phase 3 — Real water shaders (`water_depth.wgsl`, `water_surface.wgsl`)
 
-**Open-ended — this is the approximation phase.**
+**Open-ended — this is the approximation phase. Split into 3a / 3b /
+3c during execution to de-risk.**
 
-**Change A.** `src/water_depth.wgsl` — inputs:
-- Vertex: same instanced quad as base terrain.
-- Fragment uniforms: `_AlphaAddTex` (noise), `_UseWaterOffset: f32`,
-  `frame_time`.
-- Output: single-channel float in `[0, 1]` representing a per-pixel
-  water-depth-ish value. Approximation: base constant per water-type
-  (0.3 for shallow, 0.7 for deep, 0.9 for chest-deep) modulated by
-  `_AlphaAddTex` at a cell-local UV, offset by `_UseWaterOffset *
-  sin(frame_time + uv)` for moving variants. Values will be tuned; the
-  shape is what matters.
+#### 3a — Depth + ramp MVP (landed in `aa0c2b4`)
 
-**Change B.** `src/water_surface.wgsl` — inputs:
-- Vertex: same instanced quad.
-- Uniforms: `_MainTex` (the ramp), `_AlphaAddTex`, `_RippleTex`,
-  `_WaterOutputTex` (our offscreen RT), `_WaterReflectionTex`,
-  camera + `frame_time`.
-- Fragment:
-  1. Compute screen-UV from fragment world position + camera VP.
-  2. Sample `_WaterOutputTex` at screen-UV → `d ∈ [0,1]`.
-  3. Sample `_MainTex` (ramp) using `d` as the X coordinate → base
-     color.
-  4. Sample `_RippleTex` with `uv + frame_time * ripple_scroll` → a
-     displacement value; offset base color sample UV by it.
-  5. Sample `_WaterReflectionTex` with world-space UV; blend in at
-     low opacity.
-  6. Apply `_AlphaAddTex` to soften the near-shore alpha
-     (`d` close to 0).
+No ripple, no reflection. Just prove depth flows through to ramp
+color.
+
+**`src/water_depth.wgsl`.** `depth = tint.r * mix(0.75, 1.0, noise)`
+where `tint.r` is the per-type depth constant set in
+`water_shader_params` (0.35 / 0.75 / 0.9 for shallow / deep /
+chest-deep) and `noise` comes from `_AlphaAddTex` sampled at
+`cell_uv`. Writes to the R16Float offscreen RT.
+
+**`src/water_surface.wgsl`.** Samples the depth RT in screen space,
+picks one of three ramps by `u32(tint.g + 0.5)`, softens shore alpha
+via `smoothstep(0.05, 0.35, d)` jittered by a second `_AlphaAddTex`
+sample.
+
+**Per-type data packed into the instance tint vec4.** `tint.r` =
+depth_const, `tint.g` = ramp_kind (0/1/2), `tint.b` = use_offset flag
+(for 3b), `tint.a` free. Avoids a new vertex layout.
+
+**Key finding — ramps are earth-toned, not blue.** All three ramps
+(`WaterShallowRamp_2777.png`, `WaterDeepRamp_3313.png`,
+`WaterChestDeepRamp_2034.png`) are 64×64 muted brown-gray:
+- shallow ≈ RGB(96,94,85) → (106,103,93)
+- deep ≈ RGB(85,75,66) → (95,85,76)
+- chest-deep ≈ RGB(90,85,74) → (99,94,84)
+
+`Terrain_Water.xml` has no `DrawColor` override. RimWorld's blue water
+appearance therefore **does not come from the ramps** — they read
+more like a mud-bed texture. The blue comes from the
+`_WaterReflectionTex` sky overlay (`Verse/WaterInfo.cs:26,50`). 3a
+output is intentionally muddy-looking; that is the ramps in
+isolation.
+
+#### 3c — Reflection overlay (the "reads as water" lever)
+
+This is the single biggest visual lever. Do before 3b.
+
+**Plumbing.**
+- Add `reflection_tex` as a new binding on the existing
+  `water_ramps` bind group (group 3). Keeps total bind groups at 4
+  (the wgpu default max). Reuse `ramp_sampler` (linear / clamp).
+- Pass `world_pos.xy` through `VsOut` as a new location — vertex
+  input already has it (location 2) but the current surface shader
+  drops it after computing clip_pos.
+
+**Shader math (`water_surface.wgsl` fragment).**
+1. `base = sample_ramp(idx, d)` — current 3a behavior.
+2. `reflect_uv = world_pos.xy / reflect_scale` — tiles the 256×256
+   sky across the map. Start at ~8 cells per tile; tune visually.
+3. `sky = textureSample(reflection_tex, ramp_sampler, reflect_uv).rgb`.
+4. `reflect_strength = mix(0.25, 0.55, d)` — deep water reflects
+   more, shallow water lets the mud-bed read through.
+5. `final_rgb = mix(base, sky, reflect_strength)`.
+6. Keep the 3a `alpha = smoothstep(...) * mix(0.9, 1.0, shore_noise)`
+   unchanged.
+
+**Tunables live as WGSL constants for MVP.** `reflect_scale`, the two
+`mix` endpoints. No per-water-type variation (tint.a stays free for a
+future lever).
+
+**Explicitly not doing here.** Ripple distortion of `reflect_uv`
+(3b). Fresnel (we're orthographic top-down — no meaningful view angle
+variation). Reflection of on-map things (it's a global sky
+texture, not a true reflection pass).
+
+**Verification.**
+1. Re-run `fixtures/v2/water_smoke.ron --screenshot` — shallow cells
+   should read muddy-teal, deep cells clearly blue, shore alpha
+   unchanged from 3a.
+2. `cargo test && cargo clippy` clean.
+
+#### 3b — Ripple distortion (polish after 3c)
+
+Sample `_RippleTex` with `uv + frame_time * scroll` → displacement
+vector; offset the depth-sample UV and/or the reflection UV by it so
+the water surface shimmers. `use_offset` flag in tint.b selects the
+moving-water variant (river flow direction faked for now — real flow
+map is deferred per §2).
 
 **Tuning notes.**
-- Start with the shallowest water only. Get `WaterShallow` looking
-  right before touching `Deep` / `ChestDeep` / `Moving`.
 - Animation speed / ripple scroll is tuned visually — expect several
   iterations. Don't wire sun/moon lighting here.
-- If the depth-sampling-in-screen-space feels wrong in wgpu (e.g. flipY
-  issues), cross-check against RimWorld's expected Y-orientation —
-  `GL.GetGPUProjectionMatrix(..., renderIntoTexture:false)` at
-  `Verse/WaterInfo.cs:57` forces the non-RT-flipped matrix, which
-  matters.
+- If the depth-sampling-in-screen-space feels wrong in wgpu (e.g.
+  flipY issues), cross-check against RimWorld's expected
+  Y-orientation — `GL.GetGPUProjectionMatrix(..., renderIntoTexture:
+  false)` at `Verse/WaterInfo.cs:57` forces the non-RT-flipped
+  matrix, which matters.
 
 **Verification.**
 1. `fixtures/v2/terrain_mix.ron`: swap `Ice` pocket back to
@@ -435,13 +486,12 @@ plumbing with a smoke-test shader.
 3. No regression in existing reference PNGs (grass-meets-sand edges,
    walls, pawns).
 
-**Risk.** This phase is unbounded in effort. Budget: one concentrated
-session to get shallow water "reads as water"; followups for tuning,
-deep/chestdeep, and moving-water animation. If by end of session the
-output isn't plausibly water, retreat to a simpler solid-color
-animated noise surface and fall back to the baked-in gradient ramp
-without the two-pass machinery — but keep the two-pass machinery
-shipped, because it's independently valuable.
+**Risk.** Phase 3 is unbounded in effort. The 3a/3c/3b split exists
+to cap blast radius per commit. If 3c output still isn't plausibly
+water, retreat to a simpler solid-color animated noise surface and
+fall back to the baked-in gradient ramp without the two-pass
+machinery — but keep the two-pass machinery shipped, because it's
+independently valuable.
 
 ---
 
