@@ -132,10 +132,7 @@ pub fn list_defs(
     println!("shown {shown} defs (limit {limit})");
 }
 
-pub fn run_defs_probe(
-    defs: &DefSet<'_>,
-    resolver: &mut AssetResolver,
-) -> Result<()> {
+pub fn run_defs_probe(defs: &DefSet<'_>, resolver: &mut AssetResolver) -> Result<()> {
     fn probe<T>(
         label: &str,
         resolver: &mut AssetResolver,
