@@ -560,10 +560,12 @@ impl Renderer {
             config.height,
         );
 
-        // Surface-pass ramps: three ramp textures + a shared linear sampler
-        // in one bind group. The fragment picks the ramp by `tint.g` (set by
-        // `water_shader_params`). `_AlphaAddTex` is not re-bound here — we
-        // reuse `noise_bind_group` at slot 2 (same asset).
+        // Surface-pass textures: three ramps + sky reflection + two samplers
+        // in one bind group. Ramp is picked by `tint.g` (set by
+        // `water_shader_params`). Reflection is a global sky overlay sampled
+        // in world space with a repeat sampler so it tiles across the map.
+        // `_AlphaAddTex` is not re-bound here — we reuse `noise_bind_group`
+        // at slot 2 (same asset).
         let water_ramps_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("water-ramps-layout"),
@@ -577,6 +579,13 @@ impl Renderer {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    ramp_texture_entry(4),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
             });
         let ramp_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -584,6 +593,16 @@ impl Renderer {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let reflection_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("water-reflection-sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Linear,
@@ -602,6 +621,12 @@ impl Renderer {
             &queue,
             "water-chest-deep-ramp",
             &water_assets.chest_deep_ramp,
+        );
+        let reflection_view = upload_ramp_texture(
+            &device,
+            &queue,
+            "water-reflection",
+            &water_assets.reflection,
         );
         let water_ramps_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("water-ramps-bind-group"),
@@ -622,6 +647,14 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: wgpu::BindingResource::Sampler(&ramp_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&reflection_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&reflection_sampler),
                 },
             ],
         });

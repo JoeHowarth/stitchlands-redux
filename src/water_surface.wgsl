@@ -1,10 +1,11 @@
 // Main-pass water surface shader. Samples the offscreen R16Float depth RT
 // written by `water_depth.wgsl` in screen space, uses the sampled depth as
-// an X coordinate into a per-type ramp texture to pick a color, and uses a
-// second noise sample (same `_AlphaAddTex`) to soften the shore alpha.
+// an X coordinate into a per-type ramp texture to pick a base (mud-bed)
+// color, and blends in a global sky-reflection texture sampled in world
+// space — that reflection blend is the lever that turns the earth-toned
+// ramps into something that reads as water.
 //
-// Phase 3a: no ripple, no reflection, no flow. Base color comes straight
-// from the ramp; alpha is a smoothstep of depth, jittered by the noise.
+// Phase 3c: reflection wired. No ripple distortion yet (3b).
 
 struct Camera {
   view_proj: mat4x4<f32>,
@@ -41,6 +42,25 @@ var chest_deep_ramp_tex: texture_2d<f32>;
 @group(3) @binding(3)
 var ramp_sampler: sampler;
 
+@group(3) @binding(4)
+var reflection_tex: texture_2d<f32>;
+
+@group(3) @binding(5)
+var reflection_sampler: sampler;
+
+// World units per sky-reflection tile. Larger = fewer repeats across the
+// map (softer sky look); smaller = tighter tiling.
+const REFLECT_SCALE: f32 = 8.0;
+// Reflection blend strength at the shallowest vs deepest water. Shallow
+// water lets more of the mud-bed ramp read through; deep water mirrors
+// more sky.
+const REFLECT_MIX_SHALLOW: f32 = 0.35;
+const REFLECT_MIX_DEEP: f32 = 0.75;
+// RimWorld's `Other/WaterReflection` asset is grayscale cloud luminosity,
+// not pre-colored. The real shader must multiply it by a sky color; we do
+// the same here. Soft daylight sky with a touch of cyan.
+const SKY_TINT: vec3<f32> = vec3<f32>(0.45, 0.65, 0.85);
+
 struct VsIn {
   @location(0) pos: vec2<f32>,
   @location(1) uv: vec2<f32>,
@@ -54,6 +74,7 @@ struct VsOut {
   @builtin(position) clip_pos: vec4<f32>,
   @location(0) cell_uv: vec2<f32>,
   @location(1) tint: vec4<f32>,
+  @location(2) world_xy: vec2<f32>,
 };
 
 @vertex
@@ -67,6 +88,7 @@ fn vs_main(in: VsIn) -> VsOut {
   out.clip_pos = camera.view_proj * vec4<f32>(world, 1.0);
   out.cell_uv = in.uv;
   out.tint = in.tint;
+  out.world_xy = world.xy;
   return out;
 }
 
@@ -98,11 +120,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let ramp_idx = u32(in.tint.g + 0.5);
   let base_color = sample_ramp(ramp_idx, clamp(d, 0.0, 1.0));
 
+  // Sky reflection in world space — this is the 3c lever that turns the
+  // earth-toned ramp output into something blue and water-like. The asset
+  // is grayscale cloud luminosity; we multiply by a sky tint here.
+  let reflect_uv = in.world_xy / REFLECT_SCALE;
+  let sky_lum = textureSample(reflection_tex, reflection_sampler, reflect_uv).r;
+  let sky = SKY_TINT * (0.55 + 0.45 * sky_lum);
+  let reflect_strength = mix(REFLECT_MIX_SHALLOW, REFLECT_MIX_DEEP, d);
+  let rgb = mix(base_color, sky, reflect_strength);
+
   // Near-shore softening. Depth falls off at the mask-roughened cell edge
   // (see `water_depth.wgsl`), so low-d pixels end up transparent-ish;
-  // mid-d pixels pick up the full ramp tint.
+  // mid-d pixels pick up the full ramp+reflection tint.
   let shore_noise = textureSample(alpha_add_tex, alpha_add_sampler, in.cell_uv).r;
   let alpha = smoothstep(0.05, 0.35, d) * mix(0.9, 1.0, shore_noise);
 
-  return vec4<f32>(base_color, alpha);
+  return vec4<f32>(rgb, alpha);
 }
