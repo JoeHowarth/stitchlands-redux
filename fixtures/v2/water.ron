@@ -1,0 +1,94 @@
+// Focused water-rendering fixture. Exercises the two-pass water pipeline
+// across all three ramp variants (shallow / deep / chest-deep) and both
+// `_UseWaterOffset` states. In Core the only chest-deep terrain is
+// `WaterMovingChestDeep`, so the chest-deep ramp and the
+// `_UseWaterOffset=1` path show up on the same cells. The separate
+// `WaterMovingShallow` strip also hits the offset path. River-flow
+// animation isn't implemented yet — this just proves the shader
+// parameter wiring applies.
+//
+// Layout (z grows north, 14×10):
+//   row 9 ..............
+//   row 8 ..wwwwwwwwwww.
+//   row 7 ..wwwwwwwwwww.  shallow pool wrapping a deep core
+//   row 6 ..wwwwwwwwwww.
+//   row 5 ..wwwdddddwww.
+//   row 4 ..wwwdDDDDwww.   D = WaterDeep
+//   row 3 ..wwwdDDDDwww.   d = WaterMovingChestDeep (chest-deep ramp)
+//   row 2 ..wwwdddddwww.   w = WaterShallow
+//   row 1 ..mmmmmmmmmmm.  WaterMovingShallow strip — drains out of the pool
+//   row 0 ..............
+(
+  schema_version: 2,
+  map: (
+    width: 14,
+    height: 10,
+    terrain: [
+      // z=0 — Soil frame
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      // z=1 — WaterMovingShallow strip (sides Soil)
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterMovingShallow"), (terrain_def: "WaterMovingShallow"), (terrain_def: "WaterMovingShallow"),
+      (terrain_def: "WaterMovingShallow"), (terrain_def: "WaterMovingShallow"), (terrain_def: "WaterMovingShallow"),
+      (terrain_def: "WaterMovingShallow"), (terrain_def: "WaterMovingShallow"), (terrain_def: "WaterMovingShallow"),
+      (terrain_def: "WaterMovingShallow"), (terrain_def: "WaterMovingShallow"),
+      (terrain_def: "Soil"),
+      // z=2 — shallow ring around chest-deep ring
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterMovingChestDeep"), (terrain_def: "WaterMovingChestDeep"), (terrain_def: "WaterMovingChestDeep"), (terrain_def: "WaterMovingChestDeep"), (terrain_def: "WaterMovingChestDeep"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"),
+      // z=3 — chest-deep → deep core
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterMovingChestDeep"),
+      (terrain_def: "WaterDeep"), (terrain_def: "WaterDeep"), (terrain_def: "WaterDeep"), (terrain_def: "WaterDeep"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"),
+      // z=4 — deep core center
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterMovingChestDeep"),
+      (terrain_def: "WaterDeep"), (terrain_def: "WaterDeep"), (terrain_def: "WaterDeep"), (terrain_def: "WaterDeep"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"),
+      // z=5 — chest-deep ring again
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterMovingChestDeep"), (terrain_def: "WaterMovingChestDeep"), (terrain_def: "WaterMovingChestDeep"), (terrain_def: "WaterMovingChestDeep"), (terrain_def: "WaterMovingChestDeep"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"),
+      // z=6, z=7, z=8 — uniform shallow band
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"), (terrain_def: "WaterShallow"),
+      (terrain_def: "Soil"),
+      // z=9 — Soil frame
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+    ],
+  ),
+  things: [],
+  pawns: [],
+  camera: (
+    center_x: 7.0,
+    center_z: 5.0,
+  ),
+)
