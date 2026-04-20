@@ -1,9 +1,11 @@
-// Stub for the Phase 2 plumbing smoke test. Mirrors the quad/instance
-// layout of `shader.wgsl` so the same vertex/instance buffers can feed it,
-// but the fragment just writes 1.0 into the red channel of the R16Float
-// offscreen target. Phase 3 replaces the fragment with the real
-// depth-modulation math (constants per water type + `_AlphaAddTex` mask +
-// optional `_UseWaterOffset` flow distortion).
+// First half of the two-pass water pipeline. Writes a single float in the
+// R channel of the R16Float offscreen RT: the per-type depth constant
+// (tint.r, set by `water_shader_params`) modulated by a noise-mask sample
+// of `_AlphaAddTex` (RoughAlphaAdd). The surface shader then samples this
+// RT in screen space to pick a ramp color and soften the shore.
+//
+// Phase 3a keeps the math deliberately small — no ripple, no flow offset,
+// no sun/moon math. Phase 3b/c add those.
 
 struct Camera {
   view_proj: mat4x4<f32>,
@@ -16,6 +18,12 @@ struct Camera {
 @group(0) @binding(0)
 var<uniform> camera: Camera;
 
+@group(1) @binding(0)
+var alpha_add_tex: texture_2d<f32>;
+
+@group(1) @binding(1)
+var alpha_add_sampler: sampler;
+
 struct VsIn {
   @location(0) pos: vec2<f32>,
   @location(1) uv: vec2<f32>,
@@ -27,6 +35,8 @@ struct VsIn {
 
 struct VsOut {
   @builtin(position) clip_pos: vec4<f32>,
+  @location(0) cell_uv: vec2<f32>,
+  @location(1) tint: vec4<f32>,
 };
 
 @vertex
@@ -38,13 +48,16 @@ fn vs_main(in: VsIn) -> VsOut {
     in.world_pos.z
   );
   out.clip_pos = camera.view_proj * vec4<f32>(world, 1.0);
+  out.cell_uv = in.uv;
+  out.tint = in.tint;
   return out;
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-  // Phase 2 stub: constant 1.0 in R so the surface shader's sample test
-  // lights up every water pixel. Phase 3 will modulate this by depth
-  // constants, an alpha-add noise mask, and optional flow offset.
-  return vec4<f32>(1.0, 0.0, 0.0, 0.0);
+  let noise = textureSample(alpha_add_tex, alpha_add_sampler, in.cell_uv).r;
+  // Base depth per water type (tint.r), roughened by the noise mask so the
+  // shore reads as irregular when the surface pass does its smoothstep.
+  let depth = in.tint.r * mix(0.75, 1.0, noise);
+  return vec4<f32>(depth, 0.0, 0.0, 0.0);
 }

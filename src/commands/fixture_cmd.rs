@@ -15,7 +15,7 @@ use crate::pawn::{
 use crate::renderer::{FULL_UV_RECT, SpriteParams};
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
 use crate::viewer::RenderSprite;
-use crate::water_assets::WaterAssets;
+use crate::water_assets::{WaterAssets, water_shader_params};
 use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
 
 use super::common::{
@@ -51,21 +51,21 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let edge_sprites =
         emit_terrain_edge_sprites(ctx.data_dir, ctx.asset_resolver, &ctx.defs, &world, false)?;
-        let noise_image = {
-            let resolved = ctx
-                .asset_resolver
-                .resolve_texture_path(ROUGH_ALPHA_ADD_PATH)
-                .with_context(|| format!("resolving noise texture '{ROUGH_ALPHA_ADD_PATH}'"))?;
-            if resolved.used_fallback() {
-                warn!(
-                    "noise texture '{}' not resolved; using 1x1 gray fallback (FadeRough edges will be flat)",
-                    ROUGH_ALPHA_ADD_PATH
-                );
-                crate::renderer::fallback_noise_image()
-            } else {
-                resolved.image
-            }
-        };
+    let noise_image = {
+        let resolved = ctx
+            .asset_resolver
+            .resolve_texture_path(ROUGH_ALPHA_ADD_PATH)
+            .with_context(|| format!("resolving noise texture '{ROUGH_ALPHA_ADD_PATH}'"))?;
+        if resolved.used_fallback() {
+            warn!(
+                "noise texture '{}' not resolved; using 1x1 gray fallback (FadeRough edges will be flat)",
+                ROUGH_ALPHA_ADD_PATH
+            );
+            crate::renderer::fallback_noise_image()
+        } else {
+            resolved.image
+        }
+    };
     let blocking_things = world
         .things()
         .iter()
@@ -110,7 +110,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         },
     );
 
-    WaterAssets::load(ctx.asset_resolver)?;
+    let water_assets = WaterAssets::load(ctx.asset_resolver)?;
 
     if !should_run_renderer {
         let tick_limit = cmd.ticks.unwrap_or(0);
@@ -129,6 +129,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         dynamic_sprites,
         edge_sprites,
         noise_image,
+        water_assets,
         runtime: Some(runtime),
         runtime_tick_limit: cmd.ticks,
         screenshot: cmd.view.screenshot,
@@ -179,14 +180,18 @@ fn build_world_sprites(
                 );
             }
             let used_fallback = resolved.used_fallback();
-            let is_water = terrain_def.water_depth_shader.is_some();
+            let water_params = water_shader_params(terrain_def);
+            let is_water = water_params.is_some();
+            let tint = water_params
+                .map(|p| p.to_tint())
+                .unwrap_or([1.0, 1.0, 1.0, 1.0]);
             static_sprites.push(RenderSprite {
                 def_name: format!("Terrain::{}", terrain_def.def_name),
                 image: resolved.image,
                 params: SpriteParams {
                     world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -1.0),
                     size: Vec2::new(1.0, 1.0),
-                    tint: [1.0, 1.0, 1.0, 1.0],
+                    tint,
                     uv_rect: FULL_UV_RECT,
                 },
                 used_fallback,
@@ -298,12 +303,10 @@ fn build_world_sprites(
         let head_tex_path = head.map(|h| {
             resolve_directional_tex_path(ctx.asset_resolver, &h.graphic_path, facing).path
         });
-        let hair_tex_path = hair.map(|h| {
-            resolve_directional_tex_path(ctx.asset_resolver, &h.tex_path, facing).path
-        });
-        let beard_tex_path = beard.map(|b| {
-            resolve_directional_tex_path(ctx.asset_resolver, &b.tex_path, facing).path
-        });
+        let hair_tex_path = hair
+            .map(|h| resolve_directional_tex_path(ctx.asset_resolver, &h.tex_path, facing).path);
+        let beard_tex_path = beard
+            .map(|b| resolve_directional_tex_path(ctx.asset_resolver, &b.tex_path, facing).path);
 
         let apparel_inputs = build_apparel_inputs(
             ctx.defs.apparel_defs,
@@ -434,12 +437,8 @@ fn build_apparel_inputs(
         };
 
         // Resolve body-type suffixed texture path
-        let tex_path = build_apparel_tex_path(
-            apparel,
-            body_def_name,
-            render_as_pack,
-            asset_resolver,
-        );
+        let tex_path =
+            build_apparel_tex_path(apparel, body_def_name, render_as_pack, asset_resolver);
 
         // Resolve directional texture
         let directional = resolve_directional_tex_path(asset_resolver, &tex_path, facing);

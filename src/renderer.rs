@@ -37,6 +37,7 @@ pub struct Renderer {
     water_depth_sampler: wgpu::Sampler,
     water_depth_view: wgpu::TextureView,
     water_depth_bind_group: wgpu::BindGroup,
+    water_ramps_bind_group: wgpu::BindGroup,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
@@ -204,6 +205,7 @@ impl Renderer {
         window: Arc<Window>,
         sprites: Vec<SpriteInput>,
         noise_image: RgbaImage,
+        water_assets: crate::water_assets::WaterAssets,
         initial_camera_center: Option<Vec2>,
         options: RendererOptions,
     ) -> Result<Self> {
@@ -480,39 +482,41 @@ impl Renderer {
         let water_depth_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("water-depth-pipeline-layout"),
-                bind_group_layouts: &[&camera_layout],
+                // slot 1 reuses `noise_layout` so the same noise_bind_group
+                // (RoughAlphaAdd) can feed both the edge and water-depth
+                // pipelines — it's the same packed asset.
+                bind_group_layouts: &[&camera_layout, &noise_layout],
                 push_constant_ranges: &[],
             });
-        let water_depth_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("water-depth-pipeline"),
-                layout: Some(&water_depth_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &water_depth_shader,
-                    entry_point: "vs_main",
-                    buffers: &[Vertex::desc(), InstanceData::desc()],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &water_depth_shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: WATER_DEPTH_FORMAT,
-                        // The depth pass "paints" values into the RT with
-                        // straight replace semantics. Blending would confuse
-                        // downstream sampling — if two water cells overlap in
-                        // screen space (they don't today, but in principle),
-                        // take the last one written.
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::RED,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            });
+        let water_depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("water-depth-pipeline"),
+            layout: Some(&water_depth_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &water_depth_shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc(), InstanceData::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &water_depth_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: WATER_DEPTH_FORMAT,
+                    // The depth pass "paints" values into the RT with
+                    // straight replace semantics. Blending would confuse
+                    // downstream sampling — if two water cells overlap in
+                    // screen space (they don't today, but in principle),
+                    // take the last one written.
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::RED,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
 
         let water_depth_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -556,6 +560,72 @@ impl Renderer {
             config.height,
         );
 
+        // Surface-pass ramps: three ramp textures + a shared linear sampler
+        // in one bind group. The fragment picks the ramp by `tint.g` (set by
+        // `water_shader_params`). `_AlphaAddTex` is not re-bound here — we
+        // reuse `noise_bind_group` at slot 2 (same asset).
+        let water_ramps_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("water-ramps-layout"),
+                entries: &[
+                    ramp_texture_entry(0),
+                    ramp_texture_entry(1),
+                    ramp_texture_entry(2),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let ramp_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("water-ramp-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let shallow_view = upload_ramp_texture(
+            &device,
+            &queue,
+            "water-shallow-ramp",
+            &water_assets.shallow_ramp,
+        );
+        let deep_view =
+            upload_ramp_texture(&device, &queue, "water-deep-ramp", &water_assets.deep_ramp);
+        let chest_deep_view = upload_ramp_texture(
+            &device,
+            &queue,
+            "water-chest-deep-ramp",
+            &water_assets.chest_deep_ramp,
+        );
+        let water_ramps_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("water-ramps-bind-group"),
+            layout: &water_ramps_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&shallow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&deep_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&chest_deep_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&ramp_sampler),
+                },
+            ],
+        });
+
         let water_surface_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("water-surface-shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("water_surface.wgsl"))),
@@ -563,7 +633,12 @@ impl Renderer {
         let water_surface_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("water-surface-pipeline-layout"),
-                bind_group_layouts: &[&camera_layout, &water_depth_layout],
+                bind_group_layouts: &[
+                    &camera_layout,
+                    &water_depth_layout,
+                    &noise_layout,
+                    &water_ramps_layout,
+                ],
                 push_constant_ranges: &[],
             });
         let water_surface_pipeline =
@@ -607,6 +682,7 @@ impl Renderer {
             water_depth_sampler,
             water_depth_view,
             water_depth_bind_group,
+            water_ramps_bind_group,
             vertex_buffer,
             index_buffer,
             num_indices: indices.len() as u32,
@@ -982,6 +1058,7 @@ impl Renderer {
             if !self.water_sprite_batches.is_empty() {
                 depth_pass.set_pipeline(&self.water_depth_pipeline);
                 depth_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                depth_pass.set_bind_group(1, &self.noise_bind_group, &[]);
                 depth_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 depth_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 for batch in &self.water_sprite_batches {
@@ -1056,6 +1133,8 @@ impl Renderer {
                         DrawKind::Water => {
                             pass.set_pipeline(&self.water_surface_pipeline);
                             pass.set_bind_group(1, &self.water_depth_bind_group, &[]);
+                            pass.set_bind_group(2, &self.noise_bind_group, &[]);
+                            pass.set_bind_group(3, &self.water_ramps_bind_group, &[]);
                             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                             pass.set_index_buffer(
                                 self.index_buffer.slice(..),
@@ -1252,6 +1331,60 @@ fn pack_sprite_batches(
             .then(a.texture_hash.cmp(&b.texture_hash))
     });
     sprite_batches
+}
+
+fn ramp_texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn upload_ramp_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &'static str,
+    image: &RgbaImage,
+) -> wgpu::TextureView {
+    let size = wgpu::Extent3d {
+        width: image.width(),
+        height: image.height(),
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        // Ramps are sampled as color, so keep sRGB so the gradient reads
+        // correctly when sampled linearly.
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::ImageCopyTexture {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        image.as_raw(),
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * image.width()),
+            rows_per_image: Some(image.height()),
+        },
+        size,
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 fn create_water_depth_target(
