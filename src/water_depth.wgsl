@@ -1,11 +1,13 @@
 // First half of the two-pass water pipeline. Writes a single float in the
-// R channel of the R16Float offscreen RT: the per-type depth constant
-// (tint.r, set by `water_shader_params`) modulated by a noise-mask sample
-// of `_AlphaAddTex` (RoughAlphaAdd). The surface shader then samples this
-// RT in screen space to pick a ramp color and soften the shore.
+// R channel of the R16Float offscreen RT: a **type-independent** shore
+// indicator — ~1.0 inside water, 0 outside (non-water cells never draw
+// here), with noise-mask jitter so the shore reads as irregular when the
+// surface pass does its smoothstep. Per-water-type color variation lives
+// in the ramp choice, not in this value; mixing shallow-vs-deep into the
+// same RT produces a visible brown band at shallow↔deep cell boundaries
+// via linear-sampler bleed.
 //
-// Phase 3a keeps the math deliberately small — no ripple, no flow offset,
-// no sun/moon math. Phase 3b/c add those.
+// Phase 3a/3c: no ripple, no flow offset, no sun/moon math. 3b adds those.
 
 struct Camera {
   view_proj: mat4x4<f32>,
@@ -56,8 +58,9 @@ fn vs_main(in: VsIn) -> VsOut {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let noise = textureSample(alpha_add_tex, alpha_add_sampler, in.cell_uv).r;
-  // Base depth per water type (tint.r), roughened by the noise mask so the
-  // shore reads as irregular when the surface pass does its smoothstep.
-  let depth = in.tint.r * mix(0.75, 1.0, noise);
+  // Uniform across water types — type-specific color differences come
+  // from the ramp choice + per-type reflection strength in the surface
+  // pass. The noise jitter gives the shore an irregular roughened edge.
+  let depth = mix(0.75, 1.0, noise);
   return vec4<f32>(depth, 0.0, 0.0, 0.0);
 }

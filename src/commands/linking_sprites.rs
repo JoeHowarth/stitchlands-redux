@@ -281,6 +281,15 @@ pub(crate) fn compute_terrain_edge_contributions(
                 if neighbor_def.def_name == self_def.def_name {
                     continue;
                 }
+                // Two water terrains meeting: the base water pass already
+                // paints both cells; an edge fan between them would overlay
+                // the higher-precedence water's ramp on the lower one and
+                // read as a muddy band inside the water body. Skip.
+                if self_def.water_depth_shader.is_some()
+                    && neighbor_def.water_depth_shader.is_some()
+                {
+                    continue;
+                }
                 let edge_type = match neighbor_def.edge_type {
                     TerrainEdgeType::None | TerrainEdgeType::Hard => continue,
                     TerrainEdgeType::FadeRough => EdgeType::FadeRough,

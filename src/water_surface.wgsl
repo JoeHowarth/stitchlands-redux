@@ -51,11 +51,6 @@ var reflection_sampler: sampler;
 // World units per sky-reflection tile. Larger = fewer repeats across the
 // map (softer sky look); smaller = tighter tiling.
 const REFLECT_SCALE: f32 = 8.0;
-// Reflection blend strength at the shallowest vs deepest water. Shallow
-// water lets more of the mud-bed ramp read through; deep water mirrors
-// more sky.
-const REFLECT_MIX_SHALLOW: f32 = 0.35;
-const REFLECT_MIX_DEEP: f32 = 0.75;
 // RimWorld's `Other/WaterReflection` asset is grayscale cloud luminosity,
 // not pre-colored. The real shader must multiply it by a sky color; we do
 // the same here. Soft daylight sky with a touch of cyan.
@@ -122,11 +117,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
   // Sky reflection in world space — this is the 3c lever that turns the
   // earth-toned ramp output into something blue and water-like. The asset
-  // is grayscale cloud luminosity; we multiply by a sky tint here.
+  // is grayscale cloud luminosity; we multiply by a sky tint here. Per-
+  // type strength comes from tint.r (set by `water_shader_params`); we
+  // attenuate it at the shore so the mud bed reads through.
   let reflect_uv = in.world_xy / REFLECT_SCALE;
   let sky_lum = textureSample(reflection_tex, reflection_sampler, reflect_uv).r;
   let sky = SKY_TINT * (0.55 + 0.45 * sky_lum);
-  let reflect_strength = mix(REFLECT_MIX_SHALLOW, REFLECT_MIX_DEEP, d);
+  let reflect_strength = in.tint.r * smoothstep(0.2, 0.9, d);
   let rgb = mix(base_color, sky, reflect_strength);
 
   // Near-shore softening. Depth falls off at the mask-roughened cell edge
