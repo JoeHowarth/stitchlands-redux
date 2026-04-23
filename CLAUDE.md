@@ -1,4 +1,4 @@
-See [AGENTS.md](./AGENTS.md) for project conventions (lint policy, debugging workflow, work completion, path references).
+@./AGENTS.md
 
 ## External References
 

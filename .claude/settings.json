@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '--- recent commits (all branches) ---'; git log --all --oneline -15; echo; echo '--- branches (newest first) ---'; git branch -a --sort=-committerdate | head -10; echo; echo '--- worktrees ---'; git worktree list"
+          }
+        ]
+      }
+    ]
+  }
+}
