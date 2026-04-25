@@ -20,6 +20,17 @@ const EDGE_SHADOW_COLOR: RgbaColor = RgbaColor {
     a: 1.0,
 };
 
+#[derive(Clone, Copy)]
+struct SunShadowExtrusion {
+    min_x: f32,
+    min_z: f32,
+    max_x: f32,
+    max_z: f32,
+    offset: Vec2,
+    color: RgbaColor,
+    alpha: f32,
+}
+
 pub fn build_shadow_overlays(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
@@ -63,14 +74,18 @@ fn build_sun_shadow_overlay(
         }
         let offset = sky_shadow.shadow_vector * height.max(0.0);
         let alpha = (sky_shadow.shadow_alpha_scale * height).clamp(0.0, 1.0);
-        push_solid_quad(
+        push_extruded_sun_shadow(
             &mut vertices,
             &mut indices,
-            thing.cell_x as f32 + offset.x,
-            thing.cell_z as f32 + offset.y,
-            thing.cell_x as f32 + 1.0 + offset.x,
-            thing.cell_z as f32 + 1.0 + offset.y,
-            color_with_alpha(sky_shadow.overlay_shadow_color, alpha),
+            SunShadowExtrusion {
+                min_x: thing.cell_x as f32,
+                min_z: thing.cell_z as f32,
+                max_x: thing.cell_x as f32 + 1.0,
+                max_z: thing.cell_z as f32 + 1.0,
+                offset,
+                color: sky_shadow.overlay_shadow_color,
+                alpha,
+            },
         );
     }
 
@@ -292,6 +307,77 @@ fn push_solid_quad(
     }
 }
 
+fn push_extruded_sun_shadow(
+    vertices: &mut Vec<ColoredVertex>,
+    indices: &mut Vec<u32>,
+    extrusion: SunShadowExtrusion,
+) {
+    let SunShadowExtrusion {
+        min_x,
+        min_z,
+        max_x,
+        max_z,
+        offset,
+        color,
+        alpha,
+    } = extrusion;
+
+    if alpha <= 0.0 || offset.length_squared() <= f32::EPSILON {
+        return;
+    }
+
+    let base = [
+        (min_x, min_z),
+        (min_x, max_z),
+        (max_x, max_z),
+        (max_x, min_z),
+    ];
+    let projected = base.map(|(x, z)| (x + offset.x, z + offset.y));
+    let low_color = color_with_alpha(color, 0.0);
+    let high_color = color_with_alpha(color, alpha);
+    let base_index = vertices.len() as u32;
+
+    for (x, z) in base {
+        vertices.push(ColoredVertex {
+            world_pos: [x, z, SHADOW_OVERLAY_DEPTH],
+            color: low_color,
+        });
+    }
+    for (x, z) in projected {
+        vertices.push(ColoredVertex {
+            world_pos: [x, z, SHADOW_OVERLAY_DEPTH],
+            color: high_color,
+        });
+    }
+
+    indices.extend_from_slice(&[
+        base_index,
+        base_index + 1,
+        base_index + 5,
+        base_index,
+        base_index + 5,
+        base_index + 4,
+        base_index + 1,
+        base_index + 2,
+        base_index + 6,
+        base_index + 1,
+        base_index + 6,
+        base_index + 5,
+        base_index + 2,
+        base_index + 3,
+        base_index + 7,
+        base_index + 2,
+        base_index + 7,
+        base_index + 6,
+        base_index + 3,
+        base_index,
+        base_index + 4,
+        base_index + 3,
+        base_index + 4,
+        base_index + 7,
+    ]);
+}
+
 fn push_gradient_quad(
     vertices: &mut Vec<ColoredVertex>,
     indices: &mut Vec<u32>,
@@ -506,9 +592,14 @@ mod tests {
 
         assert_eq!(overlays.len(), 1);
         assert_eq!(overlays[0].blend_mode, OverlayBlendMode::Multiply);
-        assert_eq!(overlays[0].vertices[0].world_pos[0], 1.2);
-        assert_eq!(overlays[0].vertices[0].world_pos[1], 0.9);
-        assert_eq!(overlays[0].vertices[0].color[3], 0.2);
+        assert_eq!(overlays[0].vertices.len(), 8);
+        assert_eq!(overlays[0].indices.len(), 24);
+        assert_eq!(overlays[0].vertices[0].world_pos[0], 1.0);
+        assert_eq!(overlays[0].vertices[0].world_pos[1], 1.0);
+        assert_eq!(overlays[0].vertices[0].color[3], 0.0);
+        assert_eq!(overlays[0].vertices[4].world_pos[0], 1.2);
+        assert_eq!(overlays[0].vertices[4].world_pos[1], 0.9);
+        assert_eq!(overlays[0].vertices[4].color[3], 0.2);
     }
 
     #[test]
@@ -523,11 +614,11 @@ mod tests {
         let morning_overlays = build_shadow_overlays(&thing_defs, &morning).unwrap();
         let evening_overlays = build_shadow_overlays(&thing_defs, &evening).unwrap();
 
-        assert!((morning_overlays[0].vertices[0].world_pos[0] + 3.5).abs() < 0.001);
-        assert!((evening_overlays[0].vertices[0].world_pos[0] - 5.5).abs() < 0.001);
+        assert!((morning_overlays[0].vertices[4].world_pos[0] + 3.5).abs() < 0.001);
+        assert!((evening_overlays[0].vertices[4].world_pos[0] - 5.5).abs() < 0.001);
         assert_ne!(
-            morning_overlays[0].vertices[0].world_pos[0],
-            evening_overlays[0].vertices[0].world_pos[0]
+            morning_overlays[0].vertices[4].world_pos[0],
+            evening_overlays[0].vertices[4].world_pos[0]
         );
     }
 
