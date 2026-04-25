@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::cell::Cell;
 use crate::defs::ThingDef;
-use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayPass};
+use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayBlendMode, OverlayPass};
 use crate::world::WorldState;
 
 use super::glow_grid::{GlowGrid, GlowSample};
@@ -100,6 +100,7 @@ pub fn build_lighting_overlays(
 
     Ok(vec![ColoredMeshInput {
         pass: OverlayPass::AfterStatic,
+        blend_mode: OverlayBlendMode::Alpha,
         vertices,
         indices,
     }])

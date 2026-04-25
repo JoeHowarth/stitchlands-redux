@@ -31,6 +31,7 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
     overlay_pipeline: wgpu::RenderPipeline,
+    overlay_multiply_pipeline: wgpu::RenderPipeline,
     water_depth_pipeline: wgpu::RenderPipeline,
     water_surface_pipeline: wgpu::RenderPipeline,
     noise_bind_group: wgpu::BindGroup,
@@ -94,9 +95,25 @@ type GroupedSpriteInstances = HashMap<TextureId, Vec<(usize, InstanceData)>>;
 
 struct ColoredMeshBatch {
     pass: OverlayPass,
+    blend_mode: OverlayBlendMode,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+}
+
+fn multiply_overlay_blend_state() -> wgpu::BlendState {
+    wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Dst,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Zero,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        },
+    }
 }
 
 #[repr(C)]
@@ -494,6 +511,12 @@ impl Renderer {
             label: Some("colored-overlay-shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("colored_overlay.wgsl"))),
         });
+        let overlay_multiply_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("colored-overlay-multiply-shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                "colored_overlay_multiply.wgsl"
+            ))),
+        });
         let overlay_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("colored-overlay-pipeline-layout"),
@@ -524,6 +547,31 @@ impl Renderer {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
+        let overlay_multiply_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("colored-overlay-multiply-pipeline"),
+                layout: Some(&overlay_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &overlay_multiply_shader,
+                    entry_point: "vs_main",
+                    buffers: &[ColoredVertex::desc()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &overlay_multiply_shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(multiply_overlay_blend_state()),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            });
 
         let water_depth_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("water-depth-shader"),
@@ -789,6 +837,7 @@ impl Renderer {
             pipeline,
             edge_pipeline,
             overlay_pipeline,
+            overlay_multiply_pipeline,
             water_depth_pipeline,
             water_surface_pipeline,
             noise_bind_group,
@@ -1004,6 +1053,7 @@ impl Renderer {
                 });
             batches.push(ColoredMeshBatch {
                 pass: overlay.pass,
+                blend_mode: overlay.blend_mode,
                 vertex_buffer,
                 index_buffer,
                 index_count: overlay.indices.len() as u32,
@@ -1398,15 +1448,18 @@ impl Renderer {
     }
 
     fn draw_overlay_pass<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, overlay_pass: OverlayPass) {
-        let mut pipeline_set = false;
+        let mut current_blend_mode = None;
         for batch in self
             .overlay_batches
             .iter()
             .filter(|batch| batch.pass == overlay_pass)
         {
-            if !pipeline_set {
-                pass.set_pipeline(&self.overlay_pipeline);
-                pipeline_set = true;
+            if current_blend_mode != Some(batch.blend_mode) {
+                pass.set_pipeline(match batch.blend_mode {
+                    OverlayBlendMode::Alpha => &self.overlay_pipeline,
+                    OverlayBlendMode::Multiply => &self.overlay_multiply_pipeline,
+                });
+                current_blend_mode = Some(batch.blend_mode);
             }
             pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
             pass.set_index_buffer(batch.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -1696,9 +1749,16 @@ pub enum OverlayPass {
     AfterDynamic,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum OverlayBlendMode {
+    Alpha,
+    Multiply,
+}
+
 #[derive(Debug, Clone)]
 pub struct ColoredMeshInput {
     pub pass: OverlayPass,
+    pub blend_mode: OverlayBlendMode,
     pub vertices: Vec<ColoredVertex>,
     pub indices: Vec<u32>,
 }

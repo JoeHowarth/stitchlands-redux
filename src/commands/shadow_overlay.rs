@@ -5,7 +5,7 @@ use glam::Vec2;
 
 use crate::cell::Cell;
 use crate::defs::{RgbaColor, ShadowData, ThingDef};
-use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayPass};
+use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayBlendMode, OverlayPass};
 use crate::world::{ThingState, WorldState};
 
 use super::sky_shadow::sky_shadow_state;
@@ -319,6 +319,7 @@ fn mesh_if_not_empty(vertices: Vec<ColoredVertex>, indices: Vec<u32>) -> Option<
     }
     Some(ColoredMeshInput {
         pass: OverlayPass::AfterTerrain,
+        blend_mode: OverlayBlendMode::Multiply,
         vertices,
         indices,
     })
@@ -374,6 +375,7 @@ mod tests {
         FixtureColor, FixtureVector2, MapSpec, RenderSpec, SceneFixture, TerrainCell, ThingSpawn,
     };
     use crate::linking::{LinkDrawerType, LinkFlags};
+    use crate::renderer::OverlayBlendMode;
     use crate::world::world_from_fixture;
 
     use super::{EDGE_SHADOW_IN_DIST, build_shadow_overlays};
@@ -503,6 +505,7 @@ mod tests {
         let overlays = build_shadow_overlays(&thing_defs, &world).unwrap();
 
         assert_eq!(overlays.len(), 1);
+        assert_eq!(overlays[0].blend_mode, OverlayBlendMode::Multiply);
         assert_eq!(overlays[0].vertices[0].world_pos[0], 1.2);
         assert_eq!(overlays[0].vertices[0].world_pos[1], 0.9);
         assert_eq!(overlays[0].vertices[0].color[3], 0.2);
