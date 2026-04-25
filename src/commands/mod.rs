@@ -34,6 +34,7 @@ pub struct LaunchSpec {
     pub static_sprites: Vec<crate::viewer::RenderSprite>,
     pub dynamic_sprites: Vec<crate::viewer::RenderSprite>,
     pub edge_sprites: Vec<crate::renderer::EdgeSpriteInput>,
+    pub static_overlays: Vec<crate::renderer::ColoredMeshInput>,
     pub noise_image: image::RgbaImage,
     pub water_assets: WaterAssets,
     pub runtime: Option<crate::runtime::v2::V2Runtime>,

@@ -58,6 +58,7 @@ fn main() -> Result<()> {
                 static_sprites: spec.static_sprites,
                 dynamic_sprites: spec.dynamic_sprites,
                 edge_sprites: spec.edge_sprites,
+                static_overlays: spec.static_overlays,
                 noise_image: spec.noise_image,
                 water_assets: spec.water_assets,
                 screenshot_path: spec.screenshot,

@@ -13,8 +13,8 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::renderer::{
-    EdgeSpriteInput, Renderer, RendererOptions, SpriteInput, SpriteInstance, SpriteParams,
-    TextureId,
+    ColoredMeshInput, EdgeSpriteInput, Renderer, RendererOptions, SpriteInput, SpriteInstance,
+    SpriteParams, TextureId,
 };
 use crate::runtime::v2::{
     InteractionOutcome, V2Runtime,
@@ -39,6 +39,7 @@ pub(crate) struct ViewerLaunch {
     pub(crate) static_sprites: Vec<RenderSprite>,
     pub(crate) dynamic_sprites: Vec<RenderSprite>,
     pub(crate) edge_sprites: Vec<EdgeSpriteInput>,
+    pub(crate) static_overlays: Vec<ColoredMeshInput>,
     pub(crate) noise_image: RgbaImage,
     pub(crate) water_assets: WaterAssets,
     pub(crate) screenshot_path: Option<std::path::PathBuf>,
@@ -61,6 +62,7 @@ struct App {
     static_sprites: Vec<RenderSprite>,
     dynamic_sprites: Vec<RenderSprite>,
     edge_sprites: Vec<EdgeSpriteInput>,
+    static_overlays: Vec<ColoredMeshInput>,
     noise_image: RgbaImage,
     water_assets: Option<WaterAssets>,
     screenshot_path: Option<std::path::PathBuf>,
@@ -87,6 +89,7 @@ impl App {
             static_sprites: launch.static_sprites,
             dynamic_sprites: launch.dynamic_sprites,
             edge_sprites: launch.edge_sprites,
+            static_overlays: launch.static_overlays,
             noise_image: launch.noise_image,
             water_assets: Some(launch.water_assets),
             screenshot_path: launch.screenshot_path,
@@ -179,6 +182,10 @@ impl ApplicationHandler for App {
         renderer
             .set_static_edge_sprites(edge_inputs)
             .expect("set static edge sprites");
+        let static_overlays: Vec<ColoredMeshInput> = self.static_overlays.drain(..).collect();
+        renderer
+            .set_static_overlays(static_overlays)
+            .expect("set static overlays");
         self.base_dynamic_inputs.clear();
         self.pawn_node_textures.clear();
         self.overlay_texture_id = Some(renderer.register_texture(self.overlay_image.clone()));

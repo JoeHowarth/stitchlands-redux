@@ -183,6 +183,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         static_sprites,
         dynamic_sprites,
         edge_sprites,
+        static_overlays: Vec::new(),
         noise_image,
         water_assets,
         runtime: Some(runtime),

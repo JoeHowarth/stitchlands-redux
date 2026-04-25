@@ -30,6 +30,7 @@ pub struct Renderer {
     size: PhysicalSize<u32>,
     pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
+    overlay_pipeline: wgpu::RenderPipeline,
     water_depth_pipeline: wgpu::RenderPipeline,
     water_surface_pipeline: wgpu::RenderPipeline,
     noise_bind_group: wgpu::BindGroup,
@@ -53,6 +54,7 @@ pub struct Renderer {
     static_instances: Vec<SpriteInstance>,
     dynamic_instances: Vec<SpriteInstance>,
     edge_fans: Vec<EdgeFanInstance>,
+    overlay_batches: Vec<ColoredMeshBatch>,
     next_texture_id: u32,
     sprite_batches: Vec<SpriteBatch>,
     water_sprite_batches: Vec<SpriteBatch>,
@@ -82,6 +84,13 @@ struct EdgeSpriteBatch {
     min_z: f32,
     first_index: usize,
     texture_hash: u64,
+}
+
+struct ColoredMeshBatch {
+    pass: OverlayPass,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
 }
 
 #[repr(C)]
@@ -475,6 +484,41 @@ impl Renderer {
             multiview: None,
         });
 
+        let overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("colored-overlay-shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("colored_overlay.wgsl"))),
+        });
+        let overlay_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("colored-overlay-pipeline-layout"),
+                bind_group_layouts: &[&camera_layout],
+                push_constant_ranges: &[],
+            });
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("colored-overlay-pipeline"),
+            layout: Some(&overlay_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &overlay_shader,
+                entry_point: "vs_main",
+                buffers: &[ColoredVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &overlay_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         let water_depth_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("water-depth-shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("water_depth.wgsl"))),
@@ -738,6 +782,7 @@ impl Renderer {
             size,
             pipeline,
             edge_pipeline,
+            overlay_pipeline,
             water_depth_pipeline,
             water_surface_pipeline,
             noise_bind_group,
@@ -761,6 +806,7 @@ impl Renderer {
             static_instances: Vec::new(),
             dynamic_instances: Vec::new(),
             edge_fans: Vec::new(),
+            overlay_batches: Vec::new(),
             next_texture_id: 1,
             sprite_batches: Vec::new(),
             water_sprite_batches: Vec::new(),
@@ -775,6 +821,7 @@ impl Renderer {
             frame_epoch: Instant::now(),
         };
         out.set_static_sprites(sprites)?;
+        out.set_static_overlays(Vec::new())?;
         out.set_dynamic_sprites(Vec::new())?;
         Ok(out)
     }
@@ -912,6 +959,48 @@ impl Renderer {
             .collect();
         self.edge_fans = fans;
         self.rebuild_edge_batches()
+    }
+
+    pub fn set_static_overlays(&mut self, overlays: Vec<ColoredMeshInput>) -> Result<()> {
+        let mut batches = Vec::new();
+        for overlay in overlays {
+            if overlay.vertices.is_empty() || overlay.indices.is_empty() {
+                continue;
+            }
+            let vertex_count = overlay.vertices.len() as u32;
+            if let Some(index) = overlay
+                .indices
+                .iter()
+                .copied()
+                .find(|index| *index >= vertex_count)
+            {
+                anyhow::bail!(
+                    "colored overlay index {index} is out of bounds for {vertex_count} vertices"
+                );
+            }
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("colored-overlay-vertex-buffer"),
+                    contents: bytemuck::cast_slice(&overlay.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let index_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("colored-overlay-index-buffer"),
+                    contents: bytemuck::cast_slice(&overlay.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            batches.push(ColoredMeshBatch {
+                pass: overlay.pass,
+                vertex_buffer,
+                index_buffer,
+                index_count: overlay.indices.len() as u32,
+            });
+        }
+        self.overlay_batches = batches;
+        Ok(())
     }
 
     pub fn set_dynamic_sprites(&mut self, sprites: Vec<SpriteInput>) -> Result<()> {
@@ -1148,6 +1237,7 @@ impl Renderer {
             });
 
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            self.draw_overlay_pass(&mut pass, OverlayPass::BeforeWorld);
 
             #[derive(Clone, Copy)]
             enum DrawKind {
@@ -1239,6 +1329,7 @@ impl Renderer {
                     }
                 }
             }
+            self.draw_overlay_pass(&mut pass, OverlayPass::AfterWorld);
         }
 
         let readback = if screenshot_path.is_some() {
@@ -1351,6 +1442,23 @@ impl Renderer {
             }
             wgpu::SurfaceError::OutOfMemory => anyhow::bail!("gpu out of memory"),
             wgpu::SurfaceError::Timeout => Ok(()),
+        }
+    }
+
+    fn draw_overlay_pass<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, overlay_pass: OverlayPass) {
+        let mut pipeline_set = false;
+        for batch in self
+            .overlay_batches
+            .iter()
+            .filter(|batch| batch.pass == overlay_pass)
+        {
+            if !pipeline_set {
+                pass.set_pipeline(&self.overlay_pipeline);
+                pipeline_set = true;
+            }
+            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+            pass.set_index_buffer(batch.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..batch.index_count, 0, 0..1);
         }
     }
 }
@@ -1505,6 +1613,47 @@ struct ScreenshotReadback {
     height: u32,
     unpadded_bytes_per_row: u32,
     padded_bytes_per_row: u32,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum OverlayPass {
+    BeforeWorld,
+    AfterWorld,
+}
+
+#[derive(Debug, Clone)]
+pub struct ColoredMeshInput {
+    pub pass: OverlayPass,
+    pub vertices: Vec<ColoredVertex>,
+    pub indices: Vec<u32>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
+pub struct ColoredVertex {
+    pub world_pos: [f32; 3],
+    pub color: [f32; 4],
+}
+
+impl ColoredVertex {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<ColoredVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 12,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
