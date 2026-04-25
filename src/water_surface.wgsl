@@ -3,9 +3,10 @@
 // an X coordinate into a per-type ramp texture to pick a base (mud-bed)
 // color, and blends in a global sky-reflection texture sampled in world
 // space — that reflection blend is the lever that turns the earth-toned
-// ramps into something that reads as water.
+// ramps into something that reads as water. `Other/Ripples` adds a small
+// animated distortion so the surface is not a static sky overlay.
 //
-// Phase 3c: reflection wired. No ripple distortion yet (3b).
+// Phase 3b/3c: ripple distortion + reflection wired.
 
 struct Camera {
   view_proj: mat4x4<f32>,
@@ -48,9 +49,23 @@ var reflection_tex: texture_2d<f32>;
 @group(3) @binding(5)
 var reflection_sampler: sampler;
 
+@group(3) @binding(6)
+var ripple_tex: texture_2d<f32>;
+
+@group(3) @binding(7)
+var ripple_sampler: sampler;
+
 // World units per sky-reflection tile. Larger = fewer repeats across the
 // map (softer sky look); smaller = tighter tiling.
 const REFLECT_SCALE: f32 = 8.0;
+// World units per ripple tile. Kept larger than a cell so the effect reads as
+// a soft moving surface instead of high-frequency texture noise.
+const RIPPLE_SCALE: f32 = 3.5;
+// UV displacement applied to the reflection lookup. This is intentionally
+// subtle; the ramp still carries the water-depth read.
+const RIPPLE_REFLECT_STRENGTH: f32 = 0.035;
+// Tiny depth perturbation for tonal shimmer in the ramp lookup.
+const RIPPLE_DEPTH_STRENGTH: f32 = 0.03;
 // Reflection blend strength at the shallowest vs deepest water. Shallow
 // water lets more of the mud-bed ramp read through; deep water mirrors
 // more sky.
@@ -106,6 +121,17 @@ fn sample_ramp(idx: u32, d: f32) -> vec3<f32> {
   return textureSample(chest_deep_ramp_tex, ramp_sampler, uv).rgb;
 }
 
+fn sample_ripple(world_xy: vec2<f32>, moving_water: f32, time: f32) -> vec2<f32> {
+  let still_flow = vec2<f32>(0.018, -0.012);
+  let moving_flow = vec2<f32>(0.075, -0.035);
+  let flow = mix(still_flow, moving_flow, moving_water);
+  let uv_a = world_xy / RIPPLE_SCALE + flow * time;
+  let uv_b = world_xy / (RIPPLE_SCALE * 1.7) - vec2<f32>(0.031, 0.047) * time;
+  let a = textureSample(ripple_tex, ripple_sampler, uv_a).rg * 2.0 - vec2<f32>(1.0, 1.0);
+  let b = textureSample(ripple_tex, ripple_sampler, uv_b).ba * 2.0 - vec2<f32>(1.0, 1.0);
+  return (a * 0.65 + b * 0.35);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let screen_uv = vec2<f32>(
@@ -118,12 +144,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   }
 
   let ramp_idx = u32(in.tint.g + 0.5);
-  let base_color = sample_ramp(ramp_idx, clamp(d, 0.0, 1.0));
+  let moving_water = step(0.5, in.tint.b);
+  let ripple = sample_ripple(in.world_xy, moving_water, camera.frame_time_seconds);
+  let shimmer_depth = clamp(d + ripple.x * RIPPLE_DEPTH_STRENGTH * d, 0.0, 1.0);
+  let base_color = sample_ramp(ramp_idx, shimmer_depth);
 
   // Sky reflection in world space — this is the 3c lever that turns the
   // earth-toned ramp output into something blue and water-like. The asset
   // is grayscale cloud luminosity; we multiply by a sky tint here.
-  let reflect_uv = in.world_xy / REFLECT_SCALE;
+  let reflect_uv = in.world_xy / REFLECT_SCALE + ripple * RIPPLE_REFLECT_STRENGTH;
   let sky_lum = textureSample(reflection_tex, reflection_sampler, reflect_uv).r;
   let sky = SKY_TINT * (0.55 + 0.45 * sky_lum);
   let reflect_strength = mix(REFLECT_MIX_SHALLOW, REFLECT_MIX_DEEP, d);

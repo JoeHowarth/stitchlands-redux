@@ -483,6 +483,18 @@ mod tests {
         }
     }
 
+    fn make_water(def_name: &str, render_precedence: i32) -> TerrainDef {
+        TerrainDef {
+            def_name: def_name.to_string(),
+            texture_path: format!("Terrain/{def_name}"),
+            edge_texture_path: None,
+            edge_type: TerrainEdgeType::Water,
+            render_precedence,
+            water_depth_shader: Some("Map/WaterDepth".to_string()),
+            water_depth_shader_parameters: Vec::new(),
+        }
+    }
+
     fn build_world(width: usize, height: usize, tiles: &[&str]) -> WorldState {
         assert_eq!(tiles.len(), width * height);
         world_from_fixture(&SceneFixture {
@@ -689,6 +701,21 @@ mod tests {
         assert_eq!(seen[1].1, "Water");
         assert_eq!(seen[1].2, opaque(&[5, 6, 7]));
         assert_eq!(seen[1].3, EdgeType::Water);
+    }
+
+    #[test]
+    fn water_depth_terrains_do_not_emit_edges_onto_each_other() {
+        let mut defs = HashMap::new();
+        defs.insert("WaterShallow".to_string(), make_water("WaterShallow", 394));
+        defs.insert("WaterDeep".to_string(), make_water("WaterDeep", 395));
+
+        let world = build_world(2, 1, &["WaterShallow", "WaterDeep"]);
+        let contribs = contributions(&defs, &world);
+
+        assert!(
+            contribs.is_empty(),
+            "water-depth terrains should be handled by the water surface pass, not edge fans"
+        );
     }
 
     #[test]

@@ -457,13 +457,18 @@ texture, not a true reflection pass).
    unchanged from 3a.
 2. `cargo test && cargo clippy` clean.
 
-#### 3b — Ripple distortion (polish after 3c)
+#### 3b — Ripple distortion (landed after 3c)
 
 Sample `_RippleTex` with `uv + frame_time * scroll` → displacement
 vector; offset the depth-sample UV and/or the reflection UV by it so
 the water surface shimmers. `use_offset` flag in tint.b selects the
 moving-water variant (river flow direction faked for now — real flow
 map is deferred per §2).
+
+Implementation note: `water_surface.wgsl` samples two animated
+`Other/Ripples` scrolls, uses `_UseWaterOffset` to pick the faster
+moving-water scroll, and applies the result as subtle reflection-UV
+and ramp-depth shimmer.
 
 **Tuning notes.**
 - Animation speed / ripple scroll is tuned visually — expect several

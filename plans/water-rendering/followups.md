@@ -6,16 +6,6 @@ and what adjacent bugs turned up.
 
 ## Deferred by original plan (Non-Goals from `plan.md` §2)
 
-- **Ripple distortion (Phase 3b).** The `Other/Ripples` asset is
-  already loaded into `WaterAssets.ripple` but not bound to any
-  pipeline. `water_surface.wgsl` currently does a straight ramp +
-  reflection mix with no UV displacement. Plan sketch: bind the ripple
-  texture on the ramps group, sample with
-  `cell_uv + frame_time * scroll`, use the result to offset the
-  depth-sample screen UV and/or the reflection UV so the surface
-  shimmers. `tint.b` (`_UseWaterOffset`) picks up the moving variants;
-  a second scroll rate keyed off it would differentiate river flow
-  from still water. Low-risk polish; not needed for "reads as water".
 - **River flow (`_WaterOffsetTex`).** `WaterInfo.riverFlowMap`
   (`Verse/WaterInfo.cs:59-91`) encodes a per-cell 2D flow vector,
   uploaded as an `RGFloat` texture, sampled by the moving-water
@@ -64,6 +54,12 @@ All in `src/water_surface.wgsl`:
   deep water mirrors more sky.
 - **`REFLECT_SCALE = 8.0`** — world units per sky tile. Larger = fewer
   visible repeats (softer, more static); smaller = tighter shimmer.
+- **`RIPPLE_SCALE = 3.5`** — world units per ripple tile. Larger =
+  broader, slower-looking ripples; smaller = tighter shimmer.
+- **`RIPPLE_REFLECT_STRENGTH = 0.035` /
+  `RIPPLE_DEPTH_STRENGTH = 0.03`** — how much `Other/Ripples`
+  distorts the sky reflection lookup and ramp-depth lookup. Keep these
+  subtle; the depth RT should still be the main water shape.
 
 And in `src/water_assets.rs::water_shader_params`:
 
@@ -89,7 +85,13 @@ And in `src/water_assets.rs::water_shader_params`:
   `water_depth_shader` set, the edge-fan system now skips emission.
   Without this the higher-precedence water's ramp gets overlaid on
   the lower one's perimeter as a muddy band inside the water body.
-  Guard lives in `src/commands/linking_sprites.rs:287-292`.
+
+## Completed followups
+
+- **Ripple distortion.** Landed after the original water branch: the
+  surface pass now binds `Other/Ripples`, samples two animated scrolls,
+  keys faster movement from `tint.b` / `_UseWaterOffset`, and uses the
+  result for subtle reflection and ramp-depth shimmer.
 
 ## Known rough edges
 
