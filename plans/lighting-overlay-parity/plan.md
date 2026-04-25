@@ -8,13 +8,13 @@ fixture render state, colored overlay rendering, lighting overlays, static
 shadows, directional `GraphicData.shadowData` shadows, and parsed thing glower
 brightness.
 
-The goal of this worktree is not one isolated commit. The goal is to keep
+The goal of this feature branch is not one isolated commit. The goal is to keep
 improving the overlay-based RimWorld lighting model while making each commit
 land in a shape that helps the later commits. New helpers should therefore be
 small, shared, deterministic, and named around RimWorld concepts rather than
 around a single fixture.
 
-Completed in this worktree so far:
+Completed on this branch so far:
 
 - Planned the successor lighting overlay parity workstream.
 - Added deterministic fixture sky/shadow state derivation.
