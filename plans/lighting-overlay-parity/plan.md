@@ -22,9 +22,13 @@ Completed in this worktree so far:
   blend path while retaining RimWorld-style material shadow color.
 - Unified static overlay construction behind an error-returning entry point.
 - Introduced a shared fixture `GlowGrid` boundary for artificial
-  `VisualGlowAt`-style glow, separate from sky brightness. The first version is
-  intentionally scalar brightness only; later color-parity work should widen
-  this toward color/RGBA samples.
+  `VisualGlowAt`-style glow, separate from sky brightness.
+
+The current position is the blocker-aware `GlowGrid` milestone. The direct
+radial glow approximation is intentionally temporary. Known missing scope is
+scheduled by dependency below rather than deferred indefinitely: blockers come
+first, then color, then blend modes, then environmental overlays, then dynamic
+overlay work.
 
 ## Reference Model
 
@@ -66,32 +70,82 @@ conflation in a more permanent API.
 
 ## Workstream Arc
 
-1. **Deterministic sky/shadow state.** Move shadow vector, shadow strength, and
-   default shadow color decisions behind one helper. Explicit fixture overrides
-   still win, but fixtures with only `render.day_percent` should get stable,
-   RimWorld-shaped shadows.
-2. **Shared glow model.** Replace ad hoc per-overlay glower brightness with a
-   reusable fixture/runtime glow grid representation that represents
-   `GlowGrid.VisualGlowAt`, not sky lighting. Keep the first version
-   deterministic and small enough to verify with unit tests. It may remain a
-   scalar brightness grid for now, but this is a temporary approximation:
-   RimWorld's `VisualGlowAt` is color-valued, so later lighting-color parity
-   should make artificial glow color a first-class grid value.
-3. **Blocker-aware propagation.** Teach the glow model about `blockLight`,
-   doors/walls, and blocker cells before expanding visual tuning. This makes
-   the lighting overlay's corner sampling depend on the same source of truth as
-   future runtime glower updates.
-4. **Lighting color and overlay parity.** Move beyond black alpha darkness where
-   the current simplification prevents matching RimWorld: sky color, shadow
-   color, and artificial light color should be represented explicitly even if
-   the shader remains simple.
-5. **Fog and snow overlays.** The fixture state already carries fog and snow;
-   render them as overlay systems after the sky/glow model has a clearer home.
-6. **Dynamic shadows.** Add pawn/dynamic thing shadow handling once static
-   shadow inputs and ordering are stable enough to reuse.
-7. **Visual tuning and regression checks.** Add paired deterministic fixtures or
-   generated overlay assertions whenever a visual claim depends on relative
-   behavior such as morning versus evening direction.
+1. **Deterministic sky/shadow state: complete.** Shadow vector, shadow strength,
+   and default shadow color decisions now live behind a shared helper. Explicit
+   fixture overrides still win, while fixtures with only `render.day_percent`
+   get stable, RimWorld-shaped shadows.
+2. **Shared glow model boundary: complete.** Artificial glow now has a reusable
+   fixture/runtime `GlowGrid` boundary that represents `GlowGrid.VisualGlowAt`,
+   not sky lighting.
+3. **Blocker-aware propagation: next.** Replace direct radial glow sampling with
+   flood-fill attenuation seeded by fixture glow sources and parsed ThingDef
+   glowers. Use `ThingDef.blockLight` as the source of truth for blockers, not
+   pathing movement flags. Carry both propagated intensity and source color in
+   the model, but keep the current lighting overlay emission black-alpha until
+   the rendering blend model is ready for color.
+4. **Lighting color and overlay parity.** Make artificial glow color, sky color,
+   and darkness explicit in the lighting model. This milestone should consume
+   the color data carried by the blocker-aware glow grid instead of inventing a
+   separate color path.
+5. **Renderer blend modes.** Add per-overlay blend behavior, especially a
+   multiply/darken path for shadows before non-black derived shadow colors are
+   emitted to the renderer. This milestone removes the current source-over
+   limitation that forces derived shadows to use black RGB plus alpha.
+6. **Fog and snow overlays.** Render fixture fog and snow grids after sky,
+   glow, color, and blend-mode semantics are clear enough to avoid baking in
+   temporary darkness-overlay behavior.
+7. **Dynamic lighting and shadows.** Add dynamic glower updates and pawn/dynamic
+   thing shadows after static/environment overlay paths stabilize, reusing the
+   same glow, shadow-state, and renderer mechanisms.
+8. **Visual tuning and regression checks: ongoing.** Add paired deterministic
+   fixtures or generated overlay assertions whenever a visual claim depends on
+   relative behavior such as morning versus evening direction.
+
+## Next Commit: Blocker-Aware GlowGrid Propagation
+
+The next implementation commit should keep the current `GlowGrid` API but
+replace its direct radial sampling with a deterministic propagation model. This
+is the last structural step before lighting color parity: the system needs a
+single place where artificial glow is seeded, blocked, attenuated, and later
+colored.
+
+### Decisions
+
+- Use flood-fill attenuation over the map grid rather than per-cell
+  line-of-sight checks. This better matches a cached grid model and gives later
+  runtime updates a clear shape.
+- Use `ThingDef.blockLight` as the blocker source of truth. Do not infer light
+  blocking from `ThingState.blocks_movement`.
+- Treat missing glowers as normal zero-glow state. The no-silent-fallback rule
+  still applies to required authored sky/shadow inputs, but a map with no glow
+  emitters should simply produce zero artificial glow.
+- Carry glow color internally in addition to scalar intensity. The current
+  renderer should continue consuming scalar `visual_glow_at` so screenshots stay
+  stable; color should become visible only in the later lighting color/blend
+  milestones.
+
+### Implementation Notes
+
+- Build a per-cell blocker grid from static things whose defs have
+  `blockLight`.
+- Seed propagation from both `render.glow_sources` and ThingDef glowers.
+- Preserve the current overlight behavior near a source where possible.
+- Combine overlapping glow with a deterministic max or stronger-wins rule for
+  the first propagation version. Avoid introducing color blending semantics that
+  the renderer cannot yet display.
+- Keep sky brightness out of `GlowGrid`; lighting overlays may combine sky
+  brightness with `GlowGrid::visual_glow_at`, but the grid itself remains
+  artificial glow only.
+
+### Verification
+
+- A fixture glow source brightens nearby unobstructed cells.
+- A ThingDef glower brightens nearby unobstructed cells through the same path.
+- A `blockLight` thing reduces or stops glow behind it.
+- A movement-blocking thing without `blockLight` does not block glow.
+- Sky inputs still do not register as `GlowGrid` inputs and do not change
+  `GlowGrid` samples.
+- Existing lighting overlay tests remain stable.
 
 ## Completed Commit: Sky-Derived Shadow State
 
@@ -192,11 +246,22 @@ from glow rather than directly from raw `day_percent`.
   - `cargo test`
   - `cargo clippy --all-targets -- -D warnings`
 
-## Deferred Questions
+## Scheduled Follow-Up Milestones
+
+- **Lighting color parity, after blocker-aware glow.** Widen the lighting model
+  so artificial glow color, sky color, and darkness are represented explicitly.
+- **Renderer blend modes, after lighting color parity.** Add per-overlay
+  blending, including a principled darken/multiply path for shadows.
+- **Fog and snow overlays, after blend modes.** Render the existing fixture fog
+  and snow grids as first-class overlay systems.
+- **Dynamic overlays, after static/environment overlays.** Add dynamic glower
+  updates and pawn/dynamic thing shadows using the same shared systems.
+
+## Open Design Questions
 
 - Whether fixture render state should grow explicit latitude/day-of-year fields
   before attempting closer `GenCelestial` parity.
-- Whether colored overlay rendering should support separate blend modes for
-  lighting, fog, snow, and shadows instead of sharing one alpha-blend path.
-- Whether dynamic pawn shadows should use the same static overlay builder with
+- The exact color-combination rule for overlapping artificial glowers once the
+  renderer can display colored lighting.
+- Whether dynamic pawn shadows should use the static overlay builder with
   per-frame inputs or a separate dynamic overlay buffer.
