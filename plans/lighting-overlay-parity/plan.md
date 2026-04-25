@@ -22,7 +22,9 @@ Completed in this worktree so far:
   blend path while retaining RimWorld-style material shadow color.
 - Unified static overlay construction behind an error-returning entry point.
 - Introduced a shared fixture `GlowGrid` boundary for artificial
-  `VisualGlowAt`-style glow, separate from sky brightness.
+  `VisualGlowAt`-style glow, separate from sky brightness. The first version is
+  intentionally scalar brightness only; later color-parity work should widen
+  this toward color/RGBA samples.
 
 ## Reference Model
 
@@ -71,7 +73,10 @@ conflation in a more permanent API.
 2. **Shared glow model.** Replace ad hoc per-overlay glower brightness with a
    reusable fixture/runtime glow grid representation that represents
    `GlowGrid.VisualGlowAt`, not sky lighting. Keep the first version
-   deterministic and small enough to verify with unit tests.
+   deterministic and small enough to verify with unit tests. It may remain a
+   scalar brightness grid for now, but this is a temporary approximation:
+   RimWorld's `VisualGlowAt` is color-valued, so later lighting-color parity
+   should make artificial glow color a first-class grid value.
 3. **Blocker-aware propagation.** Teach the glow model about `blockLight`,
    doors/walls, and blocker cells before expanding visual tuning. This makes
    the lighting overlay's corner sampling depend on the same source of truth as
