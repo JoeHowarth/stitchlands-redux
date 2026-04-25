@@ -72,4 +72,59 @@ mod tests {
             "walls_patterns is wall-only"
         );
     }
+
+    #[test]
+    fn parses_render_state_fields() {
+        let path = std::env::temp_dir().join(format!(
+            "stitchlands-render-state-fixture-{}.ron",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            r#"
+(
+  schema_version: 2,
+  map: (
+    width: 2,
+    height: 2,
+    terrain: [
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"),
+    ],
+    roofs: [
+      (roofed: false), (roofed: true),
+      (roofed: true, thick: true), (roofed: false),
+    ],
+    fog: [false, true, true, false],
+    snow_depth: [0.0, 0.25, 0.5, 1.0],
+  ),
+  render: (
+    day_percent: 0.5,
+    sky_glow: (r: 0.8, g: 0.7, b: 0.6, a: 1.0),
+    shadow_color: (r: 0.1, g: 0.1, b: 0.2, a: 0.5),
+    glow_sources: [
+      (
+        cell_x: 1,
+        cell_z: 0,
+        radius: 6.0,
+        color: (r: 255.0, g: 240.0, b: 180.0, a: 0.0),
+        overlight_radius: 2.5,
+      ),
+    ],
+  ),
+)
+"#,
+        )
+        .unwrap();
+
+        let fixture = load_fixture(&path).expect("fixture should parse");
+        let _ = std::fs::remove_file(path);
+
+        assert!(fixture.map.roofs[1].roofed);
+        assert!(fixture.map.roofs[2].thick);
+        assert_eq!(fixture.map.fog, vec![false, true, true, false]);
+        assert_eq!(fixture.map.snow_depth, vec![0.0, 0.25, 0.5, 1.0]);
+        assert_eq!(fixture.render.day_percent, Some(0.5));
+        assert_eq!(fixture.render.glow_sources[0].radius, 6.0);
+    }
 }

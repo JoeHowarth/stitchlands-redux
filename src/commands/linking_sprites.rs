@@ -413,7 +413,7 @@ mod tests {
         ApparelDef, BeardDefRender, BodyTypeDefRender, GraphicData, HairDefRender,
         HeadTypeDefRender, RgbaColor, TerrainDef,
     };
-    use crate::fixtures::{MapSpec, SceneFixture, TerrainCell};
+    use crate::fixtures::{MapSpec, RenderSpec, SceneFixture, TerrainCell};
     use crate::world::world_from_fixture;
 
     fn make_def(def_name: &str, tex_path: &str, kind: GraphicKind) -> ThingDef {
@@ -514,7 +514,11 @@ mod tests {
                         terrain_def: (*name).to_string(),
                     })
                     .collect(),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
             },
+            render: RenderSpec::default(),
             things: Vec::new(),
             pawns: Vec::new(),
             camera: None,

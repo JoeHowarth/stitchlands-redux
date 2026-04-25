@@ -241,7 +241,7 @@ mod tests {
     use glam::Vec3;
 
     use crate::cell::Cell;
-    use crate::fixtures::{MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn};
+    use crate::fixtures::{MapSpec, PawnSpawn, RenderSpec, SceneFixture, TerrainCell, ThingSpawn};
     use crate::pawn::{
         BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData, PawnDrawFlags, PawnFacing,
         PawnRenderInput,
@@ -294,7 +294,11 @@ mod tests {
                     };
                     8 * 6
                 ],
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
             },
+            render: RenderSpec::default(),
             things: Vec::new(),
             pawns: vec![PawnSpawn {
                 cell_x: 1,

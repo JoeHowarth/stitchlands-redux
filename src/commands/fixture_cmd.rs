@@ -71,6 +71,48 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         .iter()
         .filter(|thing| thing.blocks_movement)
         .count();
+    let render_state = world.render_state();
+    let roofed_cells = render_state.roofs.iter().filter(|roof| roof.roofed).count();
+    let thick_roof_cells = render_state.roofs.iter().filter(|roof| roof.thick).count();
+    let fogged_cells = render_state.fog.iter().filter(|fogged| **fogged).count();
+    let snow_cells = render_state
+        .snow_depth
+        .iter()
+        .filter(|depth| **depth > 0.0)
+        .count();
+    let max_snow_depth = render_state
+        .snow_depth
+        .iter()
+        .copied()
+        .fold(0.0_f32, f32::max);
+    let glow_radius_total: f32 = render_state
+        .glow_sources
+        .iter()
+        .map(|source| source.radius)
+        .sum();
+    let glow_overlight_total: f32 = render_state
+        .glow_sources
+        .iter()
+        .map(|source| source.overlight_radius)
+        .sum();
+    let glow_anchor_checksum: i32 = render_state
+        .glow_sources
+        .iter()
+        .map(|source| source.cell_x + source.cell_z)
+        .sum();
+    let glow_color_total: f32 = render_state
+        .glow_sources
+        .iter()
+        .map(|source| source.color.r + source.color.g + source.color.b + source.color.a)
+        .sum();
+    let sky_glow_total = render_state
+        .sky_glow
+        .map(|color| color.r + color.g + color.b + color.a)
+        .unwrap_or(0.0);
+    let shadow_color_total = render_state
+        .shadow_color
+        .map(|color| color.r + color.g + color.b + color.a)
+        .unwrap_or(0.0);
 
     let camera_focus = fixture
         .camera
@@ -84,7 +126,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         });
 
     info!(
-        "fixture scene built: scene={} map={}x{} terrain={} things={} blocking_things={} pawns={} static={} dynamic={}",
+        "fixture scene built: scene={} map={}x{} terrain={} things={} blocking_things={} pawns={} static={} dynamic={} roofed={} thick_roofs={} fogged={} snow_cells={} max_snow={:.2} day_percent={:?} sky_glow_total={:.2} shadow_color_total={:.2} glow_sources={} glow_radius_total={:.2} glow_overlight_total={:.2} glow_anchor_checksum={} glow_color_total={:.2}",
         cmd.scene.display(),
         world.width(),
         world.height(),
@@ -93,7 +135,20 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         blocking_things,
         world.pawns().len(),
         sprites.static_sprites.len(),
-        sprites.dynamic_sprites.len()
+        sprites.dynamic_sprites.len(),
+        roofed_cells,
+        thick_roof_cells,
+        fogged_cells,
+        snow_cells,
+        max_snow_depth,
+        render_state.day_percent,
+        sky_glow_total,
+        shadow_color_total,
+        render_state.glow_sources.len(),
+        glow_radius_total,
+        glow_overlight_total,
+        glow_anchor_checksum,
+        glow_color_total
     );
 
     let SpriteLayers {

@@ -1,4 +1,5 @@
 use crate::cell::Cell;
+use crate::defs::RgbaColor;
 use crate::pawn::PawnFacing;
 use glam::Vec2;
 
@@ -14,6 +15,32 @@ pub struct ThingState {
     pub cell_x: i32,
     pub cell_z: i32,
     pub blocks_movement: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RoofTile {
+    pub roofed: bool,
+    pub thick: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GlowSource {
+    pub cell_x: i32,
+    pub cell_z: i32,
+    pub radius: f32,
+    pub color: RgbaColor,
+    pub overlight_radius: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderState {
+    pub roofs: Vec<RoofTile>,
+    pub fog: Vec<bool>,
+    pub snow_depth: Vec<f32>,
+    pub day_percent: Option<f32>,
+    pub sky_glow: Option<RgbaColor>,
+    pub shadow_color: Option<RgbaColor>,
+    pub glow_sources: Vec<GlowSource>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +97,7 @@ pub struct WorldState {
     pub(super) width: usize,
     pub(super) height: usize,
     pub(super) terrain: Vec<TerrainTile>,
+    pub(super) render_state: RenderState,
     pub(super) things: Vec<ThingState>,
     pub(super) pawns: Vec<PawnState>,
     /// Index `z * width + x` -> indices into `things`. Stays in sync with
@@ -87,6 +115,9 @@ impl WorldState {
     }
     pub fn terrain(&self) -> &[TerrainTile] {
         &self.terrain
+    }
+    pub fn render_state(&self) -> &RenderState {
+        &self.render_state
     }
     pub fn things(&self) -> &[ThingState] {
         &self.things

@@ -95,7 +95,7 @@ pub fn tick_world(world: &mut WorldState, dt_seconds: f32) {
 #[cfg(test)]
 mod tests {
     use crate::cell::Cell;
-    use crate::fixtures::{MapSpec, PawnSpawn, SceneFixture, TerrainCell, ThingSpawn};
+    use crate::fixtures::{MapSpec, PawnSpawn, RenderSpec, SceneFixture, TerrainCell, ThingSpawn};
     use crate::world::{PathProgress, ThingState, WorldState, world_from_fixture};
 
     use super::{issue_move_intent, tick_world};
@@ -112,7 +112,11 @@ mod tests {
                     };
                     8 * 6
                 ],
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
             },
+            render: RenderSpec::default(),
             things: vec![ThingSpawn {
                 def_name: "ChunkSlagSteel".to_string(),
                 cell_x: 3,
@@ -211,7 +215,11 @@ mod tests {
                     };
                     8 * 6
                 ],
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
             },
+            render: RenderSpec::default(),
             things: Vec::new(),
             pawns: vec![
                 PawnSpawn {
