@@ -3,12 +3,12 @@
 //! Mirrors the globals bound by `Verse/TexGame.cs:18-28` and
 //! `Verse/WaterInfo.cs:26,50` in the RimWorld decompile, plus the
 //! per-terrain surface ramps referenced from `Terrain_Water.xml`. All
-//! assets are resolved once at app startup; missing assets degrade to
-//! small solid-color fallbacks (logged at `warn` level) so the renderer
-//! can still boot.
+//! assets are resolved once at app startup; missing assets are hard errors so
+//! visual checks do not silently run against placeholder textures.
 
-use image::{Rgba, RgbaImage};
-use log::{info, warn};
+use anyhow::Context;
+use image::RgbaImage;
+use log::info;
 
 use crate::assets::AssetResolver;
 
@@ -95,19 +95,11 @@ pub struct WaterAssets {
 impl WaterAssets {
     pub fn load(resolver: &mut AssetResolver) -> anyhow::Result<Self> {
         let loaded = Self {
-            ripple: resolve_or_fallback(resolver, RIPPLE_TEX_PATH, solid_gray())?,
-            reflection: resolve_or_fallback(resolver, WATER_REFLECTION_TEX_PATH, solid_sky_blue())?,
-            shallow_ramp: resolve_or_fallback(
-                resolver,
-                WATER_SHALLOW_RAMP_PATH,
-                solid_shallow_water(),
-            )?,
-            deep_ramp: resolve_or_fallback(resolver, WATER_DEEP_RAMP_PATH, solid_deep_water())?,
-            chest_deep_ramp: resolve_or_fallback(
-                resolver,
-                WATER_CHEST_DEEP_RAMP_PATH,
-                solid_chest_deep_water(),
-            )?,
+            ripple: resolve_required(resolver, RIPPLE_TEX_PATH)?,
+            reflection: resolve_required(resolver, WATER_REFLECTION_TEX_PATH)?,
+            shallow_ramp: resolve_required(resolver, WATER_SHALLOW_RAMP_PATH)?,
+            deep_ramp: resolve_required(resolver, WATER_DEEP_RAMP_PATH)?,
+            chest_deep_ramp: resolve_required(resolver, WATER_CHEST_DEEP_RAMP_PATH)?,
         };
         info!(
             "water assets loaded: ripple={}x{} reflection={}x{} ramps(shallow={}x{}, deep={}x{}, chest_deep={}x{})",
@@ -126,40 +118,12 @@ impl WaterAssets {
     }
 }
 
-fn resolve_or_fallback(
-    resolver: &mut AssetResolver,
-    path: &str,
-    fallback: RgbaImage,
-) -> anyhow::Result<RgbaImage> {
-    let resolved = resolver.resolve_texture_path(path)?;
+fn resolve_required(resolver: &mut AssetResolver, path: &str) -> anyhow::Result<RgbaImage> {
+    let resolved = resolver
+        .resolve_texture_path(path)
+        .with_context(|| format!("resolving water asset '{path}'"))?;
     if resolved.used_fallback() {
-        warn!("water asset '{path}' not resolved; using solid-color fallback");
-        Ok(fallback)
-    } else {
-        Ok(resolved.image)
+        anyhow::bail!("missing water asset texture '{path}'");
     }
-}
-
-fn solid(r: u8, g: u8, b: u8, a: u8) -> RgbaImage {
-    RgbaImage::from_pixel(1, 1, Rgba([r, g, b, a]))
-}
-
-fn solid_gray() -> RgbaImage {
-    solid(128, 128, 128, 255)
-}
-
-fn solid_sky_blue() -> RgbaImage {
-    solid(128, 176, 224, 255)
-}
-
-fn solid_shallow_water() -> RgbaImage {
-    solid(72, 124, 160, 255)
-}
-
-fn solid_deep_water() -> RgbaImage {
-    solid(40, 80, 128, 255)
-}
-
-fn solid_chest_deep_water() -> RgbaImage {
-    solid(28, 56, 96, 255)
+    Ok(resolved.image)
 }

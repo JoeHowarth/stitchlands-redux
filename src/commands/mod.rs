@@ -23,7 +23,6 @@ pub struct DispatchContext<'a> {
     pub data_dir: &'a Path,
     pub defs: DefSet<'a>,
     pub compose_config: PawnComposeConfig,
-    pub allow_fallback: bool,
     pub asset_resolver: &'a mut AssetResolver,
 }
 

@@ -125,20 +125,11 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                     );
                 }
             }
-            if !ctx.allow_fallback {
-                anyhow::bail!(
-                    "texture missing for '{}' ({}) and fallback is disabled",
-                    selected.def_name,
-                    selected.graphic_data.tex_path
-                );
-            }
-            warn!(
-                "texture missing for '{}' ({}) - using checker fallback",
-                selected.def_name, selected.graphic_data.tex_path
+            anyhow::bail!(
+                "texture missing for '{}' ({})",
+                selected.def_name,
+                selected.graphic_data.tex_path
             );
-            for attempted in resolved.attempted_paths().iter().take(6) {
-                info!("attempted: {}", attempted.display());
-            }
         }
 
         if let Some(path) = resolved.source_path() {

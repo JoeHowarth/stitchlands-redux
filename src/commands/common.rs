@@ -97,7 +97,7 @@ pub fn diagnose_textures(data_dir: &Path, texture_roots: &[PathBuf], packed_root
     }
 
     println!(
-        "tip: if counts are near zero, this install likely stores textures in Unity assets; keep using fallback or point --texture-root to an extracted texture dump"
+        "tip: if counts are near zero, this install likely stores textures in Unity assets; configure a TypeTree registry or point --texture-root to an extracted texture dump"
     );
 }
 

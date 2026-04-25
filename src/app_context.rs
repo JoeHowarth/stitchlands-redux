@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use log::{info, warn};
+use log::info;
 
 use crate::assets::{AssetResolver, AssetSetupOptions, prepare_asset_setup};
 use crate::cli::DataArgs;
@@ -24,7 +24,6 @@ pub struct AppContext {
     pub hair_defs: HashMap<String, HairDefRender>,
     pub compose_config: PawnComposeConfig,
     pub asset_resolver: AssetResolver,
-    pub allow_fallback: bool,
 }
 
 impl AppContext {
@@ -93,14 +92,8 @@ impl AppContext {
         );
         let compose_config = compose_from_layers(humanlike_layers);
 
-        if setup.typetree_registries.is_empty() {
-            warn!(
-                "no typetree registry selected; packed texture decode may fail on stripped Unity assets (set --typetree-registry or STITCHLANDS_TYPETREE_REGISTRY)"
-            );
-        } else {
-            for registry in &setup.typetree_registries {
-                info!("using typetree registry: {}", registry.display());
-            }
+        for registry in &setup.typetree_registries {
+            info!("using typetree registry: {}", registry.display());
         }
 
         Ok(Self {
@@ -114,7 +107,6 @@ impl AppContext {
             hair_defs,
             compose_config,
             asset_resolver: setup.resolver,
-            allow_fallback: data.allow_fallback,
         })
     }
 }

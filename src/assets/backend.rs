@@ -34,7 +34,7 @@ impl<'a> TextureQuery<'a> {
 pub enum SpriteSource {
     Disk(PathBuf),
     Packed { label: String },
-    Fallback { attempted: Vec<PathBuf> },
+    Fallback,
 }
 
 pub struct ResolvedSprite {
@@ -44,7 +44,7 @@ pub struct ResolvedSprite {
 
 impl ResolvedSprite {
     pub fn used_fallback(&self) -> bool {
-        matches!(self.source, SpriteSource::Fallback { .. })
+        matches!(self.source, SpriteSource::Fallback)
     }
 
     pub fn resolved_from_packed(&self) -> bool {
@@ -55,21 +55,14 @@ impl ResolvedSprite {
         match &self.source {
             SpriteSource::Disk(p) => Some(p.clone()),
             SpriteSource::Packed { label } => Some(PathBuf::from(label)),
-            SpriteSource::Fallback { .. } => None,
-        }
-    }
-
-    pub fn attempted_paths(&self) -> &[PathBuf] {
-        match &self.source {
-            SpriteSource::Fallback { attempted } => attempted,
-            _ => &[],
+            SpriteSource::Fallback => None,
         }
     }
 }
 
 pub enum BackendLookup {
     Hit(ResolvedSprite),
-    Miss { attempted: Vec<PathBuf> },
+    Miss,
 }
 
 pub trait TextureBackend {

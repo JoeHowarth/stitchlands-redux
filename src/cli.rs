@@ -31,8 +31,6 @@ pub struct DataArgs {
     pub typetree_registry: Vec<PathBuf>,
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub auto_typetree: bool,
-    #[arg(long, default_value_t = false)]
-    pub allow_fallback: bool,
 }
 
 #[derive(Args, Debug, Clone)]

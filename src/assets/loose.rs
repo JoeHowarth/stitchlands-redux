@@ -41,10 +41,8 @@ impl TextureBackend for LooseFiles {
     fn lookup(&mut self, query: &TextureQuery) -> Result<BackendLookup> {
         let roots = self.texture_roots();
         let variants = variants_for(query.tex_path, query.kind);
-        let mut attempted = Vec::new();
         for root in &roots {
             for candidate in variants.disk_candidates(root) {
-                attempted.push(candidate.clone());
                 if !candidate.exists() {
                     continue;
                 }
@@ -57,7 +55,7 @@ impl TextureBackend for LooseFiles {
                 }));
             }
         }
-        Ok(BackendLookup::Miss { attempted })
+        Ok(BackendLookup::Miss)
     }
 }
 
@@ -91,7 +89,7 @@ mod tests {
         let query = TextureQuery::single(tex_path);
         match loose.lookup(&query).unwrap() {
             BackendLookup::Hit(sprite) => (false, sprite.source_path()),
-            BackendLookup::Miss { .. } => (true, None),
+            BackendLookup::Miss => (true, None),
         }
     }
 
@@ -121,7 +119,7 @@ mod tests {
         let query = TextureQuery::for_thing(&def, 0);
         let (missed, path) = match loose.lookup(&query).unwrap() {
             BackendLookup::Hit(sprite) => (false, sprite.source_path()),
-            BackendLookup::Miss { .. } => (true, None),
+            BackendLookup::Miss => (true, None),
         };
         assert!(!missed);
         assert_eq!(path.as_deref(), Some(tex_file.as_path()));

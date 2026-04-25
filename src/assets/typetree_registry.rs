@@ -64,6 +64,9 @@ pub fn load_typetree_registry(paths: &[PathBuf]) -> Result<Option<Arc<dyn TypeTr
 
 fn auto_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
+    candidates.push(PathBuf::from(
+        "/Users/jh/personal/stitchlands-redux/target/investigation/typetree/lz4.tpk",
+    ));
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     candidates.push(cwd.join("typetree").join("lz4.tpk"));
     candidates.push(cwd.join("typetree").join("default.tpk"));

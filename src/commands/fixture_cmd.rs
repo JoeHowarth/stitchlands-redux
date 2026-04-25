@@ -32,7 +32,6 @@ use super::{CommandAction, DispatchContext, LaunchSpec};
 /// (`ContentFinder<Texture2D>.Get("Other/RoughAlphaAdd")`). The packed
 /// resolver matches on basename so the prefix is not load-bearing, but we
 /// keep the RimWorld-native path to stay searchable against the decompile.
-/// Fallback is a 1x1 gray image; in that case FadeRough edges flatten.
 const ROUGH_ALPHA_ADD_PATH: &str = "Other/RoughAlphaAdd";
 
 pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<CommandAction> {
@@ -49,10 +48,10 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         let _ = issue_move_intent(&mut world, first_pawn_id, start);
         tick_world(&mut world, 0.0);
     }
-    let sprites = build_world_sprites(ctx, &world, !ctx.allow_fallback)?;
+    let sprites = build_world_sprites(ctx, &world)?;
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let edge_sprites =
-        emit_terrain_edge_sprites(ctx.data_dir, ctx.asset_resolver, &ctx.defs, &world, false)?;
+        emit_terrain_edge_sprites(ctx.data_dir, ctx.asset_resolver, &ctx.defs, &world)?;
     let mut static_overlays = build_shadow_overlays(ctx.defs.thing_defs, &world);
     static_overlays.extend(build_lighting_overlays(ctx.defs.thing_defs, &world));
     let noise_image = {
@@ -61,14 +60,9 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
             .resolve_texture_path(ROUGH_ALPHA_ADD_PATH)
             .with_context(|| format!("resolving noise texture '{ROUGH_ALPHA_ADD_PATH}'"))?;
         if resolved.used_fallback() {
-            warn!(
-                "noise texture '{}' not resolved; using 1x1 gray fallback (FadeRough edges will be flat)",
-                ROUGH_ALPHA_ADD_PATH
-            );
-            crate::renderer::fallback_noise_image()
-        } else {
-            resolved.image
+            anyhow::bail!("missing noise texture '{ROUGH_ALPHA_ADD_PATH}'");
         }
+        resolved.image
     };
     let blocking_things = world
         .things()
@@ -209,7 +203,6 @@ struct SpriteLayers {
 fn build_world_sprites(
     ctx: &mut DispatchContext<'_>,
     world: &crate::world::WorldState,
-    strict_missing: bool,
 ) -> Result<SpriteLayers> {
     let mut static_sprites = Vec::new();
     let mut dynamic_sprites = Vec::new();
@@ -232,7 +225,7 @@ fn build_world_sprites(
                         terrain_def.texture_path, terrain_def.def_name
                     )
                 })?;
-            if strict_missing && resolved.used_fallback() {
+            if resolved.used_fallback() {
                 anyhow::bail!(
                     "missing terrain texture '{}' for '{}'",
                     terrain_def.texture_path,
@@ -283,7 +276,6 @@ fn build_world_sprites(
                 &thing,
                 thing_def,
                 world,
-                strict_missing,
             )?;
             static_sprites.extend(linked);
             continue;
@@ -292,7 +284,7 @@ fn build_world_sprites(
             .asset_resolver
             .resolve_thing(thing_def, thing.id)
             .with_context(|| format!("resolving ThingDef '{}'", thing_def.def_name))?;
-        if strict_missing && resolved.used_fallback() {
+        if resolved.used_fallback() {
             anyhow::bail!(
                 "missing thing texture for '{}' ({})",
                 thing_def.def_name,
@@ -418,7 +410,7 @@ fn build_world_sprites(
                 .asset_resolver
                 .resolve_texture_path(&node.tex_path)
                 .with_context(|| format!("resolving pawn texture '{}'", node.tex_path))?;
-            if strict_missing && resolved.used_fallback() {
+            if resolved.used_fallback() {
                 anyhow::bail!("missing pawn node texture: {}", node.tex_path);
             }
             let used_fallback = resolved.used_fallback();

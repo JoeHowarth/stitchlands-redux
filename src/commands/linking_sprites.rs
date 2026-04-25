@@ -42,7 +42,6 @@ pub fn emit_linked_thing_sprites(
     thing: &ThingState,
     thing_def: &ThingDef,
     world: &WorldState,
-    strict_missing: bool,
 ) -> Result<Vec<RenderSprite>> {
     let atlas_path = linked_atlas_path(thing_def);
     let resolved = asset_resolver
@@ -53,7 +52,7 @@ pub fn emit_linked_thing_sprites(
                 atlas_path, thing_def.def_name
             )
         })?;
-    if strict_missing && resolved.used_fallback() {
+    if resolved.used_fallback() {
         anyhow::bail!(
             "missing linked atlas '{}' for '{}'",
             atlas_path,
@@ -355,7 +354,6 @@ pub fn emit_terrain_edge_sprites(
     asset_resolver: &mut AssetResolver,
     defs: &DefSet<'_>,
     world: &WorldState,
-    strict_missing: bool,
 ) -> Result<Vec<EdgeSpriteInput>> {
     let contributions = compute_terrain_edge_contributions(defs, world)?;
     let mut out = Vec::with_capacity(contributions.len());
@@ -368,7 +366,7 @@ pub fn emit_terrain_edge_sprites(
                     contribution.neighbor_texture_path, contribution.neighbor_def_name
                 )
             })?;
-        if strict_missing && resolved.used_fallback() {
+        if resolved.used_fallback() {
             anyhow::bail!(
                 "missing terrain edge texture '{}' for '{}'",
                 contribution.neighbor_texture_path,

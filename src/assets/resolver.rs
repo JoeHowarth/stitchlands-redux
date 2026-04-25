@@ -42,21 +42,17 @@ impl AssetResolver {
     }
 
     pub fn resolve(&mut self, query: TextureQuery) -> Result<ResolvedSprite> {
-        let mut attempted = Vec::new();
-
-        match self.loose.lookup(&query)? {
-            BackendLookup::Hit(sprite) => return Ok(sprite),
-            BackendLookup::Miss { attempted: a } => attempted.extend(a),
+        if let BackendLookup::Hit(sprite) = self.loose.lookup(&query)? {
+            return Ok(sprite);
         }
 
-        match self.packed.lookup(&query)? {
-            BackendLookup::Hit(sprite) => return Ok(sprite),
-            BackendLookup::Miss { attempted: a } => attempted.extend(a),
+        if let BackendLookup::Hit(sprite) = self.packed.lookup(&query)? {
+            return Ok(sprite);
         }
 
         Ok(ResolvedSprite {
             image: checkerboard_image(64, 64),
-            source: SpriteSource::Fallback { attempted },
+            source: SpriteSource::Fallback,
         })
     }
 
@@ -299,15 +295,11 @@ impl PackedCatalog {
 impl TextureBackend for PackedCatalog {
     fn lookup(&mut self, query: &TextureQuery) -> Result<BackendLookup> {
         if !self.can_try_query(query) {
-            return Ok(BackendLookup::Miss {
-                attempted: Vec::new(),
-            });
+            return Ok(BackendLookup::Miss);
         }
 
         let Some(resolver) = self.get()? else {
-            return Ok(BackendLookup::Miss {
-                attempted: Vec::new(),
-            });
+            return Ok(BackendLookup::Miss);
         };
 
         let hit = if query.kind.is_random() {
@@ -326,9 +318,7 @@ impl TextureBackend for PackedCatalog {
                     label: hit.source_label,
                 },
             })),
-            None => Ok(BackendLookup::Miss {
-                attempted: Vec::new(),
-            }),
+            None => Ok(BackendLookup::Miss),
         }
     }
 }

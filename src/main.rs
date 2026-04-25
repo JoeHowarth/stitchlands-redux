@@ -30,7 +30,6 @@ fn main() -> Result<()> {
     let ctx = AppContext::load(&cli.data, compose_config_from_humanlike_layers)?;
     let data_dir = ctx.data_dir.clone();
     let compose_config = ctx.compose_config.clone();
-    let allow_fallback = ctx.allow_fallback;
     let mut asset_resolver = ctx.asset_resolver;
 
     let defs = crate::commands::DefSet {
@@ -47,7 +46,6 @@ fn main() -> Result<()> {
         data_dir: &data_dir,
         defs,
         compose_config,
-        allow_fallback,
         asset_resolver: &mut asset_resolver,
     };
 
