@@ -287,6 +287,21 @@ pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>
     walk_defs(core_data_dir, parse_doc_thing_defs)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThingDefInheritanceAudit {
+    pub raw_concrete_defs: usize,
+    pub loaded_defs: usize,
+    pub missing_inherited_graphic_defs: Vec<String>,
+}
+
+pub fn audit_thing_def_inheritance(
+    core_data_dir: &Path,
+    loaded_defs: &HashMap<String, ThingDef>,
+) -> Result<ThingDefInheritanceAudit> {
+    let raw = walk_defs(core_data_dir, parse_doc_thing_raw)?;
+    Ok(audit_thing_def_inheritance_from_raw(raw, loaded_defs))
+}
+
 pub fn load_terrain_defs(core_data_dir: &Path) -> Result<HashMap<String, TerrainDef>> {
     let raw = walk_defs(core_data_dir, parse_doc_terrain_raw)?;
     Ok(resolve_terrain_defs_from_raw(raw))
@@ -544,6 +559,112 @@ fn parse_doc_thing_defs(doc: &Document<'_>, defs: &mut HashMap<String, ThingDef>
         if let Some(thing_def) = parse_thing_def(node) {
             defs.insert(thing_def.def_name.clone(), thing_def);
         }
+    }
+}
+
+#[derive(Clone, Default)]
+struct RawThingDef {
+    parent_name: Option<String>,
+    def_name: Option<String>,
+    is_abstract: bool,
+    graphic_data: Option<RawGraphicData>,
+}
+
+#[derive(Clone, Default)]
+struct RawGraphicData {
+    tex_path: Option<String>,
+}
+
+fn parse_doc_thing_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawThingDef>) {
+    for node in doc.descendants().filter(|n| n.has_tag_name("ThingDef")) {
+        let name_attr = node.attribute("Name").map(str::to_string);
+        let def_name = child_text(node, "defName").map(str::to_string);
+        let Some(key) = def_name.clone().or_else(|| name_attr.clone()) else {
+            continue;
+        };
+        let graphic_data = child_node(node, "graphicData").map(parse_raw_graphic_data);
+        raw.insert(
+            key,
+            RawThingDef {
+                parent_name: node.attribute("ParentName").map(str::to_string),
+                def_name,
+                is_abstract: node
+                    .attribute("Abstract")
+                    .and_then(parse_bool)
+                    .unwrap_or(false),
+                graphic_data,
+            },
+        );
+    }
+}
+
+fn parse_raw_graphic_data(node: Node<'_, '_>) -> RawGraphicData {
+    RawGraphicData {
+        tex_path: child_text(node, "texPath").map(str::to_string),
+    }
+}
+
+fn audit_thing_def_inheritance_from_raw(
+    raw: HashMap<String, RawThingDef>,
+    loaded_defs: &HashMap<String, ThingDef>,
+) -> ThingDefInheritanceAudit {
+    fn resolve_graphic_data(
+        key: &str,
+        all: &HashMap<String, RawThingDef>,
+        cache: &mut HashMap<String, Option<RawGraphicData>>,
+        stack: &mut Vec<String>,
+    ) -> Option<RawGraphicData> {
+        if let Some(existing) = cache.get(key) {
+            return existing.clone();
+        }
+        if stack.iter().any(|k| k == key) {
+            warn!("cyclic ParentName chain detected for thing '{key}'");
+            return None;
+        }
+        let raw = all.get(key)?;
+        stack.push(key.to_string());
+        let parent_graphic = raw
+            .parent_name
+            .as_ref()
+            .and_then(|p| resolve_graphic_data(p, all, cache, stack));
+        let graphic = raw
+            .graphic_data
+            .clone()
+            .or(parent_graphic)
+            .filter(|graphic| graphic.tex_path.is_some());
+        stack.pop();
+        cache.insert(key.to_string(), graphic.clone());
+        graphic
+    }
+
+    let raw_concrete_defs = raw.values().filter(|record| !record.is_abstract).count();
+    let mut cache = HashMap::new();
+    let mut missing_inherited_graphic_defs = Vec::new();
+    for key in raw.keys() {
+        let Some(record) = raw.get(key) else {
+            continue;
+        };
+        if record.is_abstract {
+            continue;
+        }
+        let Some(def_name) = record.def_name.as_ref() else {
+            continue;
+        };
+        if loaded_defs.contains_key(def_name) {
+            continue;
+        }
+        if record.graphic_data.is_some() {
+            continue;
+        }
+        if resolve_graphic_data(key, &raw, &mut cache, &mut Vec::new()).is_some() {
+            missing_inherited_graphic_defs.push(def_name.clone());
+        }
+    }
+    missing_inherited_graphic_defs.sort();
+    ThingDefInheritanceAudit {
+        raw_concrete_defs,
+        loaded_defs: loaded_defs.len(),
+        missing_inherited_graphic_defs,
     }
 }
 
@@ -1123,6 +1244,42 @@ mod tests {
         assert_eq!(thing.graphic_data.tex_path, "Things/Test");
         assert_eq!(thing.graphic_data.draw_size, Vec2::new(2.0, 3.0));
         assert_eq!(thing.graphic_data.draw_offset, Vec3::new(0.1, 0.2, 0.3));
+    }
+
+    #[test]
+    fn audits_missing_thingdefs_with_inherited_graphic_data() {
+        let xml = r#"
+        <Defs>
+            <ThingDef Abstract="True" Name="BaseThing">
+                <graphicData>
+                    <texPath>Things/Base</texPath>
+                </graphicData>
+            </ThingDef>
+            <ThingDef ParentName="BaseThing">
+                <defName>InheritedThing</defName>
+            </ThingDef>
+            <ThingDef>
+                <defName>LoadedThing</defName>
+                <graphicData>
+                    <texPath>Things/Loaded</texPath>
+                </graphicData>
+            </ThingDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut raw = HashMap::new();
+        parse_doc_thing_raw(&doc, &mut raw);
+        let mut loaded = HashMap::new();
+        parse_doc_thing_defs(&doc, &mut loaded);
+
+        let audit = audit_thing_def_inheritance_from_raw(raw, &loaded);
+
+        assert_eq!(audit.raw_concrete_defs, 2);
+        assert_eq!(audit.loaded_defs, 1);
+        assert_eq!(
+            audit.missing_inherited_graphic_defs,
+            vec!["InheritedThing".to_string()]
+        );
     }
 
     fn parse_terrain_xml(xml: &str) -> HashMap<String, TerrainDef> {

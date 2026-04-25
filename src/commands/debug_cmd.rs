@@ -55,6 +55,14 @@ pub fn run(ctx: &mut DispatchContext<'_>, command: DebugCmd) -> Result<CommandAc
             super::common::run_defs_probe(&ctx.defs, ctx.asset_resolver)?;
             Ok(CommandAction::Done)
         }
+        DebugCmd::AuditThingDefInheritance { list_limit } => {
+            super::common::run_thingdef_inheritance_audit(
+                ctx.data_dir,
+                ctx.defs.thing_defs,
+                list_limit,
+            )?;
+            Ok(CommandAction::Done)
+        }
         DebugCmd::PackedDecodeProbe {
             sample_limit,
             min_attempts,

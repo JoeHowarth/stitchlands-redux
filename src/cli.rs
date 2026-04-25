@@ -123,6 +123,10 @@ pub enum DebugCmd {
         terrain_probe_limit: usize,
     },
     ProbeDefs,
+    AuditThingDefInheritance {
+        #[arg(long, default_value_t = 25)]
+        list_limit: usize,
+    },
     ExtractPackedTextures {
         output_dir: PathBuf,
     },
