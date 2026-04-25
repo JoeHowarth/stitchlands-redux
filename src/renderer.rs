@@ -56,8 +56,10 @@ pub struct Renderer {
     edge_fans: Vec<EdgeFanInstance>,
     overlay_batches: Vec<ColoredMeshBatch>,
     next_texture_id: u32,
+    terrain_sprite_batches: Vec<SpriteBatch>,
     static_sprite_batches: Vec<SpriteBatch>,
     dynamic_sprite_batches: Vec<SpriteBatch>,
+    terrain_water_sprite_batches: Vec<SpriteBatch>,
     static_water_sprite_batches: Vec<SpriteBatch>,
     dynamic_water_sprite_batches: Vec<SpriteBatch>,
     edge_sprite_batches: Vec<EdgeSpriteBatch>,
@@ -812,8 +814,10 @@ impl Renderer {
             edge_fans: Vec::new(),
             overlay_batches: Vec::new(),
             next_texture_id: 1,
+            terrain_sprite_batches: Vec::new(),
             static_sprite_batches: Vec::new(),
             dynamic_sprite_batches: Vec::new(),
+            terrain_water_sprite_batches: Vec::new(),
             static_water_sprite_batches: Vec::new(),
             dynamic_water_sprite_batches: Vec::new(),
             edge_sprite_batches: Vec::new(),
@@ -1031,14 +1035,30 @@ impl Renderer {
                 texture_id: self.register_texture(sprite.image),
                 params: sprite.params,
                 is_water: sprite.is_water,
+                is_terrain: sprite.is_terrain,
             })
             .collect()
     }
 
     fn rebuild_sprite_batches(&mut self) -> Result<()> {
-        let (static_base, static_water) = group_sprite_instances(&self.static_instances);
+        let mut terrain_instances = Vec::new();
+        let mut static_instances = Vec::new();
+        for sprite in self.static_instances.iter().cloned() {
+            if sprite.is_terrain {
+                terrain_instances.push(sprite);
+            } else {
+                static_instances.push(sprite);
+            }
+        }
+
+        let (terrain_base, terrain_water) = group_sprite_instances(&terrain_instances);
+        let (static_base, static_water) = group_sprite_instances(&static_instances);
         let (dynamic_base, dynamic_water) = group_sprite_instances(&self.dynamic_instances);
 
+        self.terrain_sprite_batches =
+            pack_sprite_batches(&self.device, terrain_base, "terrain-instance-buffer");
+        self.terrain_water_sprite_batches =
+            pack_sprite_batches(&self.device, terrain_water, "terrain-water-instance-buffer");
         self.static_sprite_batches =
             pack_sprite_batches(&self.device, static_base, "static-instance-buffer");
         self.static_water_sprite_batches =
@@ -1202,7 +1222,8 @@ impl Renderer {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            if !self.static_water_sprite_batches.is_empty()
+            if !self.terrain_water_sprite_batches.is_empty()
+                || !self.static_water_sprite_batches.is_empty()
                 || !self.dynamic_water_sprite_batches.is_empty()
             {
                 depth_pass.set_pipeline(&self.water_depth_pipeline);
@@ -1211,8 +1232,9 @@ impl Renderer {
                 depth_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 depth_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 for batch in self
-                    .static_water_sprite_batches
+                    .terrain_water_sprite_batches
                     .iter()
+                    .chain(self.static_water_sprite_batches.iter())
                     .chain(self.dynamic_water_sprite_batches.iter())
                 {
                     depth_pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
@@ -1241,9 +1263,16 @@ impl Renderer {
             self.draw_overlay_pass(&mut pass, OverlayPass::BeforeWorld);
             self.draw_world_batches(
                 &mut pass,
+                &self.terrain_sprite_batches,
+                &self.terrain_water_sprite_batches,
+                Some(&self.edge_sprite_batches),
+            )?;
+            self.draw_overlay_pass(&mut pass, OverlayPass::AfterTerrain);
+            self.draw_world_batches(
+                &mut pass,
                 &self.static_sprite_batches,
                 &self.static_water_sprite_batches,
-                Some(&self.edge_sprite_batches),
+                None,
             )?;
             self.draw_overlay_pass(&mut pass, OverlayPass::AfterStatic);
             self.draw_world_batches(
@@ -1662,6 +1691,7 @@ struct ScreenshotReadback {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum OverlayPass {
     BeforeWorld,
+    AfterTerrain,
     AfterStatic,
     AfterDynamic,
 }
@@ -1710,6 +1740,7 @@ pub struct SpriteInput {
     /// terrain cells; in the future any caller that wants a sprite to
     /// participate in water rendering can set it.
     pub is_water: bool,
+    pub is_terrain: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1717,6 +1748,7 @@ pub struct SpriteInstance {
     pub texture_id: TextureId,
     pub params: SpriteParams,
     pub is_water: bool,
+    pub is_terrain: bool,
 }
 
 /// UV sub-rect `(u_min, v_min, u_max, v_max)` covering the full texture.

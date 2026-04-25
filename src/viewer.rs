@@ -33,6 +33,7 @@ pub(crate) struct RenderSprite {
     /// Set by the fixture builder for terrain cells whose `TerrainDef` has a
     /// `waterDepthShader` entry.
     pub(crate) is_water: bool,
+    pub(crate) is_terrain: bool,
 }
 
 pub(crate) struct ViewerLaunch {
@@ -162,6 +163,7 @@ impl ApplicationHandler for App {
                 image: sprite.image,
                 params: sprite.params,
                 is_water: sprite.is_water,
+                is_terrain: sprite.is_terrain,
             })
             .collect();
         let water_assets = self
@@ -205,6 +207,7 @@ impl ApplicationHandler for App {
                 texture_id,
                 params: sprite.params,
                 is_water: sprite.is_water,
+                is_terrain: false,
             });
         }
         renderer

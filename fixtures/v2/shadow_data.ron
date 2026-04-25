@@ -1,0 +1,31 @@
+// Small deterministic scene for static GraphicData.shadowData shadows.
+// WoodFiredGenerator and Plant_Bush carry Core shadowData. Neither uses
+// castEdgeShadows here, so the soft graphic shadows can be checked separately
+// from wall edge/static shadows.
+(
+  schema_version: 2,
+  map: (
+    width: 5,
+    height: 5,
+    terrain: [
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+    ],
+  ),
+  render: (
+    sky_glow: (r: 0.55, g: 0.55, b: 0.58, a: 1.0),
+    shadow_color: (r: 0.0, g: 0.0, b: 0.0, a: 0.6),
+  ),
+  things: [
+    (def_name: "WoodFiredGenerator", cell_x: 2, cell_z: 2, blocks_movement: true),
+    (def_name: "Plant_Bush", cell_x: 1, cell_z: 3, blocks_movement: false),
+  ],
+  pawns: [],
+  camera: (
+    center_x: 2.5,
+    center_z: 2.5,
+  ),
+)

@@ -88,6 +88,7 @@ pub fn emit_linked_thing_sprites(
         used_fallback: resolved.used_fallback(),
         pawn_id: None,
         is_water: false,
+        is_terrain: false,
     });
 
     if effective_type == LinkDrawerType::CornerFiller {
@@ -131,6 +132,7 @@ pub fn emit_linked_thing_sprites(
                     uv_rect: CORNER_FILL_UV_RECT,
                 },
                 is_water: false,
+                is_terrain: false,
                 used_fallback: resolved.used_fallback(),
                 pawn_id: None,
             });

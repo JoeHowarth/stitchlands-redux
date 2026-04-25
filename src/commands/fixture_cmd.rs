@@ -257,6 +257,7 @@ fn build_world_sprites(
                 used_fallback,
                 pawn_id: None,
                 is_water,
+                is_terrain: true,
             });
         }
     }
@@ -321,6 +322,7 @@ fn build_world_sprites(
             used_fallback,
             pawn_id: None,
             is_water: false,
+            is_terrain: false,
         });
     }
 
@@ -432,6 +434,7 @@ fn build_world_sprites(
                 used_fallback,
                 pawn_id: Some(pawn.id),
                 is_water: false,
+                is_terrain: false,
             });
         }
     }
@@ -607,6 +610,7 @@ mod tests {
             used_fallback: false,
             pawn_id: None,
             is_water: false,
+            is_terrain: def_name.starts_with("Terrain::"),
         }
     }
 

@@ -89,6 +89,25 @@ mod tests {
     }
 
     #[test]
+    fn parses_shadow_data_fixture() {
+        let path = std::path::Path::new("fixtures/v2/shadow_data.ron");
+        let fixture = load_fixture(path).expect("shadow_data.ron should parse");
+        assert_eq!(fixture.things.len(), 2);
+        assert!(
+            fixture
+                .things
+                .iter()
+                .any(|thing| thing.def_name == "WoodFiredGenerator" && thing.blocks_movement)
+        );
+        assert!(
+            fixture
+                .things
+                .iter()
+                .any(|thing| thing.def_name == "Plant_Bush" && !thing.blocks_movement)
+        );
+    }
+
+    #[test]
     fn parses_render_state_fields() {
         let path = std::env::temp_dir().join(format!(
             "stitchlands-render-state-fixture-{}.ron",

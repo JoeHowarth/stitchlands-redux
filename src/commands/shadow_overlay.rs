@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use glam::Vec2;
 
 use crate::cell::Cell;
-use crate::defs::{RgbaColor, ThingDef};
+use crate::defs::{RgbaColor, ShadowData, ThingDef};
 use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayPass};
 use crate::world::{ThingState, WorldState};
 
 const SHADOW_OVERLAY_DEPTH: f32 = -0.18;
 const EDGE_SHADOW_IN_DIST: f32 = 0.45;
 const EDGE_SHADOW_ALPHA: f32 = (255.0 - 195.0) / 255.0;
+const GRAPHIC_SHADOW_CORE_SCALE: f32 = 0.5;
 const DEFAULT_SHADOW_VECTOR: Vec2 = Vec2::new(0.45, -0.35);
 
 pub fn build_shadow_overlays(
@@ -22,6 +23,9 @@ pub fn build_shadow_overlays(
     }
     if let Some(edge) = build_edge_shadow_overlay(thing_defs, world) {
         overlays.push(edge);
+    }
+    if let Some(graphic) = build_graphic_shadow_overlay(thing_defs, world) {
+        overlays.push(graphic);
     }
     overlays
 }
@@ -144,6 +148,103 @@ fn build_edge_shadow_overlay(
     mesh_if_not_empty(vertices, indices)
 }
 
+fn build_graphic_shadow_overlay(
+    thing_defs: &HashMap<String, ThingDef>,
+    world: &WorldState,
+) -> Option<ColoredMeshInput> {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    for thing in world.things() {
+        let Some(shadow) =
+            thing_def(thing_defs, thing).and_then(|def| def.graphic_data.shadow_data)
+        else {
+            continue;
+        };
+        push_graphic_shadow(&mut vertices, &mut indices, thing, shadow);
+    }
+
+    mesh_if_not_empty(vertices, indices)
+}
+
+fn push_graphic_shadow(
+    vertices: &mut Vec<ColoredVertex>,
+    indices: &mut Vec<u32>,
+    thing: &ThingState,
+    shadow: ShadowData,
+) {
+    let half_width = shadow.volume.x.abs() * 0.5;
+    let half_height = shadow.volume.z.abs() * 0.5;
+    let alpha = shadow.volume.y.clamp(0.0, 1.0);
+    if half_width <= 0.0 || half_height <= 0.0 || alpha <= 0.0 {
+        return;
+    }
+
+    let center_x = thing.cell_x as f32 + 0.5 + shadow.offset.x;
+    let center_z = thing.cell_z as f32 + 0.5 + shadow.offset.z;
+    let outer_min_x = center_x - half_width;
+    let outer_max_x = center_x + half_width;
+    let outer_min_z = center_z - half_height;
+    let outer_max_z = center_z + half_height;
+    let inner_half_width = half_width * GRAPHIC_SHADOW_CORE_SCALE;
+    let inner_half_height = half_height * GRAPHIC_SHADOW_CORE_SCALE;
+    let inner_min_x = center_x - inner_half_width;
+    let inner_max_x = center_x + inner_half_width;
+    let inner_min_z = center_z - inner_half_height;
+    let inner_max_z = center_z + inner_half_height;
+
+    push_gradient_quad(
+        vertices,
+        indices,
+        [
+            (inner_min_x, inner_min_z, alpha),
+            (inner_min_x, inner_max_z, alpha),
+            (inner_max_x, inner_max_z, alpha),
+            (inner_max_x, inner_min_z, alpha),
+        ],
+    );
+    push_gradient_quad(
+        vertices,
+        indices,
+        [
+            (outer_min_x, outer_min_z, 0.0),
+            (outer_min_x, outer_max_z, 0.0),
+            (inner_min_x, inner_max_z, alpha),
+            (inner_min_x, inner_min_z, alpha),
+        ],
+    );
+    push_gradient_quad(
+        vertices,
+        indices,
+        [
+            (outer_min_x, outer_max_z, 0.0),
+            (outer_max_x, outer_max_z, 0.0),
+            (inner_max_x, inner_max_z, alpha),
+            (inner_min_x, inner_max_z, alpha),
+        ],
+    );
+    push_gradient_quad(
+        vertices,
+        indices,
+        [
+            (outer_max_x, outer_max_z, 0.0),
+            (outer_max_x, outer_min_z, 0.0),
+            (inner_max_x, inner_min_z, alpha),
+            (inner_max_x, inner_max_z, alpha),
+        ],
+    );
+    push_gradient_quad(
+        vertices,
+        indices,
+        [
+            (outer_max_x, outer_min_z, 0.0),
+            (outer_min_x, outer_min_z, 0.0),
+            (inner_min_x, inner_min_z, alpha),
+            (inner_max_x, inner_min_z, alpha),
+        ],
+    );
+}
+
 fn push_solid_quad(
     vertices: &mut Vec<ColoredVertex>,
     indices: &mut Vec<u32>,
@@ -189,7 +290,7 @@ fn mesh_if_not_empty(vertices: Vec<ColoredVertex>, indices: Vec<u32>) -> Option<
         return None;
     }
     Some(ColoredMeshInput {
-        pass: OverlayPass::AfterStatic,
+        pass: OverlayPass::AfterTerrain,
         vertices,
         indices,
     })
@@ -240,7 +341,7 @@ mod tests {
 
     use glam::{Vec2, Vec3};
 
-    use crate::defs::{GraphicData, GraphicKind, RgbaColor, ThingDef};
+    use crate::defs::{GraphicData, GraphicKind, RgbaColor, ShadowData, ThingDef};
     use crate::fixtures::{
         FixtureColor, FixtureVector2, MapSpec, RenderSpec, SceneFixture, TerrainCell, ThingSpawn,
     };
@@ -258,7 +359,12 @@ mod tests {
         ]
     }
 
-    fn thing_def(def_name: &str, cast_edge_shadows: bool, sun_height: f32) -> ThingDef {
+    fn thing_def(
+        def_name: &str,
+        cast_edge_shadows: bool,
+        sun_height: f32,
+        shadow_data: Option<ShadowData>,
+    ) -> ThingDef {
         ThingDef {
             def_name: def_name.to_string(),
             graphic_data: GraphicData {
@@ -267,7 +373,7 @@ mod tests {
                 color: RgbaColor::WHITE,
                 draw_size: Vec2::ONE,
                 draw_offset: Vec3::ZERO,
-                shadow_data: None,
+                shadow_data,
                 link_type: LinkDrawerType::None,
                 link_flags: LinkFlags::EMPTY,
             },
@@ -333,7 +439,7 @@ mod tests {
         });
         let thing_defs = HashMap::from([(
             "ShadowCaster".to_string(),
-            thing_def("ShadowCaster", false, 0.4),
+            thing_def("ShadowCaster", false, 0.4, None),
         )]);
 
         let overlays = build_shadow_overlays(&thing_defs, &world);
@@ -366,8 +472,10 @@ mod tests {
             pawns: Vec::new(),
             camera: None,
         });
-        let thing_defs =
-            HashMap::from([("EdgeCaster".to_string(), thing_def("EdgeCaster", true, 0.0))]);
+        let thing_defs = HashMap::from([(
+            "EdgeCaster".to_string(),
+            thing_def("EdgeCaster", true, 0.0, None),
+        )]);
 
         let overlays = build_shadow_overlays(&thing_defs, &world);
 
@@ -377,6 +485,64 @@ mod tests {
                 .vertices
                 .iter()
                 .any(|vertex| (vertex.world_pos[0] - (1.0 - EDGE_SHADOW_IN_DIST)).abs() < 0.001)
+        );
+    }
+
+    #[test]
+    fn graphic_shadow_uses_shadow_data_volume_and_offset() {
+        let world = world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 3,
+                height: 3,
+                terrain: soil(9),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
+            },
+            render: RenderSpec::default(),
+            things: vec![ThingSpawn {
+                def_name: "PlantLike".to_string(),
+                cell_x: 1,
+                cell_z: 1,
+                blocks_movement: false,
+            }],
+            pawns: Vec::new(),
+            camera: None,
+        });
+        let thing_defs = HashMap::from([(
+            "PlantLike".to_string(),
+            thing_def(
+                "PlantLike",
+                false,
+                0.0,
+                Some(ShadowData {
+                    volume: Vec3::new(1.2, 0.35, 0.8),
+                    offset: Vec3::new(0.2, 0.0, -0.1),
+                }),
+            ),
+        )]);
+
+        let overlays = build_shadow_overlays(&thing_defs, &world);
+
+        assert_eq!(overlays.len(), 1);
+        assert_eq!(overlays[0].vertices.len(), 20);
+        assert_eq!(overlays[0].indices.len(), 30);
+        assert!(
+            overlays[0]
+                .vertices
+                .iter()
+                .any(|vertex| (vertex.world_pos[0] - 1.1).abs() < 0.001
+                    && (vertex.world_pos[1] - 1.0).abs() < 0.001
+                    && vertex.color[3] == 0.0)
+        );
+        assert!(
+            overlays[0]
+                .vertices
+                .iter()
+                .any(|vertex| (vertex.world_pos[0] - 1.4).abs() < 0.001
+                    && (vertex.world_pos[1] - 1.2).abs() < 0.001
+                    && (vertex.color[3] - 0.35).abs() < 0.001)
         );
     }
 }

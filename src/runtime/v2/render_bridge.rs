@@ -29,6 +29,7 @@ pub fn compose_dynamic_sprites(
             texture_id: *texture_id,
             params: node.params.clone(),
             is_water: false,
+            is_terrain: false,
         });
     }
 
@@ -42,6 +43,7 @@ pub fn compose_dynamic_sprites(
                 uv_rect: FULL_UV_RECT,
             },
             is_water: false,
+            is_terrain: false,
         });
     }
 
@@ -55,6 +57,7 @@ pub fn compose_dynamic_sprites(
                 uv_rect: FULL_UV_RECT,
             },
             is_water: false,
+            is_terrain: false,
         });
     }
 
@@ -68,6 +71,7 @@ pub fn compose_dynamic_sprites(
                 uv_rect: FULL_UV_RECT,
             },
             is_water: false,
+            is_terrain: false,
         });
     } else if let Some(Cell { x, z }) = frame.selected_cell {
         out.push(SpriteInstance {
@@ -79,6 +83,7 @@ pub fn compose_dynamic_sprites(
                 uv_rect: FULL_UV_RECT,
             },
             is_water: false,
+            is_terrain: false,
         });
     }
 
