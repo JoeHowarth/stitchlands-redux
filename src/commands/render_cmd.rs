@@ -4,6 +4,7 @@ use log::{info, warn};
 
 use crate::cli::RenderCmd;
 use crate::renderer::{FULL_UV_RECT, SpriteParams};
+use crate::water_assets::WaterAssets;
 
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
@@ -27,6 +28,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             },
             used_fallback: false,
             pawn_id: None,
+            is_water: false,
         };
 
         if let Some(screenshot) = &render.view.screenshot {
@@ -43,11 +45,13 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             return Ok(CommandAction::Done);
         }
 
+        let water_assets = WaterAssets::load(ctx.asset_resolver)?;
         return Ok(CommandAction::Launch(Box::new(LaunchSpec {
             static_sprites: vec![sprite],
             dynamic_sprites: Vec::new(),
             edge_sprites: Vec::new(),
             noise_image: crate::renderer::fallback_noise_image(),
+            water_assets,
             runtime: None,
             runtime_tick_limit: None,
             screenshot: render.view.screenshot,
@@ -204,6 +208,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             },
             used_fallback,
             pawn_id: None,
+            is_water: false,
         });
     }
 
@@ -211,11 +216,13 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         return Ok(CommandAction::Done);
     }
 
+    let water_assets = WaterAssets::load(ctx.asset_resolver)?;
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites: render_sprites,
         dynamic_sprites: Vec::new(),
         edge_sprites: Vec::new(),
         noise_image: crate::renderer::fallback_noise_image(),
+        water_assets,
         runtime: None,
         runtime_tick_limit: None,
         screenshot: render.view.screenshot,

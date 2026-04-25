@@ -20,6 +20,7 @@ use crate::runtime::v2::{
     InteractionOutcome, V2Runtime,
     render_bridge::{PawnNodeTextureCache, compose_dynamic_sprites},
 };
+use crate::water_assets::WaterAssets;
 
 pub(crate) struct RenderSprite {
     pub(crate) def_name: String,
@@ -27,6 +28,11 @@ pub(crate) struct RenderSprite {
     pub(crate) params: SpriteParams,
     pub(crate) used_fallback: bool,
     pub(crate) pawn_id: Option<usize>,
+    /// When true, the sprite routes through the water-depth offscreen pass and
+    /// the water-surface draw in the main pass instead of the base pipeline.
+    /// Set by the fixture builder for terrain cells whose `TerrainDef` has a
+    /// `waterDepthShader` entry.
+    pub(crate) is_water: bool,
 }
 
 pub(crate) struct ViewerLaunch {
@@ -34,6 +40,7 @@ pub(crate) struct ViewerLaunch {
     pub(crate) dynamic_sprites: Vec<RenderSprite>,
     pub(crate) edge_sprites: Vec<EdgeSpriteInput>,
     pub(crate) noise_image: RgbaImage,
+    pub(crate) water_assets: WaterAssets,
     pub(crate) screenshot_path: Option<std::path::PathBuf>,
     pub(crate) initial_camera_center: Option<Vec2>,
     pub(crate) renderer_options: RendererOptions,
@@ -55,6 +62,7 @@ struct App {
     dynamic_sprites: Vec<RenderSprite>,
     edge_sprites: Vec<EdgeSpriteInput>,
     noise_image: RgbaImage,
+    water_assets: Option<WaterAssets>,
     screenshot_path: Option<std::path::PathBuf>,
     initial_camera_center: Option<Vec2>,
     screenshot_taken: bool,
@@ -80,6 +88,7 @@ impl App {
             dynamic_sprites: launch.dynamic_sprites,
             edge_sprites: launch.edge_sprites,
             noise_image: launch.noise_image,
+            water_assets: Some(launch.water_assets),
             screenshot_path: launch.screenshot_path,
             initial_camera_center: launch.initial_camera_center,
             screenshot_taken: false,
@@ -149,12 +158,18 @@ impl ApplicationHandler for App {
             .map(|sprite| SpriteInput {
                 image: sprite.image,
                 params: sprite.params,
+                is_water: sprite.is_water,
             })
             .collect();
+        let water_assets = self
+            .water_assets
+            .take()
+            .expect("water assets already consumed");
         let renderer = pollster::block_on(Renderer::new(
             window.clone(),
             static_inputs,
             self.noise_image.clone(),
+            water_assets,
             self.initial_camera_center,
             self.renderer_options,
         ))
@@ -182,6 +197,7 @@ impl ApplicationHandler for App {
             self.base_dynamic_inputs.push(SpriteInstance {
                 texture_id,
                 params: sprite.params,
+                is_water: sprite.is_water,
             });
         }
         renderer

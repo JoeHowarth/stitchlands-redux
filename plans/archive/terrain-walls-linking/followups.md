@@ -18,22 +18,11 @@ surrounding systems are built out.
   must be picked from the stuff's `stuffProps.appearance`. See
   `commands/linking_sprites.rs::linked_atlas_path` for the insertion
   point.
-- **Water terrain rendering (base pass + depth pass)** —
-  `TerrainEdgeType::Water` currently falls through the FadeRough edge
-  shader branch, but the **base cell** for water terrains is also wrong:
-  RimWorld draws water as two passes and we draw it as one. Base pass
-  uses `ShaderDatabase.TerrainWater` with `texturePath` pointing at a
-  *gradient ramp* (e.g. `Terrain/Surfaces/WaterShallowRamp`, not a
-  tileable water tile) plus an `_AlphaAddTex` input from
-  `TexGame.AlphaAddTex`, injected in `Verse/TerrainDef.cs:434-437`. A
-  second pass via `SectionLayer_Watergen` (`Verse/SectionLayer_Watergen.cs:6-34`)
-  draws `terrain.def.waterDepthMaterial` — built from
-  `waterDepthShader = "Map/WaterDepth"` — into a separate
-  `SubcameraDefOf.WaterDepth` buffer that composites underneath. Without
-  both passes, the ramp texture reads directly to screen as a muddy
-  brown gradient. `fixtures/v2/terrain_mix.ron` swapped its WaterShallow
-  pocket for Ice until the water pipeline lands. Animated wave
-  distortion is the next step after the two-pass basics work.
+- ~~**Water terrain rendering (base pass + depth pass)**~~ — landed in
+  branch `feat/water-rendering`. Two-pass pipeline writes an R16Float
+  depth RT then samples it in screen space for a ramp + sky-reflection
+  mix. Ripple distortion (motion) is tracked in
+  `plans/water-rendering/followups.md`.
 - **Door-linking via `asymmetricLink.linkToDoors`** — doors aren't
   drawn yet.
 - **Section batching for edge overlays** — 9-vertex fan emission landed
@@ -46,16 +35,11 @@ surrounding systems are built out.
 
 ## Adjacent bugs noticed during this work
 
-- **`TerrainDef` XML inheritance is not resolved.** `parse_terrain_def`
-  drops any def that has no direct `texturePath` child, so terrains that
-  inherit it from an `Abstract="True"` parent via `ParentName` are
-  silently missing at runtime. In vanilla Core this drops **WaterDeep**,
-  **WaterMovingChestDeep**, and a handful of other variants (only 29 of
-  ~50+ terrain defs load). `terrain_mix.ron` falls back to
-  `WaterShallow` for its pond core because of this. Fix is to build a
-  two-pass loader that resolves `ParentName` chains before finalizing
-  defs — same bug likely exists for `ThingDef` inheritance. Scope it
-  into its own commit; it bleeds beyond this feature.
+- ~~**`TerrainDef` XML inheritance is not resolved.**~~ Fixed in
+  branch `feat/water-rendering` (commit `e358048`) — two-pass loader
+  now resolves `ParentName` chains. `ThingDef` has the same bug but
+  larger blast radius; still open, tracked in
+  `plans/water-rendering/followups.md`.
 
 ## Known rough edges
 
@@ -106,6 +90,10 @@ cargo run -- fixture fixtures/v2/mixed_things_pawns.ron \
     --screenshot plans/terrain-walls-linking/reference/mixed_things_pawns.png \
     --no-window
 ```
+
+The water-focused fixture and its reference live under
+`plans/water-rendering/reference/` — see that plan's followups for
+regen commands.
 
 Regenerate when touching the renderer, the edge shader, or any fixture
 listed above. Commit the regenerated PNG alongside the code change.

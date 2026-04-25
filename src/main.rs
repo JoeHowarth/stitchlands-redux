@@ -12,6 +12,7 @@ mod pawn;
 mod renderer;
 mod runtime;
 mod viewer;
+mod water_assets;
 mod world;
 
 use anyhow::Result;
@@ -58,6 +59,7 @@ fn main() -> Result<()> {
                 dynamic_sprites: spec.dynamic_sprites,
                 edge_sprites: spec.edge_sprites,
                 noise_image: spec.noise_image,
+                water_assets: spec.water_assets,
                 screenshot_path: spec.screenshot,
                 initial_camera_center: spec.camera_focus,
                 renderer_options: spec.render_options,

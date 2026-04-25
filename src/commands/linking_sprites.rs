@@ -87,6 +87,7 @@ pub fn emit_linked_thing_sprites(
         },
         used_fallback: resolved.used_fallback(),
         pawn_id: None,
+        is_water: false,
     });
 
     if effective_type == LinkDrawerType::CornerFiller {
@@ -129,6 +130,7 @@ pub fn emit_linked_thing_sprites(
                     tint,
                     uv_rect: CORNER_FILL_UV_RECT,
                 },
+                is_water: false,
                 used_fallback: resolved.used_fallback(),
                 pawn_id: None,
             });
@@ -277,6 +279,15 @@ pub(crate) fn compute_terrain_edge_contributions(
                         format!("missing TerrainDef '{}'", neighbor_tile.terrain_def)
                     })?;
                 if neighbor_def.def_name == self_def.def_name {
+                    continue;
+                }
+                // Two water terrains meeting: the base water pass already
+                // paints both cells; an edge fan between them would overlay
+                // the higher-precedence water's ramp on the lower one and
+                // read as a muddy band inside the water body. Skip.
+                if self_def.water_depth_shader.is_some()
+                    && neighbor_def.water_depth_shader.is_some()
+                {
                     continue;
                 }
                 let edge_type = match neighbor_def.edge_type {
@@ -467,6 +478,20 @@ mod tests {
             edge_texture_path: None,
             edge_type,
             render_precedence,
+            water_depth_shader: None,
+            water_depth_shader_parameters: Vec::new(),
+        }
+    }
+
+    fn make_water(def_name: &str, render_precedence: i32) -> TerrainDef {
+        TerrainDef {
+            def_name: def_name.to_string(),
+            texture_path: format!("Terrain/{def_name}"),
+            edge_texture_path: None,
+            edge_type: TerrainEdgeType::Water,
+            render_precedence,
+            water_depth_shader: Some("Map/WaterDepth".to_string()),
+            water_depth_shader_parameters: Vec::new(),
         }
     }
 
@@ -676,6 +701,21 @@ mod tests {
         assert_eq!(seen[1].1, "Water");
         assert_eq!(seen[1].2, opaque(&[5, 6, 7]));
         assert_eq!(seen[1].3, EdgeType::Water);
+    }
+
+    #[test]
+    fn water_depth_terrains_do_not_emit_edges_onto_each_other() {
+        let mut defs = HashMap::new();
+        defs.insert("WaterShallow".to_string(), make_water("WaterShallow", 394));
+        defs.insert("WaterDeep".to_string(), make_water("WaterDeep", 395));
+
+        let world = build_world(2, 1, &["WaterShallow", "WaterDeep"]);
+        let contribs = contributions(&defs, &world);
+
+        assert!(
+            contribs.is_empty(),
+            "water-depth terrains should be handled by the water surface pass, not edge fans"
+        );
     }
 
     #[test]
