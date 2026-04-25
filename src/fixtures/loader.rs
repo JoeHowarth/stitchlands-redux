@@ -117,6 +117,7 @@ mod tests {
     day_percent: 0.5,
     sky_glow: (r: 0.8, g: 0.7, b: 0.6, a: 1.0),
     shadow_color: (r: 0.1, g: 0.1, b: 0.2, a: 0.5),
+    shadow_vector: (x: 0.35, z: -0.4),
     glow_sources: [
       (
         cell_x: 1,
@@ -140,6 +141,7 @@ mod tests {
         assert_eq!(fixture.map.fog, vec![false, true, true, false]);
         assert_eq!(fixture.map.snow_depth, vec![0.0, 0.25, 0.5, 1.0]);
         assert_eq!(fixture.render.day_percent, Some(0.5));
+        assert_eq!(fixture.render.shadow_vector.unwrap().x, 0.35);
         assert_eq!(fixture.render.glow_sources[0].radius, 6.0);
     }
 }

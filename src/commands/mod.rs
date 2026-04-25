@@ -15,6 +15,7 @@ mod fixture_cmd;
 mod lighting_overlay;
 mod linking_sprites;
 mod render_cmd;
+mod shadow_overlay;
 
 pub use common::DefSet;
 

@@ -81,7 +81,7 @@ pub fn build_lighting_overlays(
     }
 
     vec![ColoredMeshInput {
-        pass: OverlayPass::AfterWorld,
+        pass: OverlayPass::AfterStatic,
         vertices,
         indices,
     }]
@@ -357,6 +357,7 @@ mod tests {
             },
             render: RenderSpec {
                 day_percent: Some(0.0),
+                shadow_vector: None,
                 ..RenderSpec::default()
             },
             things: vec![ThingSpawn {

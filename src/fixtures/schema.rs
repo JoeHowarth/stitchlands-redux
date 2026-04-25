@@ -48,6 +48,8 @@ pub struct RenderSpec {
     #[serde(default)]
     pub shadow_color: Option<FixtureColor>,
     #[serde(default)]
+    pub shadow_vector: Option<FixtureVector2>,
+    #[serde(default)]
     pub glow_sources: Vec<GlowSourceSpec>,
 }
 
@@ -58,6 +60,12 @@ pub struct FixtureColor {
     pub b: f32,
     #[serde(default = "default_color_alpha")]
     pub a: f32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+pub struct FixtureVector2 {
+    pub x: f32,
+    pub z: f32,
 }
 
 impl From<FixtureColor> for crate::defs::RgbaColor {

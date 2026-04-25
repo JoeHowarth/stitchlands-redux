@@ -39,6 +39,7 @@
   render: (
     sky_glow: (r: 0.18, g: 0.18, b: 0.22, a: 1.0),
     shadow_color: (r: 0.0, g: 0.0, b: 0.0, a: 0.65),
+    shadow_vector: (x: 0.42, z: -0.35),
     glow_sources: [
       (
         cell_x: 2,

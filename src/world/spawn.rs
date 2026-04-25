@@ -76,6 +76,10 @@ pub fn world_from_fixture(fixture: &SceneFixture) -> WorldState {
             day_percent: fixture.render.day_percent,
             sky_glow: fixture.render.sky_glow.map(Into::into),
             shadow_color: fixture.render.shadow_color.map(Into::into),
+            shadow_vector: fixture
+                .render
+                .shadow_vector
+                .map(|vector| Vec2::new(vector.x, vector.z)),
             glow_sources: fixture
                 .render
                 .glow_sources
@@ -206,6 +210,7 @@ mod tests {
                     b: 0.3,
                     a: 0.4,
                 }),
+                shadow_vector: None,
                 glow_sources: vec![GlowSourceSpec {
                     cell_x: 1,
                     cell_z: 0,

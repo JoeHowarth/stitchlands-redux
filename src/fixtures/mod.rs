@@ -6,6 +6,7 @@ pub use loader::load_fixture;
 pub use schema::SceneFixture;
 #[cfg(test)]
 pub use schema::{
-    FixtureColor, GlowSourceSpec, MapSpec, PawnSpawn, RenderSpec, RoofCell, TerrainCell, ThingSpawn,
+    FixtureColor, FixtureVector2, GlowSourceSpec, MapSpec, PawnSpawn, RenderSpec, RoofCell,
+    TerrainCell, ThingSpawn,
 };
 pub use validate::validate_fixture;

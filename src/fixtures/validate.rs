@@ -157,6 +157,11 @@ pub fn validate_fixture(fixture: &SceneFixture) -> Result<()> {
     {
         errors.push("render.shadow_color components must be finite".to_string());
     }
+    if let Some(vector) = fixture.render.shadow_vector
+        && (!vector.x.is_finite() || !vector.z.is_finite())
+    {
+        errors.push("render.shadow_vector components must be finite".to_string());
+    }
     for (idx, source) in fixture.render.glow_sources.iter().enumerate() {
         if !in_bounds(
             source.cell_x,
@@ -272,6 +277,7 @@ mod tests {
             day_percent: Some(1.2),
             sky_glow: None,
             shadow_color: None,
+            shadow_vector: None,
             glow_sources: vec![GlowSourceSpec {
                 cell_x: 3,
                 cell_z: 0,

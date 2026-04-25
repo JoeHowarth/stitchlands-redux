@@ -40,6 +40,7 @@ pub struct RenderState {
     pub day_percent: Option<f32>,
     pub sky_glow: Option<RgbaColor>,
     pub shadow_color: Option<RgbaColor>,
+    pub shadow_vector: Option<Vec2>,
     pub glow_sources: Vec<GlowSource>,
 }
 

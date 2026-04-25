@@ -56,8 +56,10 @@ pub struct Renderer {
     edge_fans: Vec<EdgeFanInstance>,
     overlay_batches: Vec<ColoredMeshBatch>,
     next_texture_id: u32,
-    sprite_batches: Vec<SpriteBatch>,
-    water_sprite_batches: Vec<SpriteBatch>,
+    static_sprite_batches: Vec<SpriteBatch>,
+    dynamic_sprite_batches: Vec<SpriteBatch>,
+    static_water_sprite_batches: Vec<SpriteBatch>,
+    dynamic_water_sprite_batches: Vec<SpriteBatch>,
     edge_sprite_batches: Vec<EdgeSpriteBatch>,
     camera_speed: f32,
     clear_color: wgpu::Color,
@@ -85,6 +87,8 @@ struct EdgeSpriteBatch {
     first_index: usize,
     texture_hash: u64,
 }
+
+type GroupedSpriteInstances = HashMap<TextureId, Vec<(usize, InstanceData)>>;
 
 struct ColoredMeshBatch {
     pass: OverlayPass,
@@ -808,8 +812,10 @@ impl Renderer {
             edge_fans: Vec::new(),
             overlay_batches: Vec::new(),
             next_texture_id: 1,
-            sprite_batches: Vec::new(),
-            water_sprite_batches: Vec::new(),
+            static_sprite_batches: Vec::new(),
+            dynamic_sprite_batches: Vec::new(),
+            static_water_sprite_batches: Vec::new(),
+            dynamic_water_sprite_batches: Vec::new(),
             edge_sprite_batches: Vec::new(),
             camera_speed: 0.2,
             clear_color: wgpu::Color {
@@ -1030,28 +1036,17 @@ impl Renderer {
     }
 
     fn rebuild_sprite_batches(&mut self) -> Result<()> {
-        let mut base_grouped: HashMap<TextureId, Vec<(usize, InstanceData)>> = HashMap::new();
-        let mut water_grouped: HashMap<TextureId, Vec<(usize, InstanceData)>> = HashMap::new();
-        for (index, sprite) in self
-            .static_instances
-            .iter()
-            .chain(self.dynamic_instances.iter())
-            .enumerate()
-        {
-            let bucket = if sprite.is_water {
-                &mut water_grouped
-            } else {
-                &mut base_grouped
-            };
-            bucket
-                .entry(sprite.texture_id)
-                .or_default()
-                .push((index, InstanceData::from_params(&sprite.params)));
-        }
+        let (static_base, static_water) = group_sprite_instances(&self.static_instances);
+        let (dynamic_base, dynamic_water) = group_sprite_instances(&self.dynamic_instances);
 
-        self.sprite_batches = pack_sprite_batches(&self.device, base_grouped, "instance-buffer");
-        self.water_sprite_batches =
-            pack_sprite_batches(&self.device, water_grouped, "water-instance-buffer");
+        self.static_sprite_batches =
+            pack_sprite_batches(&self.device, static_base, "static-instance-buffer");
+        self.static_water_sprite_batches =
+            pack_sprite_batches(&self.device, static_water, "static-water-instance-buffer");
+        self.dynamic_sprite_batches =
+            pack_sprite_batches(&self.device, dynamic_base, "dynamic-instance-buffer");
+        self.dynamic_water_sprite_batches =
+            pack_sprite_batches(&self.device, dynamic_water, "dynamic-water-instance-buffer");
         Ok(())
     }
 
@@ -1207,13 +1202,19 @@ impl Renderer {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            if !self.water_sprite_batches.is_empty() {
+            if !self.static_water_sprite_batches.is_empty()
+                || !self.dynamic_water_sprite_batches.is_empty()
+            {
                 depth_pass.set_pipeline(&self.water_depth_pipeline);
                 depth_pass.set_bind_group(0, &self.camera_bind_group, &[]);
                 depth_pass.set_bind_group(1, &self.noise_bind_group, &[]);
                 depth_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 depth_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                for batch in &self.water_sprite_batches {
+                for batch in self
+                    .static_water_sprite_batches
+                    .iter()
+                    .chain(self.dynamic_water_sprite_batches.iter())
+                {
                     depth_pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
                     depth_pass.draw_indexed(0..self.num_indices, 0, 0..batch.instance_count);
                 }
@@ -1238,98 +1239,20 @@ impl Renderer {
 
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             self.draw_overlay_pass(&mut pass, OverlayPass::BeforeWorld);
-
-            #[derive(Clone, Copy)]
-            enum DrawKind {
-                Base,
-                Edge,
-                Water,
-            }
-            let mut drawables: Vec<(f32, usize, usize, DrawKind)> = Vec::with_capacity(
-                self.sprite_batches.len()
-                    + self.edge_sprite_batches.len()
-                    + self.water_sprite_batches.len(),
-            );
-            for (i, batch) in self.sprite_batches.iter().enumerate() {
-                drawables.push((batch.min_z, batch.first_index, i, DrawKind::Base));
-            }
-            for (i, batch) in self.edge_sprite_batches.iter().enumerate() {
-                drawables.push((batch.min_z, batch.first_index, i, DrawKind::Edge));
-            }
-            for (i, batch) in self.water_sprite_batches.iter().enumerate() {
-                drawables.push((batch.min_z, batch.first_index, i, DrawKind::Water));
-            }
-            drawables.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-
-            let mut current: Option<DrawKind> = None;
-            for (_, _, idx, kind) in drawables {
-                let need_switch = !matches!(
-                    (current, kind),
-                    (Some(DrawKind::Base), DrawKind::Base)
-                        | (Some(DrawKind::Edge), DrawKind::Edge)
-                        | (Some(DrawKind::Water), DrawKind::Water)
-                );
-                if need_switch {
-                    match kind {
-                        DrawKind::Base => {
-                            pass.set_pipeline(&self.pipeline);
-                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                            pass.set_index_buffer(
-                                self.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint16,
-                            );
-                        }
-                        DrawKind::Edge => {
-                            pass.set_pipeline(&self.edge_pipeline);
-                            pass.set_bind_group(2, &self.noise_bind_group, &[]);
-                        }
-                        DrawKind::Water => {
-                            pass.set_pipeline(&self.water_surface_pipeline);
-                            pass.set_bind_group(1, &self.water_depth_bind_group, &[]);
-                            pass.set_bind_group(2, &self.noise_bind_group, &[]);
-                            pass.set_bind_group(3, &self.water_ramps_bind_group, &[]);
-                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                            pass.set_index_buffer(
-                                self.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint16,
-                            );
-                        }
-                    }
-                    current = Some(kind);
-                }
-                match kind {
-                    DrawKind::Base => {
-                        let batch = &self.sprite_batches[idx];
-                        let texture_bind_group = self
-                            .texture_bind_groups
-                            .get(&batch.texture_id)
-                            .context("missing texture bind group for sprite batch")?;
-                        pass.set_bind_group(1, texture_bind_group, &[]);
-                        pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
-                        pass.draw_indexed(0..self.num_indices, 0, 0..batch.instance_count);
-                    }
-                    DrawKind::Edge => {
-                        let batch = &self.edge_sprite_batches[idx];
-                        let texture_bind_group = self
-                            .texture_bind_groups
-                            .get(&batch.texture_id)
-                            .context("missing texture bind group for edge batch")?;
-                        pass.set_bind_group(1, texture_bind_group, &[]);
-                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
-                        pass.set_index_buffer(
-                            batch.index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint32,
-                        );
-                        pass.draw_indexed(0..batch.index_count, 0, 0..1);
-                    }
-                    DrawKind::Water => {
-                        let batch = &self.water_sprite_batches[idx];
-                        pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
-                        pass.draw_indexed(0..self.num_indices, 0, 0..batch.instance_count);
-                    }
-                }
-            }
-            self.draw_overlay_pass(&mut pass, OverlayPass::AfterWorld);
+            self.draw_world_batches(
+                &mut pass,
+                &self.static_sprite_batches,
+                &self.static_water_sprite_batches,
+                Some(&self.edge_sprite_batches),
+            )?;
+            self.draw_overlay_pass(&mut pass, OverlayPass::AfterStatic);
+            self.draw_world_batches(
+                &mut pass,
+                &self.dynamic_sprite_batches,
+                &self.dynamic_water_sprite_batches,
+                None,
+            )?;
+            self.draw_overlay_pass(&mut pass, OverlayPass::AfterDynamic);
         }
 
         let readback = if screenshot_path.is_some() {
@@ -1461,6 +1384,108 @@ impl Renderer {
             pass.draw_indexed(0..batch.index_count, 0, 0..1);
         }
     }
+
+    fn draw_world_batches<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        sprite_batches: &'a [SpriteBatch],
+        water_sprite_batches: &'a [SpriteBatch],
+        edge_sprite_batches: Option<&'a [EdgeSpriteBatch]>,
+    ) -> Result<()> {
+        #[derive(Clone, Copy)]
+        enum DrawKind {
+            Base,
+            Edge,
+            Water,
+        }
+
+        let edge_len = edge_sprite_batches
+            .map(|batches| batches.len())
+            .unwrap_or(0);
+        let mut drawables: Vec<(f32, usize, usize, DrawKind)> =
+            Vec::with_capacity(sprite_batches.len() + water_sprite_batches.len() + edge_len);
+        for (i, batch) in sprite_batches.iter().enumerate() {
+            drawables.push((batch.min_z, batch.first_index, i, DrawKind::Base));
+        }
+        if let Some(edge_batches) = edge_sprite_batches {
+            for (i, batch) in edge_batches.iter().enumerate() {
+                drawables.push((batch.min_z, batch.first_index, i, DrawKind::Edge));
+            }
+        }
+        for (i, batch) in water_sprite_batches.iter().enumerate() {
+            drawables.push((batch.min_z, batch.first_index, i, DrawKind::Water));
+        }
+        drawables.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+        let mut current: Option<DrawKind> = None;
+        for (_, _, idx, kind) in drawables {
+            let need_switch = !matches!(
+                (current, kind),
+                (Some(DrawKind::Base), DrawKind::Base)
+                    | (Some(DrawKind::Edge), DrawKind::Edge)
+                    | (Some(DrawKind::Water), DrawKind::Water)
+            );
+            if need_switch {
+                match kind {
+                    DrawKind::Base => {
+                        pass.set_pipeline(&self.pipeline);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            self.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                    }
+                    DrawKind::Edge => {
+                        pass.set_pipeline(&self.edge_pipeline);
+                        pass.set_bind_group(2, &self.noise_bind_group, &[]);
+                    }
+                    DrawKind::Water => {
+                        pass.set_pipeline(&self.water_surface_pipeline);
+                        pass.set_bind_group(1, &self.water_depth_bind_group, &[]);
+                        pass.set_bind_group(2, &self.noise_bind_group, &[]);
+                        pass.set_bind_group(3, &self.water_ramps_bind_group, &[]);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            self.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                    }
+                }
+                current = Some(kind);
+            }
+            match kind {
+                DrawKind::Base => {
+                    let batch = &sprite_batches[idx];
+                    let texture_bind_group = self
+                        .texture_bind_groups
+                        .get(&batch.texture_id)
+                        .context("missing texture bind group for sprite batch")?;
+                    pass.set_bind_group(1, texture_bind_group, &[]);
+                    pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
+                    pass.draw_indexed(0..self.num_indices, 0, 0..batch.instance_count);
+                }
+                DrawKind::Edge => {
+                    let edge_batches = edge_sprite_batches.context("missing edge batches")?;
+                    let batch = &edge_batches[idx];
+                    let texture_bind_group = self
+                        .texture_bind_groups
+                        .get(&batch.texture_id)
+                        .context("missing texture bind group for edge batch")?;
+                    pass.set_bind_group(1, texture_bind_group, &[]);
+                    pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                    pass.set_index_buffer(batch.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..batch.index_count, 0, 0..1);
+                }
+                DrawKind::Water => {
+                    let batch = &water_sprite_batches[idx];
+                    pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
+                    pass.draw_indexed(0..self.num_indices, 0, 0..batch.instance_count);
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn pack_sprite_batches(
@@ -1502,6 +1527,25 @@ fn pack_sprite_batches(
             .then(a.texture_hash.cmp(&b.texture_hash))
     });
     sprite_batches
+}
+
+fn group_sprite_instances(
+    instances: &[SpriteInstance],
+) -> (GroupedSpriteInstances, GroupedSpriteInstances) {
+    let mut base_grouped: GroupedSpriteInstances = HashMap::new();
+    let mut water_grouped: GroupedSpriteInstances = HashMap::new();
+    for (index, sprite) in instances.iter().enumerate() {
+        let bucket = if sprite.is_water {
+            &mut water_grouped
+        } else {
+            &mut base_grouped
+        };
+        bucket
+            .entry(sprite.texture_id)
+            .or_default()
+            .push((index, InstanceData::from_params(&sprite.params)));
+    }
+    (base_grouped, water_grouped)
 }
 
 fn ramp_texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -1618,7 +1662,8 @@ struct ScreenshotReadback {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum OverlayPass {
     BeforeWorld,
-    AfterWorld,
+    AfterStatic,
+    AfterDynamic,
 }
 
 #[derive(Debug, Clone)]
