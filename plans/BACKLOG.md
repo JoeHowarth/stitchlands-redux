@@ -6,6 +6,7 @@ Deferred work that doesn't warrant its own plan folder yet. Add new items here; 
 
 ### Correctness / bugs
 
+- **Non-graphic `ThingDef` XML inheritance audit.** Render-facing `graphicData` inheritance is resolved, but other inherited fields still need a pass before simulation systems lean on them.
 - **`TerrainDef` XML inheritance resolution.** `parse_terrain_def` drops defs without a direct `texturePath`, silently losing `WaterDeep`, `WaterMovingChestDeep`, and ~20 other variants that inherit via `ParentName`. Only 29 of ~50+ terrain defs load. Likely same bug for `ThingDef`. Being fixed on `feat/water-rendering` (commit `e358048`).
 - **`thing_grid` staleness if v2 ever moves things.** Built once in `world_from_fixture`, never updated. Wall-link lookup silently reads stale data if this assumption breaks. Add a debug-assert tied to a thing-move API when one exists.
 
@@ -23,7 +24,6 @@ Deferred work that doesn't warrant its own plan folder yet. Add new items here; 
 - **`LinkDrawerType::Transmitter` / `TransmitterOverlay`.** Needs a power-net graph. Power conduits render as `Basic` via fallback in `linking_sprites::effective_link_type`.
 - **`LinkDrawerType::Asymmetric` (fences).** Needs second flag set on `GraphicData`.
 - **`Graphic_Appearances` stuff variants (Smooth / Bricks / Planks).** No stuff system yet; `linked_atlas_path` hardcodes `_Atlas_Bricks` for `Graphic_Appearances`. When stuff lands, pick atlas basename from `stuffProps.appearance`. Insertion point: `commands/linking_sprites.rs::linked_atlas_path`.
-- **`Custom1..10` link flags.** Unused in Core; add on demand.
 
 ### Simulation / systems
 

@@ -17,6 +17,19 @@ impl LinkFlags {
     pub const POWER_CONDUIT: Self = Self(0x10);
     pub const BARRICADES: Self = Self(0x20);
     pub const FENCES: Self = Self(0x40);
+    pub const FLESHMASS: Self = Self(0x80);
+    pub const SOLID_ICE: Self = Self(0x100);
+    pub const BURROW_WALL: Self = Self(0x200);
+    pub const CUSTOM1: Self = Self(0x20000);
+    pub const CUSTOM2: Self = Self(0x40000);
+    pub const CUSTOM3: Self = Self(0x80000);
+    pub const CUSTOM4: Self = Self(0x100000);
+    pub const CUSTOM5: Self = Self(0x200000);
+    pub const CUSTOM6: Self = Self(0x400000);
+    pub const CUSTOM7: Self = Self(0x800000);
+    pub const CUSTOM8: Self = Self(0x1000000);
+    pub const CUSTOM9: Self = Self(0x2000000);
+    pub const CUSTOM10: Self = Self(0x4000000);
 
     pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) == other.0
@@ -43,6 +56,19 @@ impl LinkFlags {
             "PowerConduit" => Some(Self::POWER_CONDUIT),
             "Barricades" => Some(Self::BARRICADES),
             "Fences" => Some(Self::FENCES),
+            "Fleshmass" => Some(Self::FLESHMASS),
+            "SolidIce" => Some(Self::SOLID_ICE),
+            "BurrowWall" => Some(Self::BURROW_WALL),
+            "Custom1" => Some(Self::CUSTOM1),
+            "Custom2" => Some(Self::CUSTOM2),
+            "Custom3" => Some(Self::CUSTOM3),
+            "Custom4" => Some(Self::CUSTOM4),
+            "Custom5" => Some(Self::CUSTOM5),
+            "Custom6" => Some(Self::CUSTOM6),
+            "Custom7" => Some(Self::CUSTOM7),
+            "Custom8" => Some(Self::CUSTOM8),
+            "Custom9" => Some(Self::CUSTOM9),
+            "Custom10" => Some(Self::CUSTOM10),
             _ => None,
         }
     }
@@ -223,6 +249,11 @@ mod tests {
         assert_eq!(
             LinkFlags::from_token("PowerConduit"),
             Some(LinkFlags::POWER_CONDUIT)
+        );
+        assert_eq!(LinkFlags::from_token("Custom8"), Some(LinkFlags::CUSTOM8));
+        assert_eq!(
+            LinkFlags::from_token("BurrowWall"),
+            Some(LinkFlags::BURROW_WALL)
         );
         assert_eq!(LinkFlags::from_token("wall"), None); // case-sensitive
         assert_eq!(LinkFlags::from_token("Unknown"), None);

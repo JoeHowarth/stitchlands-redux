@@ -215,6 +215,30 @@ pub fn run_defs_probe(defs: &DefSet<'_>, resolver: &mut AssetResolver) -> Result
     Ok(())
 }
 
+pub fn run_thingdef_inheritance_audit(
+    data_dir: &Path,
+    thing_defs: &HashMap<String, ThingDef>,
+    limit: usize,
+) -> Result<()> {
+    let audit = crate::defs::audit_thing_def_inheritance(data_dir, thing_defs)?;
+    println!(
+        "thingdef inheritance audit: raw_concrete={} loaded={} inherited_graphic_missing={}",
+        audit.raw_concrete_defs,
+        audit.loaded_defs,
+        audit.missing_inherited_graphic_defs.len()
+    );
+    for def_name in audit.missing_inherited_graphic_defs.iter().take(limit) {
+        println!("MISSING inherited graphicData: {def_name}");
+    }
+    if audit.missing_inherited_graphic_defs.len() > limit {
+        println!(
+            "... {} more",
+            audit.missing_inherited_graphic_defs.len() - limit
+        );
+    }
+    Ok(())
+}
+
 pub fn run_terrain_probe(
     terrain_defs: &std::collections::HashMap<String, TerrainDef>,
     resolver: &mut AssetResolver,
