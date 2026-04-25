@@ -284,7 +284,8 @@ fn walk_defs<T>(
 }
 
 pub fn load_thing_defs(core_data_dir: &Path) -> Result<HashMap<String, ThingDef>> {
-    walk_defs(core_data_dir, parse_doc_thing_defs)
+    let raw = walk_defs(core_data_dir, parse_doc_thing_raw)?;
+    Ok(resolve_thing_defs_from_raw(raw))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -554,12 +555,11 @@ fn parse_humanlike_render_tree_layers(doc: &Document<'_>) -> Result<HumanlikeRen
     })
 }
 
+#[cfg(test)]
 fn parse_doc_thing_defs(doc: &Document<'_>, defs: &mut HashMap<String, ThingDef>) {
-    for node in doc.descendants().filter(|n| n.has_tag_name("ThingDef")) {
-        if let Some(thing_def) = parse_thing_def(node) {
-            defs.insert(thing_def.def_name.clone(), thing_def);
-        }
-    }
+    let mut raw = HashMap::new();
+    parse_doc_thing_raw(doc, &mut raw);
+    defs.extend(resolve_thing_defs_from_raw(raw));
 }
 
 #[derive(Clone, Default)]
@@ -573,6 +573,12 @@ struct RawThingDef {
 #[derive(Clone, Default)]
 struct RawGraphicData {
     tex_path: Option<String>,
+    graphic_class: Option<String>,
+    color: Option<RgbaColor>,
+    draw_size: Option<Vec2>,
+    draw_offset: Option<Vec3>,
+    link_type: Option<LinkDrawerType>,
+    link_flags: Option<LinkFlags>,
 }
 
 fn parse_doc_thing_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawThingDef>) {
@@ -599,9 +605,128 @@ fn parse_doc_thing_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawThingDef
 }
 
 fn parse_raw_graphic_data(node: Node<'_, '_>) -> RawGraphicData {
+    let tex_path = child_text(node, "texPath").map(str::to_string);
+    let context = tex_path
+        .clone()
+        .unwrap_or_else(|| "<inherited graphicData>".to_string());
+    let link_type =
+        child_text(node, "linkType").and_then(|value| match LinkDrawerType::from_token(value) {
+            Some(parsed) => Some(parsed),
+            None => {
+                warn!("unknown linkType '{value}' for '{context}'");
+                None
+            }
+        });
     RawGraphicData {
-        tex_path: child_text(node, "texPath").map(str::to_string),
+        tex_path,
+        graphic_class: child_text(node, "graphicClass").map(str::to_string),
+        color: child_text(node, "color").and_then(parse_color),
+        draw_size: child_node(node, "drawSize").map(parse_vec2),
+        draw_offset: child_node(node, "drawOffset").map(parse_vec3),
+        link_type,
+        link_flags: child_node(node, "linkFlags")
+            .map(|flags_node| parse_link_flags(flags_node, &context)),
     }
+}
+
+fn merge_raw_graphic_data(
+    child: Option<RawGraphicData>,
+    parent: Option<RawGraphicData>,
+) -> Option<RawGraphicData> {
+    match (child, parent) {
+        (Some(child), Some(parent)) => Some(RawGraphicData {
+            tex_path: child.tex_path.or(parent.tex_path),
+            graphic_class: child.graphic_class.or(parent.graphic_class),
+            color: child.color.or(parent.color),
+            draw_size: child.draw_size.or(parent.draw_size),
+            draw_offset: child.draw_offset.or(parent.draw_offset),
+            link_type: child.link_type.or(parent.link_type),
+            link_flags: child.link_flags.or(parent.link_flags),
+        }),
+        (Some(child), None) => Some(child),
+        (None, Some(parent)) => Some(parent),
+        (None, None) => None,
+    }
+}
+
+fn finalize_graphic_data(raw: RawGraphicData) -> Option<GraphicData> {
+    let tex_path = raw.tex_path?;
+    Some(GraphicData {
+        tex_path,
+        kind: GraphicKind::parse(raw.graphic_class.as_deref()),
+        color: raw.color.unwrap_or(RgbaColor::WHITE),
+        draw_size: raw.draw_size.unwrap_or(Vec2::new(1.0, 1.0)),
+        draw_offset: raw.draw_offset.unwrap_or(Vec3::ZERO),
+        link_type: raw.link_type.unwrap_or_default(),
+        link_flags: raw.link_flags.unwrap_or_default(),
+    })
+}
+
+/// Resolve `ParentName` inheritance chains into concrete renderable
+/// `ThingDef`s.
+///
+/// This intentionally resolves only the render fields this project consumes:
+/// `defName` and `graphicData`. RimWorld's XML inheritance is broader, but
+/// carrying every `ThingDef` field through this lightweight render model would
+/// create a lot of unused surface area.
+fn resolve_thing_defs_from_raw(raw: HashMap<String, RawThingDef>) -> HashMap<String, ThingDef> {
+    fn resolve(
+        key: &str,
+        all: &HashMap<String, RawThingDef>,
+        cache: &mut HashMap<String, RawThingDef>,
+        stack: &mut Vec<String>,
+    ) -> Option<RawThingDef> {
+        if let Some(existing) = cache.get(key) {
+            return Some(existing.clone());
+        }
+        if stack.iter().any(|k| k == key) {
+            warn!("cyclic ParentName chain detected for thing '{key}'");
+            return None;
+        }
+        let raw = all.get(key)?;
+        stack.push(key.to_string());
+        let parent = raw
+            .parent_name
+            .as_ref()
+            .and_then(|p| resolve(p, all, cache, stack));
+        let merged = RawThingDef {
+            parent_name: raw.parent_name.clone(),
+            def_name: raw.def_name.clone(),
+            is_abstract: raw.is_abstract,
+            graphic_data: merge_raw_graphic_data(
+                raw.graphic_data.clone(),
+                parent.as_ref().and_then(|p| p.graphic_data.clone()),
+            ),
+        };
+        stack.pop();
+        cache.insert(key.to_string(), merged.clone());
+        Some(merged)
+    }
+
+    let mut out = HashMap::new();
+    let mut cache = HashMap::new();
+    for key in raw.keys() {
+        let Some(merged) = resolve(key, &raw, &mut cache, &mut Vec::new()) else {
+            continue;
+        };
+        if merged.is_abstract {
+            continue;
+        }
+        let Some(def_name) = merged.def_name else {
+            continue;
+        };
+        let Some(graphic_data) = merged.graphic_data.and_then(finalize_graphic_data) else {
+            continue;
+        };
+        out.insert(
+            def_name.clone(),
+            ThingDef {
+                def_name,
+                graphic_data,
+            },
+        );
+    }
+    out
 }
 
 fn audit_thing_def_inheritance_from_raw(
@@ -627,10 +752,7 @@ fn audit_thing_def_inheritance_from_raw(
             .parent_name
             .as_ref()
             .and_then(|p| resolve_graphic_data(p, all, cache, stack));
-        let graphic = raw
-            .graphic_data
-            .clone()
-            .or(parent_graphic)
+        let graphic = merge_raw_graphic_data(raw.graphic_data.clone(), parent_graphic)
             .filter(|graphic| graphic.tex_path.is_some());
         stack.pop();
         cache.insert(key.to_string(), graphic.clone());
@@ -651,9 +773,6 @@ fn audit_thing_def_inheritance_from_raw(
             continue;
         };
         if loaded_defs.contains_key(def_name) {
-            continue;
-        }
-        if record.graphic_data.is_some() {
             continue;
         }
         if resolve_graphic_data(key, &raw, &mut cache, &mut Vec::new()).is_some() {
@@ -845,17 +964,6 @@ fn parse_doc_apparel_defs(doc: &Document<'_>, defs: &mut HashMap<String, Apparel
     }
 }
 
-fn parse_thing_def(node: Node<'_, '_>) -> Option<ThingDef> {
-    let def_name = child_text(node, "defName")?.to_string();
-    let graphic_node = node.children().find(|n| n.has_tag_name("graphicData"))?;
-    let graphic_data = parse_graphic_data(graphic_node)?;
-
-    Some(ThingDef {
-        def_name,
-        graphic_data,
-    })
-}
-
 fn parse_apparel_def(node: Node<'_, '_>) -> Option<ApparelDef> {
     let def_name = child_text(node, "defName")?.to_string();
     let apparel_node = child_node(node, "apparel")?;
@@ -982,6 +1090,7 @@ fn list_text_values<'a>(node: Node<'a, 'a>) -> impl Iterator<Item = &'a str> {
     node.children()
         .filter_map(|child| child.text())
         .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn parse_apparel_layer_def(input: &str) -> Option<ApparelLayerDef> {
@@ -1258,6 +1367,12 @@ mod tests {
             <ThingDef ParentName="BaseThing">
                 <defName>InheritedThing</defName>
             </ThingDef>
+            <ThingDef ParentName="BaseThing">
+                <defName>PartialThing</defName>
+                <graphicData>
+                    <color>0, 1, 0, 1</color>
+                </graphicData>
+            </ThingDef>
             <ThingDef>
                 <defName>LoadedThing</defName>
                 <graphicData>
@@ -1270,16 +1385,85 @@ mod tests {
         let mut raw = HashMap::new();
         parse_doc_thing_raw(&doc, &mut raw);
         let mut loaded = HashMap::new();
-        parse_doc_thing_defs(&doc, &mut loaded);
+        loaded.insert(
+            "LoadedThing".to_string(),
+            ThingDef {
+                def_name: "LoadedThing".to_string(),
+                graphic_data: GraphicData {
+                    tex_path: "Things/Loaded".to_string(),
+                    kind: GraphicKind::Single,
+                    color: RgbaColor::WHITE,
+                    draw_size: Vec2::ONE,
+                    draw_offset: Vec3::ZERO,
+                    link_type: LinkDrawerType::None,
+                    link_flags: LinkFlags::EMPTY,
+                },
+            },
+        );
 
         let audit = audit_thing_def_inheritance_from_raw(raw, &loaded);
 
-        assert_eq!(audit.raw_concrete_defs, 2);
+        assert_eq!(audit.raw_concrete_defs, 3);
         assert_eq!(audit.loaded_defs, 1);
         assert_eq!(
             audit.missing_inherited_graphic_defs,
-            vec!["InheritedThing".to_string()]
+            vec!["InheritedThing".to_string(), "PartialThing".to_string()]
         );
+    }
+
+    #[test]
+    fn resolves_thing_parent_graphic_data() {
+        let xml = r#"
+        <Defs>
+            <ThingDef Abstract="True" Name="BaseThing">
+                <graphicData>
+                    <texPath>Things/Base</texPath>
+                    <graphicClass>Graphic_Appearances</graphicClass>
+                    <drawSize><x>2.0</x><y>3.0</y></drawSize>
+                    <color>1, 0, 0, 1</color>
+                    <linkType>CornerFiller</linkType>
+                    <linkFlags>
+                        <li>Wall</li>
+                    </linkFlags>
+                </graphicData>
+            </ThingDef>
+            <ThingDef ParentName="BaseThing">
+                <defName>InheritedThing</defName>
+            </ThingDef>
+            <ThingDef ParentName="BaseThing">
+                <defName>OverrideThing</defName>
+                <graphicData>
+                    <color>0, 1, 0, 1</color>
+                </graphicData>
+            </ThingDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut defs = HashMap::new();
+        parse_doc_thing_defs(&doc, &mut defs);
+
+        let inherited = defs.get("InheritedThing").unwrap();
+        assert_eq!(inherited.graphic_data.tex_path, "Things/Base");
+        assert_eq!(inherited.graphic_data.kind, GraphicKind::Appearances);
+        assert_eq!(inherited.graphic_data.draw_size, Vec2::new(2.0, 3.0));
+        assert_eq!(
+            inherited.graphic_data.link_type,
+            LinkDrawerType::CornerFiller
+        );
+        assert!(inherited.graphic_data.link_flags.contains(LinkFlags::WALL));
+
+        let override_thing = defs.get("OverrideThing").unwrap();
+        assert_eq!(override_thing.graphic_data.tex_path, "Things/Base");
+        assert_eq!(
+            override_thing.graphic_data.color,
+            RgbaColor {
+                r: 0.0,
+                g: 1.0,
+                b: 0.0,
+                a: 1.0,
+            }
+        );
+        assert_eq!(override_thing.graphic_data.draw_size, Vec2::new(2.0, 3.0));
     }
 
     fn parse_terrain_xml(xml: &str) -> HashMap<String, TerrainDef> {
