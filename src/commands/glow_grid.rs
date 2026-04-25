@@ -1,34 +1,59 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::cell::Cell;
 use crate::defs::{GlowerProps, RgbaColor, ThingDef};
 use crate::world::{GlowSource, WorldState};
 
+const CARDINAL_STEP_COST: f32 = 1.0;
+const DIAGONAL_STEP_COST: f32 = std::f32::consts::SQRT_2;
+const PROPAGATION_EPSILON: f32 = 0.0001;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlowSample {
+    pub intensity: f32,
+    pub color: RgbaColor,
+}
+
+impl Default for GlowSample {
+    fn default() -> Self {
+        Self {
+            intensity: 0.0,
+            color: RgbaColor::WHITE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GlowEmitter {
+    cell: Cell,
+    radius: f32,
+    overlight_radius: f32,
+    color: RgbaColor,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlowGrid {
     width: usize,
     height: usize,
-    visual_glow: Vec<f32>,
+    visual_glow: Vec<GlowSample>,
 }
 
 impl GlowGrid {
     pub fn from_world(thing_defs: &HashMap<String, ThingDef>, world: &WorldState) -> Self {
         let width = world.width();
         let height = world.height();
-        let mut visual_glow = Vec::with_capacity(width * height);
-
-        for z in 0..height {
-            for x in 0..width {
-                let cell = Cell::new(x as i32, z as i32);
-                visual_glow.push(artificial_glow_brightness(thing_defs, world, cell));
-            }
-        }
-
-        Self {
+        let blockers = blocker_grid(thing_defs, world);
+        let mut grid = Self {
             width,
             height,
-            visual_glow,
+            visual_glow: vec![GlowSample::default(); width * height],
+        };
+
+        for emitter in glow_emitters(thing_defs, world) {
+            grid.propagate_emitter(emitter, &blockers);
         }
+
+        grid
     }
 
     pub fn has_inputs(thing_defs: &HashMap<String, ThingDef>, world: &WorldState) -> bool {
@@ -42,84 +67,158 @@ impl GlowGrid {
     }
 
     pub fn visual_glow_at(&self, cell: Cell) -> f32 {
+        self.visual_glow_sample_at(cell).intensity
+    }
+
+    pub fn visual_glow_sample_at(&self, cell: Cell) -> GlowSample {
         if cell.x < 0 || cell.z < 0 {
-            return 0.0;
+            return GlowSample::default();
         }
         let x = cell.x as usize;
         let z = cell.z as usize;
         if x >= self.width || z >= self.height {
-            return 0.0;
+            return GlowSample::default();
         }
         self.visual_glow[z * self.width + x]
     }
+
+    fn propagate_emitter(&mut self, emitter: GlowEmitter, blockers: &[bool]) {
+        if emitter.radius <= 0.0 || !self.contains(emitter.cell) {
+            return;
+        }
+
+        let cell_count = self.width * self.height;
+        let mut distances = vec![f32::INFINITY; cell_count];
+        let source_index = self.cell_index(emitter.cell).expect("source is in bounds");
+        distances[source_index] = 0.0;
+
+        let mut queue = VecDeque::from([emitter.cell]);
+        while let Some(cell) = queue.pop_front() {
+            let Some(cell_index) = self.cell_index(cell) else {
+                continue;
+            };
+            let distance = distances[cell_index];
+            self.apply_emitter_sample(cell_index, distance, emitter);
+
+            if blockers[cell_index] && cell != emitter.cell {
+                continue;
+            }
+
+            for (dx, dz, step_cost) in neighbors() {
+                let next = Cell::new(cell.x + dx, cell.z + dz);
+                let Some(next_index) = self.cell_index(next) else {
+                    continue;
+                };
+                let next_distance = distance + step_cost;
+                if next_distance > emitter.radius {
+                    continue;
+                }
+                if next_distance + PROPAGATION_EPSILON < distances[next_index] {
+                    distances[next_index] = next_distance;
+                    queue.push_back(next);
+                }
+            }
+        }
+    }
+
+    fn apply_emitter_sample(&mut self, cell_index: usize, distance: f32, emitter: GlowEmitter) {
+        let intensity = emitter_intensity(emitter, distance);
+        if intensity > self.visual_glow[cell_index].intensity {
+            self.visual_glow[cell_index] = GlowSample {
+                intensity,
+                color: emitter.color,
+            };
+        }
+    }
+
+    fn contains(&self, cell: Cell) -> bool {
+        self.cell_index(cell).is_some()
+    }
+
+    fn cell_index(&self, cell: Cell) -> Option<usize> {
+        if cell.x < 0 || cell.z < 0 {
+            return None;
+        }
+        let x = cell.x as usize;
+        let z = cell.z as usize;
+        (x < self.width && z < self.height).then_some(z * self.width + x)
+    }
 }
 
-fn artificial_glow_brightness(
-    thing_defs: &HashMap<String, ThingDef>,
-    world: &WorldState,
-    cell: Cell,
-) -> f32 {
-    let fixture_brightness = world
+fn blocker_grid(thing_defs: &HashMap<String, ThingDef>, world: &WorldState) -> Vec<bool> {
+    let mut blockers = vec![false; world.width() * world.height()];
+    for thing in world.things() {
+        let Some(def) = thing_defs.get(&thing.def_name) else {
+            continue;
+        };
+        if !def.block_light {
+            continue;
+        }
+        let cell = Cell::new(thing.cell_x, thing.cell_z);
+        if cell.x < 0 || cell.z < 0 {
+            continue;
+        }
+        let x = cell.x as usize;
+        let z = cell.z as usize;
+        if x < world.width() && z < world.height() {
+            blockers[z * world.width() + x] = true;
+        }
+    }
+    blockers
+}
+
+fn glow_emitters(thing_defs: &HashMap<String, ThingDef>, world: &WorldState) -> Vec<GlowEmitter> {
+    let mut emitters: Vec<_> = world
         .render_state()
         .glow_sources
         .iter()
-        .map(|source| glow_source_brightness(source, cell))
-        .fold(0.0, f32::max);
-
-    let glower_brightness = world
-        .things()
-        .iter()
-        .filter_map(|thing| {
-            let glower = thing_defs.get(&thing.def_name).and_then(|def| def.glower)?;
-            Some(glower_brightness(thing.cell_x, thing.cell_z, glower, cell))
-        })
-        .fold(0.0, f32::max);
-
-    fixture_brightness.max(glower_brightness)
+        .map(glow_source_emitter)
+        .collect();
+    emitters.extend(world.things().iter().filter_map(|thing| {
+        let glower = thing_defs.get(&thing.def_name).and_then(|def| def.glower)?;
+        Some(glower_emitter(thing.cell_x, thing.cell_z, glower))
+    }));
+    emitters
 }
 
-fn glow_source_brightness(source: &GlowSource, cell: Cell) -> f32 {
-    point_glow_brightness(
-        source.cell_x,
-        source.cell_z,
-        source.radius,
-        source.overlight_radius,
-        source.color,
-        cell,
-    )
-}
-
-fn glower_brightness(cell_x: i32, cell_z: i32, glower: GlowerProps, cell: Cell) -> f32 {
-    point_glow_brightness(
-        cell_x,
-        cell_z,
-        glower.glow_radius,
-        glower.overlight_radius,
-        glower.glow_color,
-        cell,
-    )
-}
-
-fn point_glow_brightness(
-    source_x: i32,
-    source_z: i32,
-    radius: f32,
-    overlight_radius: f32,
-    color: RgbaColor,
-    cell: Cell,
-) -> f32 {
-    if radius <= 0.0 {
-        return 0.0;
+fn glow_source_emitter(source: &GlowSource) -> GlowEmitter {
+    GlowEmitter {
+        cell: Cell::new(source.cell_x, source.cell_z),
+        radius: source.radius,
+        overlight_radius: source.overlight_radius,
+        color: source.color,
     }
-    let dx = cell.x as f32 + 0.5 - (source_x as f32 + 0.5);
-    let dz = cell.z as f32 + 0.5 - (source_z as f32 + 0.5);
-    let distance = (dx * dx + dz * dz).sqrt();
-    let falloff = if overlight_radius > 0.0 && distance <= overlight_radius {
+}
+
+fn glower_emitter(cell_x: i32, cell_z: i32, glower: GlowerProps) -> GlowEmitter {
+    GlowEmitter {
+        cell: Cell::new(cell_x, cell_z),
+        radius: glower.glow_radius,
+        overlight_radius: glower.overlight_radius,
+        color: glower.glow_color,
+    }
+}
+
+fn emitter_intensity(emitter: GlowEmitter, distance: f32) -> f32 {
+    let falloff = if emitter.overlight_radius > 0.0 && distance <= emitter.overlight_radius {
         1.0
     } else {
-        (1.0 - distance / radius).clamp(0.0, 1.0)
+        (1.0 - distance / emitter.radius).clamp(0.0, 1.0)
     };
-    falloff * color_brightness(color)
+    falloff * color_brightness(emitter.color)
+}
+
+fn neighbors() -> [(i32, i32, f32); 8] {
+    [
+        (-1, 0, CARDINAL_STEP_COST),
+        (1, 0, CARDINAL_STEP_COST),
+        (0, -1, CARDINAL_STEP_COST),
+        (0, 1, CARDINAL_STEP_COST),
+        (-1, -1, DIAGONAL_STEP_COST),
+        (1, -1, DIAGONAL_STEP_COST),
+        (-1, 1, DIAGONAL_STEP_COST),
+        (1, 1, DIAGONAL_STEP_COST),
+    ]
 }
 
 fn color_brightness(color: RgbaColor) -> f32 {
@@ -157,7 +256,7 @@ mod tests {
         ]
     }
 
-    fn thing_def(def_name: &str) -> ThingDef {
+    fn thing_def(def_name: &str, block_light: bool) -> ThingDef {
         ThingDef {
             def_name: def_name.to_string(),
             graphic_data: GraphicData {
@@ -170,7 +269,7 @@ mod tests {
                 link_type: LinkDrawerType::None,
                 link_flags: LinkFlags::EMPTY,
             },
-            block_light: false,
+            block_light,
             holds_roof: false,
             cast_edge_shadows: false,
             static_sun_shadow_height: 0.0,
@@ -240,7 +339,7 @@ mod tests {
             pawns: Vec::new(),
             camera: None,
         });
-        let mut lamp = thing_def("Lamp");
+        let mut lamp = thing_def("Lamp", false);
         lamp.glower = Some(GlowerProps {
             glow_radius: 1.5,
             glow_color: RgbaColor {
@@ -259,6 +358,229 @@ mod tests {
         assert!(
             glow_grid.visual_glow_at(Cell::new(0, 0)) > glow_grid.visual_glow_at(Cell::new(2, 0))
         );
+    }
+
+    #[test]
+    fn block_light_cell_stops_glow_propagation() {
+        let world = world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 4,
+                height: 1,
+                terrain: soil(4),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
+            },
+            render: RenderSpec {
+                glow_sources: vec![GlowSourceSpec {
+                    cell_x: 0,
+                    cell_z: 0,
+                    radius: 4.0,
+                    color: FixtureColor {
+                        r: 255.0,
+                        g: 255.0,
+                        b: 255.0,
+                        a: 0.0,
+                    },
+                    overlight_radius: 0.0,
+                }],
+                ..RenderSpec::default()
+            },
+            things: vec![ThingSpawn {
+                def_name: "Wall".to_string(),
+                cell_x: 1,
+                cell_z: 0,
+                blocks_movement: true,
+            }],
+            pawns: Vec::new(),
+            camera: None,
+        });
+        let thing_defs = HashMap::from([("Wall".to_string(), thing_def("Wall", true))]);
+
+        let glow_grid = GlowGrid::from_world(&thing_defs, &world);
+
+        assert!(glow_grid.visual_glow_at(Cell::new(1, 0)) > 0.0);
+        assert_eq!(glow_grid.visual_glow_at(Cell::new(2, 0)), 0.0);
+        assert_eq!(glow_grid.visual_glow_at(Cell::new(3, 0)), 0.0);
+    }
+
+    #[test]
+    fn movement_blocking_without_block_light_does_not_stop_glow() {
+        let world = world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 4,
+                height: 1,
+                terrain: soil(4),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
+            },
+            render: RenderSpec {
+                glow_sources: vec![GlowSourceSpec {
+                    cell_x: 0,
+                    cell_z: 0,
+                    radius: 4.0,
+                    color: FixtureColor {
+                        r: 255.0,
+                        g: 255.0,
+                        b: 255.0,
+                        a: 0.0,
+                    },
+                    overlight_radius: 0.0,
+                }],
+                ..RenderSpec::default()
+            },
+            things: vec![ThingSpawn {
+                def_name: "Crate".to_string(),
+                cell_x: 1,
+                cell_z: 0,
+                blocks_movement: true,
+            }],
+            pawns: Vec::new(),
+            camera: None,
+        });
+        let thing_defs = HashMap::from([("Crate".to_string(), thing_def("Crate", false))]);
+
+        let glow_grid = GlowGrid::from_world(&thing_defs, &world);
+
+        assert!(glow_grid.visual_glow_at(Cell::new(2, 0)) > 0.0);
+        assert!(glow_grid.visual_glow_at(Cell::new(3, 0)) > 0.0);
+    }
+
+    #[test]
+    fn diagonal_steps_use_longer_cost_for_radius_cutoff() {
+        let world = world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 2,
+                height: 2,
+                terrain: soil(4),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
+            },
+            render: RenderSpec {
+                glow_sources: vec![GlowSourceSpec {
+                    cell_x: 0,
+                    cell_z: 0,
+                    radius: 1.1,
+                    color: FixtureColor {
+                        r: 255.0,
+                        g: 255.0,
+                        b: 255.0,
+                        a: 0.0,
+                    },
+                    overlight_radius: 0.0,
+                }],
+                ..RenderSpec::default()
+            },
+            things: Vec::new(),
+            pawns: Vec::new(),
+            camera: None,
+        });
+
+        let glow_grid = GlowGrid::from_world(&HashMap::new(), &world);
+
+        assert!(glow_grid.visual_glow_at(Cell::new(1, 0)) > 0.0);
+        assert!(glow_grid.visual_glow_at(Cell::new(0, 1)) > 0.0);
+        assert_eq!(glow_grid.visual_glow_at(Cell::new(1, 1)), 0.0);
+    }
+
+    #[test]
+    fn source_cell_can_be_block_light_and_still_emit() {
+        let world = world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 3,
+                height: 1,
+                terrain: soil(3),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
+            },
+            render: RenderSpec::default(),
+            things: vec![ThingSpawn {
+                def_name: "GlowWall".to_string(),
+                cell_x: 0,
+                cell_z: 0,
+                blocks_movement: true,
+            }],
+            pawns: Vec::new(),
+            camera: None,
+        });
+        let mut glow_wall = thing_def("GlowWall", true);
+        glow_wall.glower = Some(GlowerProps {
+            glow_radius: 3.0,
+            glow_color: RgbaColor {
+                r: 255.0,
+                g: 255.0,
+                b: 255.0,
+                a: 0.0,
+            },
+            overlight_radius: 0.0,
+        });
+        let thing_defs = HashMap::from([("GlowWall".to_string(), glow_wall)]);
+
+        let glow_grid = GlowGrid::from_world(&thing_defs, &world);
+
+        assert!(glow_grid.visual_glow_at(Cell::new(0, 0)) > 0.0);
+        assert!(glow_grid.visual_glow_at(Cell::new(1, 0)) > 0.0);
+        assert!(glow_grid.visual_glow_at(Cell::new(2, 0)) > 0.0);
+    }
+
+    #[test]
+    fn carries_color_for_strongest_glow_sample() {
+        let world = world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 3,
+                height: 1,
+                terrain: soil(3),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
+            },
+            render: RenderSpec {
+                glow_sources: vec![
+                    GlowSourceSpec {
+                        cell_x: 0,
+                        cell_z: 0,
+                        radius: 3.0,
+                        color: FixtureColor {
+                            r: 255.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 0.0,
+                        },
+                        overlight_radius: 0.0,
+                    },
+                    GlowSourceSpec {
+                        cell_x: 2,
+                        cell_z: 0,
+                        radius: 3.0,
+                        color: FixtureColor {
+                            r: 0.0,
+                            g: 255.0,
+                            b: 0.0,
+                            a: 0.0,
+                        },
+                        overlight_radius: 1.0,
+                    },
+                ],
+                ..RenderSpec::default()
+            },
+            things: Vec::new(),
+            pawns: Vec::new(),
+            camera: None,
+        });
+
+        let glow_grid = GlowGrid::from_world(&HashMap::new(), &world);
+        let sample = glow_grid.visual_glow_sample_at(Cell::new(2, 0));
+
+        assert!(sample.intensity > 0.0);
+        assert_eq!(sample.color.g, 255.0);
     }
 
     #[test]

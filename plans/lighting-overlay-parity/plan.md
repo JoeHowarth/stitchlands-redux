@@ -23,12 +23,13 @@ Completed in this worktree so far:
 - Unified static overlay construction behind an error-returning entry point.
 - Introduced a shared fixture `GlowGrid` boundary for artificial
   `VisualGlowAt`-style glow, separate from sky brightness.
+- Added blocker-aware `GlowGrid` propagation with fixed cardinal/diagonal
+  attenuation costs and internal color-carrying samples.
 
-The current position is the blocker-aware `GlowGrid` milestone. The direct
-radial glow approximation is intentionally temporary. Known missing scope is
-scheduled by dependency below rather than deferred indefinitely: blockers come
-first, then color, then blend modes, then environmental overlays, then dynamic
-overlay work.
+The current position is the lighting color parity milestone. Known missing
+scope is scheduled by dependency below rather than deferred indefinitely: color
+comes next, then blend modes, then environmental overlays, then dynamic overlay
+work.
 
 ## Reference Model
 
@@ -77,13 +78,13 @@ conflation in a more permanent API.
 2. **Shared glow model boundary: complete.** Artificial glow now has a reusable
    fixture/runtime `GlowGrid` boundary that represents `GlowGrid.VisualGlowAt`,
    not sky lighting.
-3. **Blocker-aware propagation: next.** Replace direct radial glow sampling with
-   flood-fill attenuation seeded by fixture glow sources and parsed ThingDef
-   glowers. Use `ThingDef.blockLight` as the source of truth for blockers, not
-   pathing movement flags. Carry both propagated intensity and source color in
-   the model, but keep the current lighting overlay emission black-alpha until
-   the rendering blend model is ready for color.
-4. **Lighting color and overlay parity.** Make artificial glow color, sky color,
+3. **Blocker-aware propagation: complete.** Direct radial glow sampling has been
+   replaced with flood-fill attenuation seeded by fixture glow sources and
+   parsed ThingDef glowers. `ThingDef.blockLight` is the source of truth for
+   blockers, not pathing movement flags. The model carries both propagated
+   intensity and source color, while the current lighting overlay still emits
+   black-alpha until the rendering blend model is ready for color.
+4. **Lighting color and overlay parity: next.** Make artificial glow color, sky color,
    and darkness explicit in the lighting model. This milestone should consume
    the color data carried by the blocker-aware glow grid instead of inventing a
    separate color path.
@@ -101,13 +102,12 @@ conflation in a more permanent API.
    fixtures or generated overlay assertions whenever a visual claim depends on
    relative behavior such as morning versus evening direction.
 
-## Next Commit: Blocker-Aware GlowGrid Propagation
+## Completed Commit: Blocker-Aware GlowGrid Propagation
 
-The next implementation commit should keep the current `GlowGrid` API but
-replace its direct radial sampling with a deterministic propagation model. This
-is the last structural step before lighting color parity: the system needs a
-single place where artificial glow is seeded, blocked, attenuated, and later
-colored.
+This implementation commit kept the current `GlowGrid` API but replaced its
+direct radial sampling with a deterministic propagation model. This is the last
+structural step before lighting color parity: the system now has a single place
+where artificial glow is seeded, blocked, attenuated, and later colored.
 
 ### Decisions
 
@@ -253,8 +253,8 @@ from glow rather than directly from raw `day_percent`.
 
 ## Scheduled Follow-Up Milestones
 
-- **Lighting color parity, after blocker-aware glow.** Widen the lighting model
-  so artificial glow color, sky color, and darkness are represented explicitly.
+- **Lighting color parity, next.** Widen the lighting model so artificial glow
+  color, sky color, and darkness are represented explicitly.
 - **Renderer blend modes, after lighting color parity.** Add per-overlay
   blending, including a principled darken/multiply path for shadows.
 - **Fog and snow overlays, after blend modes.** Render the existing fixture fog
