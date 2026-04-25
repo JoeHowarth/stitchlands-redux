@@ -52,7 +52,7 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let edge_sprites =
         emit_terrain_edge_sprites(ctx.data_dir, ctx.asset_resolver, &ctx.defs, &world)?;
-    let mut static_overlays = build_shadow_overlays(ctx.defs.thing_defs, &world);
+    let mut static_overlays = build_shadow_overlays(ctx.defs.thing_defs, &world)?;
     static_overlays.extend(build_lighting_overlays(ctx.defs.thing_defs, &world));
     let noise_image = {
         let resolved = ctx

@@ -16,6 +16,7 @@ mod lighting_overlay;
 mod linking_sprites;
 mod render_cmd;
 mod shadow_overlay;
+mod sky_shadow;
 
 pub use common::DefSet;
 

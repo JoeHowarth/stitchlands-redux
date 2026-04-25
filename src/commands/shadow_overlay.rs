@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use glam::Vec2;
 
 use crate::cell::Cell;
@@ -7,42 +8,48 @@ use crate::defs::{RgbaColor, ShadowData, ThingDef};
 use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayPass};
 use crate::world::{ThingState, WorldState};
 
+use super::sky_shadow::sky_shadow_state;
+
 const SHADOW_OVERLAY_DEPTH: f32 = -0.18;
 const EDGE_SHADOW_IN_DIST: f32 = 0.45;
 const EDGE_SHADOW_ALPHA: f32 = (255.0 - 195.0) / 255.0;
-const DEFAULT_SHADOW_VECTOR: Vec2 = Vec2::new(0.45, -0.35);
+const EDGE_SHADOW_COLOR: RgbaColor = RgbaColor {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 1.0,
+};
 
 pub fn build_shadow_overlays(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
-) -> Vec<ColoredMeshInput> {
+) -> Result<Vec<ColoredMeshInput>> {
     let mut overlays = Vec::new();
-    if let Some(sun) = build_sun_shadow_overlay(thing_defs, world) {
+    if let Some(sun) = build_sun_shadow_overlay(thing_defs, world)? {
         overlays.push(sun);
     }
     if let Some(edge) = build_edge_shadow_overlay(thing_defs, world) {
         overlays.push(edge);
     }
-    if let Some(graphic) = build_graphic_shadow_overlay(thing_defs, world) {
+    if let Some(graphic) = build_graphic_shadow_overlay(thing_defs, world)? {
         overlays.push(graphic);
     }
-    overlays
+    Ok(overlays)
 }
 
 fn build_sun_shadow_overlay(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
-) -> Option<ColoredMeshInput> {
-    let shadow_vector = world
-        .render_state()
-        .shadow_vector
-        .unwrap_or(DEFAULT_SHADOW_VECTOR);
-    let shadow_color = world.render_state().shadow_color.unwrap_or(RgbaColor {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
-        a: 0.55,
-    });
+) -> Result<Option<ColoredMeshInput>> {
+    if !world.things().iter().any(|thing| {
+        thing_defs
+            .get(&thing.def_name)
+            .is_some_and(|def| def.static_sun_shadow_height > 0.0)
+    }) {
+        return Ok(None);
+    }
+
+    let sky_shadow = sky_shadow_state(world.render_state())?;
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -54,8 +61,8 @@ fn build_sun_shadow_overlay(
         if height <= 0.0 {
             continue;
         }
-        let offset = shadow_vector * height.max(0.0);
-        let alpha = (shadow_color.a * height).clamp(0.0, 1.0);
+        let offset = sky_shadow.shadow_vector * height.max(0.0);
+        let alpha = (sky_shadow.shadow_alpha_scale * height).clamp(0.0, 1.0);
         push_solid_quad(
             &mut vertices,
             &mut indices,
@@ -63,11 +70,11 @@ fn build_sun_shadow_overlay(
             thing.cell_z as f32 + offset.y,
             thing.cell_x as f32 + 1.0 + offset.x,
             thing.cell_z as f32 + 1.0 + offset.y,
-            color_with_alpha(shadow_color, alpha),
+            color_with_alpha(sky_shadow.shadow_color, alpha),
         );
     }
 
-    mesh_if_not_empty(vertices, indices)
+    Ok(mesh_if_not_empty(vertices, indices))
 }
 
 fn build_edge_shadow_overlay(
@@ -103,6 +110,7 @@ fn build_edge_shadow_overlay(
                         (x as f32 + 1.0, z as f32 + 1.0 - EDGE_SHADOW_IN_DIST, 0.0),
                         (x as f32, z as f32 + 1.0 - EDGE_SHADOW_IN_DIST, 0.0),
                     ],
+                    EDGE_SHADOW_COLOR,
                 );
             }
             if neighbor_casts_edge_shadow(thing_defs, world, cell, 1, 0) {
@@ -115,6 +123,7 @@ fn build_edge_shadow_overlay(
                         (x as f32 + 1.0 - EDGE_SHADOW_IN_DIST, z as f32 + 1.0, 0.0),
                         (x as f32 + 1.0 - EDGE_SHADOW_IN_DIST, z as f32, 0.0),
                     ],
+                    EDGE_SHADOW_COLOR,
                 );
             }
             if neighbor_casts_edge_shadow(thing_defs, world, cell, 0, -1) {
@@ -127,6 +136,7 @@ fn build_edge_shadow_overlay(
                         (x as f32 + 1.0, z as f32 + EDGE_SHADOW_IN_DIST, 0.0),
                         (x as f32, z as f32 + EDGE_SHADOW_IN_DIST, 0.0),
                     ],
+                    EDGE_SHADOW_COLOR,
                 );
             }
             if neighbor_casts_edge_shadow(thing_defs, world, cell, -1, 0) {
@@ -139,6 +149,7 @@ fn build_edge_shadow_overlay(
                         (x as f32 + EDGE_SHADOW_IN_DIST, z as f32 + 1.0, 0.0),
                         (x as f32 + EDGE_SHADOW_IN_DIST, z as f32, 0.0),
                     ],
+                    EDGE_SHADOW_COLOR,
                 );
             }
         }
@@ -150,16 +161,14 @@ fn build_edge_shadow_overlay(
 fn build_graphic_shadow_overlay(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
-) -> Option<ColoredMeshInput> {
-    let shadow_vector = world
-        .render_state()
-        .shadow_vector
-        .unwrap_or(DEFAULT_SHADOW_VECTOR);
-    let shadow_alpha_scale = world
-        .render_state()
-        .shadow_color
-        .map(|color| color.a)
-        .unwrap_or(0.55);
+) -> Result<Option<ColoredMeshInput>> {
+    if !world.things().iter().any(|thing| {
+        thing_def(thing_defs, thing).is_some_and(|def| def.graphic_data.shadow_data.is_some())
+    }) {
+        return Ok(None);
+    }
+
+    let sky_shadow = sky_shadow_state(world.render_state())?;
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -174,12 +183,13 @@ fn build_graphic_shadow_overlay(
             &mut indices,
             thing,
             shadow,
-            shadow_vector,
-            shadow_alpha_scale,
+            sky_shadow.shadow_vector,
+            sky_shadow.shadow_alpha_scale,
+            sky_shadow.shadow_color,
         );
     }
 
-    mesh_if_not_empty(vertices, indices)
+    Ok(mesh_if_not_empty(vertices, indices))
 }
 
 fn push_graphic_shadow(
@@ -189,6 +199,7 @@ fn push_graphic_shadow(
     shadow: ShadowData,
     shadow_vector: Vec2,
     shadow_alpha_scale: f32,
+    shadow_color: RgbaColor,
 ) {
     let half_width = shadow.volume.x.abs() * 0.5;
     let length = shadow.volume.z.abs();
@@ -197,9 +208,7 @@ fn push_graphic_shadow(
         return;
     }
 
-    let direction = shadow_vector
-        .try_normalize()
-        .unwrap_or_else(|| DEFAULT_SHADOW_VECTOR.normalize());
+    let direction = shadow_vector.try_normalize().unwrap_or(Vec2::Y);
     let perp = Vec2::new(-direction.y, direction.x);
     let center = Vec2::new(
         thing.cell_x as f32 + 0.5 + shadow.offset.x,
@@ -226,6 +235,7 @@ fn push_graphic_shadow(
             (far_inner_left.x, far_inner_left.y, alpha),
             (far_outer_left.x, far_outer_left.y, 0.0),
         ],
+        shadow_color,
     );
     push_gradient_quad(
         vertices,
@@ -236,6 +246,7 @@ fn push_graphic_shadow(
             (far_inner_right.x, far_inner_right.y, alpha),
             (far_inner_left.x, far_inner_left.y, alpha),
         ],
+        shadow_color,
     );
     push_gradient_quad(
         vertices,
@@ -246,6 +257,7 @@ fn push_graphic_shadow(
             (far_outer_right.x, far_outer_right.y, 0.0),
             (far_inner_right.x, far_inner_right.y, alpha),
         ],
+        shadow_color,
     );
 }
 
@@ -267,6 +279,12 @@ fn push_solid_quad(
             (max_x, max_z, color[3]),
             (max_x, min_z, color[3]),
         ],
+        RgbaColor {
+            r: color[0],
+            g: color[1],
+            b: color[2],
+            a: color[3],
+        },
     );
     let base = vertices.len() - 4;
     for vertex in &mut vertices[base..] {
@@ -278,12 +296,18 @@ fn push_gradient_quad(
     vertices: &mut Vec<ColoredVertex>,
     indices: &mut Vec<u32>,
     points: [(f32, f32, f32); 4],
+    color: RgbaColor,
 ) {
     let base = vertices.len() as u32;
     for (x, z, alpha) in points {
         vertices.push(ColoredVertex {
             world_pos: [x, z, SHADOW_OVERLAY_DEPTH],
-            color: [0.0, 0.0, 0.0, alpha],
+            color: [
+                color.r.clamp(0.0, 1.0),
+                color.g.clamp(0.0, 1.0),
+                color.b.clamp(0.0, 1.0),
+                alpha,
+            ],
         });
     }
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -363,6 +387,32 @@ mod tests {
         ]
     }
 
+    fn shadow_caster_world(day_percent: Option<f32>) -> crate::world::WorldState {
+        world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 2,
+                height: 2,
+                terrain: soil(4),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
+            },
+            render: RenderSpec {
+                day_percent,
+                ..RenderSpec::default()
+            },
+            things: vec![ThingSpawn {
+                def_name: "ShadowCaster".to_string(),
+                cell_x: 1,
+                cell_z: 1,
+                blocks_movement: true,
+            }],
+            pawns: Vec::new(),
+            camera: None,
+        })
+    }
+
     fn thing_def(
         def_name: &str,
         cast_edge_shadows: bool,
@@ -407,7 +457,11 @@ mod tests {
             camera: None,
         });
 
-        assert!(build_shadow_overlays(&HashMap::new(), &world).is_empty());
+        assert!(
+            build_shadow_overlays(&HashMap::new(), &world)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -446,12 +500,47 @@ mod tests {
             thing_def("ShadowCaster", false, 0.4, None),
         )]);
 
-        let overlays = build_shadow_overlays(&thing_defs, &world);
+        let overlays = build_shadow_overlays(&thing_defs, &world).unwrap();
 
         assert_eq!(overlays.len(), 1);
         assert_eq!(overlays[0].vertices[0].world_pos[0], 1.2);
         assert_eq!(overlays[0].vertices[0].world_pos[1], 0.9);
         assert_eq!(overlays[0].vertices[0].color[3], 0.2);
+    }
+
+    #[test]
+    fn static_sun_shadow_derives_vector_from_day_percent() {
+        let thing_defs = HashMap::from([(
+            "ShadowCaster".to_string(),
+            thing_def("ShadowCaster", false, 1.0, None),
+        )]);
+        let morning = shadow_caster_world(Some(0.35));
+        let evening = shadow_caster_world(Some(0.65));
+
+        let morning_overlays = build_shadow_overlays(&thing_defs, &morning).unwrap();
+        let evening_overlays = build_shadow_overlays(&thing_defs, &evening).unwrap();
+
+        assert!((morning_overlays[0].vertices[0].world_pos[0] + 3.5).abs() < 0.001);
+        assert!((evening_overlays[0].vertices[0].world_pos[0] - 5.5).abs() < 0.001);
+        assert_ne!(
+            morning_overlays[0].vertices[0].world_pos[0],
+            evening_overlays[0].vertices[0].world_pos[0]
+        );
+    }
+
+    #[test]
+    fn sun_shadow_without_sky_state_errors() {
+        let world = shadow_caster_world(None);
+        let thing_defs = HashMap::from([(
+            "ShadowCaster".to_string(),
+            thing_def("ShadowCaster", false, 1.0, None),
+        )]);
+
+        let err = build_shadow_overlays(&thing_defs, &world)
+            .expect_err("sun shadow should require explicit or derived sky state")
+            .to_string();
+
+        assert!(err.contains("shadow overlays require render.day_percent"));
     }
 
     #[test]
@@ -481,7 +570,7 @@ mod tests {
             thing_def("EdgeCaster", true, 0.0, None),
         )]);
 
-        let overlays = build_shadow_overlays(&thing_defs, &world);
+        let overlays = build_shadow_overlays(&thing_defs, &world).unwrap();
 
         assert_eq!(overlays.len(), 1);
         assert!(
@@ -536,7 +625,7 @@ mod tests {
             ),
         )]);
 
-        let overlays = build_shadow_overlays(&thing_defs, &world);
+        let overlays = build_shadow_overlays(&thing_defs, &world).unwrap();
 
         assert_eq!(overlays.len(), 1);
         assert_eq!(overlays[0].vertices.len(), 12);
