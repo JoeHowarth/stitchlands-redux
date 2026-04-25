@@ -22,7 +22,8 @@ pub struct SkyShadowState {
     pub shadow_vector: Vec2,
     pub sun_glow: f32,
     pub shadow_strength: f32,
-    pub shadow_color: RgbaColor,
+    pub material_shadow_color: RgbaColor,
+    pub overlay_shadow_color: RgbaColor,
     pub shadow_alpha_scale: f32,
 }
 
@@ -40,7 +41,8 @@ pub fn sky_shadow_state(render: &RenderState) -> Result<SkyShadowState> {
                 shadow_vector,
                 sun_glow,
                 shadow_strength,
-                shadow_color,
+                material_shadow_color: shadow_color,
+                overlay_shadow_color: shadow_color,
                 shadow_alpha_scale: shadow_color.a.clamp(0.0, 1.0),
             })
         }
@@ -49,18 +51,23 @@ pub fn sky_shadow_state(render: &RenderState) -> Result<SkyShadowState> {
             let (sun_glow, shadow_strength) = derived_sun_glow_and_shadow_strength(day_percent);
             let shadow_vector =
                 shadow_vector.unwrap_or_else(|| derived_shadow_vector(day_percent, sun_glow));
-            let (shadow_color, shadow_alpha_scale) = match shadow_color {
-                Some(shadow_color) => (shadow_color, shadow_color.a.clamp(0.0, 1.0)),
-                None => (
-                    derived_shadow_color(shadow_strength),
-                    DEFAULT_SHADOW_ALPHA_SCALE * shadow_strength,
-                ),
-            };
+            let (material_shadow_color, overlay_shadow_color, shadow_alpha_scale) =
+                match shadow_color {
+                    Some(shadow_color) => {
+                        (shadow_color, shadow_color, shadow_color.a.clamp(0.0, 1.0))
+                    }
+                    None => (
+                        derived_material_shadow_color(shadow_strength),
+                        source_over_shadow_color(),
+                        DEFAULT_SHADOW_ALPHA_SCALE * shadow_strength,
+                    ),
+                };
             Ok(SkyShadowState {
                 shadow_vector,
                 sun_glow,
                 shadow_strength,
-                shadow_color,
+                material_shadow_color,
+                overlay_shadow_color,
                 shadow_alpha_scale,
             })
         }
@@ -101,8 +108,17 @@ fn derived_shadow_vector(day_percent: f32, sun_glow: f32) -> Vec2 {
     Vec2::new(x, z)
 }
 
-fn derived_shadow_color(shadow_strength: f32) -> RgbaColor {
+fn derived_material_shadow_color(shadow_strength: f32) -> RgbaColor {
     lerp_color(RgbaColor::WHITE, DEFAULT_SKY_SHADOW_COLOR, shadow_strength)
+}
+
+fn source_over_shadow_color() -> RgbaColor {
+    RgbaColor {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    }
 }
 
 fn inverse_lerp(min: f32, max: f32, value: f32) -> f32 {
@@ -185,7 +201,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(state.shadow_vector, glam::Vec2::new(0.5, -0.25));
-        assert_eq!(state.shadow_color.r, 0.1);
+        assert_eq!(state.material_shadow_color.r, 0.1);
+        assert_eq!(state.overlay_shadow_color.r, 0.1);
         assert_eq!(state.shadow_alpha_scale, 0.4);
     }
 
@@ -198,7 +215,8 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(vector_only.shadow_vector, glam::Vec2::new(0.5, -0.25));
-        assert!(vector_only.shadow_color.r < 0.001);
+        assert!(vector_only.material_shadow_color.r < 0.001);
+        assert!(vector_only.overlay_shadow_color.r < 0.001);
 
         let color_only = sky_shadow_state(&render_state(
             Some(0.5),
@@ -212,7 +230,8 @@ mod tests {
         ))
         .unwrap();
         assert!(color_only.shadow_vector.x.abs() < 0.001);
-        assert_eq!(color_only.shadow_color.r, 0.1);
+        assert_eq!(color_only.material_shadow_color.r, 0.1);
+        assert_eq!(color_only.overlay_shadow_color.r, 0.1);
         assert_eq!(color_only.shadow_alpha_scale, 0.4);
     }
 
@@ -232,5 +251,17 @@ mod tests {
         assert!((threshold.sun_glow - 0.6).abs() < 0.001);
         assert!((noon.shadow_strength - 1.0).abs() < 0.001);
         assert!((noon.sun_glow - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn derived_overlay_color_stays_darkening_only_for_source_over_blending() {
+        let partial = sky_shadow_state(&render_state(Some(0.275), None, None)).unwrap();
+
+        assert!(partial.shadow_strength > 0.0 && partial.shadow_strength < 1.0);
+        assert!(partial.material_shadow_color.r > 0.0);
+        assert_eq!(partial.overlay_shadow_color.r, 0.0);
+        assert_eq!(partial.overlay_shadow_color.g, 0.0);
+        assert_eq!(partial.overlay_shadow_color.b, 0.0);
+        assert!(partial.shadow_alpha_scale > 0.0);
     }
 }

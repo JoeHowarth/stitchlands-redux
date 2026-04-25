@@ -125,9 +125,11 @@ sky/shadow state:
 - If `render.shadow_color` is absent, use a documented default sky shadow color
   and lerp white to that color by `shadow_strength`, matching the shape of
   `SkyManager`'s `Color.Lerp(Color.white, curSky.colors.shadow, strength)`.
-  The helper should return the final RGBA shadow color. It may also expose an
-  alpha scale while current callers still need that compatibility value, but the
-  long-term API should not bake in black-alpha-only shadows.
+  The helper should return both the RimWorld-style material shadow color and the
+  current renderer's source-over overlay emission color. Until a multiply/darken
+  shadow pipeline exists, derived overlay emission must keep RGB black and put
+  strength in alpha; lerping white into an alpha-blended overlay can brighten
+  dark pixels instead of only darkening them.
 
 This rule is not full RimWorld sky parity. It is a deterministic fixture rule
 that preserves the important shape: shadow direction moves with time of day,
@@ -140,9 +142,10 @@ from glow rather than directly from raw `day_percent`.
   `src/commands/shadow_overlay.rs`; later overlay systems should be able to call
   it.
 - Return a small value object with at least `shadow_vector`,
-  `shadow_strength`, `sun_glow`, and final `shadow_color`. Include
-  `shadow_alpha_scale` only as a compatibility field for current overlay
-  callers, not as the primary representation.
+  `shadow_strength`, `sun_glow`, `material_shadow_color`,
+  `overlay_shadow_color`, and `shadow_alpha_scale`. `material_shadow_color`
+  keeps the RimWorld/SkyManager concept available for a later shadow shader;
+  current source-over geometry should use `overlay_shadow_color`.
 - Keep explicit `render.shadow_vector` as the highest-priority vector override.
 - Keep explicit `render.shadow_color` as the highest-priority color override.
 - Make missing required inputs an error in the fixture/shadow build path. Do not
@@ -164,6 +167,8 @@ from glow rather than directly from raw `day_percent`.
   shadow overlay is requested.
 - Add a unit test proving shadow strength comes from derived `sun_glow`, not raw
   `day_percent`.
+- Add a unit test proving derived source-over overlay color stays darkening-only
+  even when material shadow color is a partial white-to-shadow lerp.
 - Use paired fixture coverage or direct overlay vertex/color assertions for
   visual-relative behavior. One screenshot is not enough to prove that shadows
   changed because only `render.day_percent` changed.

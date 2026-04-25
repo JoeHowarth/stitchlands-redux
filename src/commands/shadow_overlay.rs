@@ -70,7 +70,7 @@ fn build_sun_shadow_overlay(
             thing.cell_z as f32 + offset.y,
             thing.cell_x as f32 + 1.0 + offset.x,
             thing.cell_z as f32 + 1.0 + offset.y,
-            color_with_alpha(sky_shadow.shadow_color, alpha),
+            color_with_alpha(sky_shadow.overlay_shadow_color, alpha),
         );
     }
 
@@ -185,7 +185,7 @@ fn build_graphic_shadow_overlay(
             shadow,
             sky_shadow.shadow_vector,
             sky_shadow.shadow_alpha_scale,
-            sky_shadow.shadow_color,
+            sky_shadow.overlay_shadow_color,
         );
     }
 
