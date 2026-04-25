@@ -108,6 +108,15 @@ mod tests {
     }
 
     #[test]
+    fn parses_glower_lighting_fixture() {
+        let path = std::path::Path::new("fixtures/v2/glower_lighting.ron");
+        let fixture = load_fixture(path).expect("glower_lighting.ron should parse");
+        assert_eq!(fixture.render.day_percent, Some(0.0));
+        assert!(fixture.render.glow_sources.is_empty());
+        assert_eq!(fixture.things[0].def_name, "Gloomlight");
+    }
+
+    #[test]
     fn parses_render_state_fields() {
         let path = std::env::temp_dir().join(format!(
             "stitchlands-render-state-fixture-{}.ron",

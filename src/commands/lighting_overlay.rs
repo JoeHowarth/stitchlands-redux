@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use crate::cell::Cell;
-use crate::defs::ThingDef;
+use crate::defs::{GlowerProps, RgbaColor, ThingDef};
 use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayPass};
-use crate::world::WorldState;
+use crate::world::{GlowSource, WorldState};
 
 const LIGHTING_OVERLAY_DEPTH: f32 = -0.20;
 const ROOF_ALPHA_FLOOR: f32 = 100.0 / 255.0;
@@ -21,7 +21,7 @@ pub fn build_lighting_overlays(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
 ) -> Vec<ColoredMeshInput> {
-    if !has_lighting_inputs(world) {
+    if !has_lighting_inputs(world) && !has_glower_inputs(thing_defs, world) {
         return Vec::new();
     }
 
@@ -95,6 +95,15 @@ fn has_lighting_inputs(world: &WorldState) -> bool {
         || render.roofs.iter().any(|roof| roof.roofed)
 }
 
+fn has_glower_inputs(thing_defs: &HashMap<String, ThingDef>, world: &WorldState) -> bool {
+    world.things().iter().any(|thing| {
+        thing_defs
+            .get(&thing.def_name)
+            .and_then(|def| def.glower)
+            .is_some()
+    })
+}
+
 fn build_cell_lighting(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
@@ -110,7 +119,8 @@ fn build_cell_lighting(
             let block_light = cell_has_block_light(thing_defs, world, cell);
             let holds_roof = cell_holds_roof(thing_defs, world, cell);
             let roof = render.roofs[index];
-            let brightness = (sky_brightness + artificial_glow_brightness(world, cell)).min(1.0);
+            let brightness =
+                (sky_brightness + artificial_glow_brightness(thing_defs, world, cell)).min(1.0);
             let mut alpha = ((1.0 - brightness) * MAX_DARKNESS_ALPHA).clamp(0.0, 1.0);
             let roof_forces_alpha = roof.roofed && (roof.thick || !holds_roof);
             if roof_forces_alpha && alpha < ROOF_ALPHA_FLOOR {
@@ -140,21 +150,82 @@ fn sky_brightness(world: &WorldState) -> f32 {
     1.0
 }
 
-fn artificial_glow_brightness(world: &WorldState, cell: Cell) -> f32 {
-    world
+fn artificial_glow_brightness(
+    thing_defs: &HashMap<String, ThingDef>,
+    world: &WorldState,
+    cell: Cell,
+) -> f32 {
+    let fixture_brightness = world
         .render_state()
         .glow_sources
         .iter()
-        .map(|source| {
-            if source.radius <= 0.0 {
-                return 0.0;
-            }
-            let dx = cell.x as f32 + 0.5 - (source.cell_x as f32 + 0.5);
-            let dz = cell.z as f32 + 0.5 - (source.cell_z as f32 + 0.5);
-            let distance = (dx * dx + dz * dz).sqrt();
-            (1.0 - distance / source.radius).clamp(0.0, 1.0)
+        .map(|source| glow_source_brightness(source, cell))
+        .fold(0.0, f32::max);
+
+    let glower_brightness = world
+        .things()
+        .iter()
+        .filter_map(|thing| {
+            let glower = thing_defs.get(&thing.def_name).and_then(|def| def.glower)?;
+            Some(glower_brightness(thing.cell_x, thing.cell_z, glower, cell))
         })
-        .fold(0.0, f32::max)
+        .fold(0.0, f32::max);
+
+    fixture_brightness.max(glower_brightness)
+}
+
+fn glow_source_brightness(source: &GlowSource, cell: Cell) -> f32 {
+    point_glow_brightness(
+        source.cell_x,
+        source.cell_z,
+        source.radius,
+        source.overlight_radius,
+        source.color,
+        cell,
+    )
+}
+
+fn glower_brightness(cell_x: i32, cell_z: i32, glower: GlowerProps, cell: Cell) -> f32 {
+    point_glow_brightness(
+        cell_x,
+        cell_z,
+        glower.glow_radius,
+        glower.overlight_radius,
+        glower.glow_color,
+        cell,
+    )
+}
+
+fn point_glow_brightness(
+    source_x: i32,
+    source_z: i32,
+    radius: f32,
+    overlight_radius: f32,
+    color: RgbaColor,
+    cell: Cell,
+) -> f32 {
+    if radius <= 0.0 {
+        return 0.0;
+    }
+    let dx = cell.x as f32 + 0.5 - (source_x as f32 + 0.5);
+    let dz = cell.z as f32 + 0.5 - (source_z as f32 + 0.5);
+    let distance = (dx * dx + dz * dz).sqrt();
+    let falloff = if overlight_radius > 0.0 && distance <= overlight_radius {
+        1.0
+    } else {
+        (1.0 - distance / radius).clamp(0.0, 1.0)
+    };
+    falloff * color_brightness(color)
+}
+
+fn color_brightness(color: RgbaColor) -> f32 {
+    let average = (color.r + color.g + color.b) / 3.0;
+    let max_component = color.r.max(color.g).max(color.b);
+    if max_component > 1.0 {
+        (average / 255.0).clamp(0.0, 1.0)
+    } else {
+        average.clamp(0.0, 1.0)
+    }
 }
 
 fn corner_color(
@@ -253,7 +324,7 @@ mod tests {
 
     use glam::{Vec2, Vec3};
 
-    use crate::defs::{GraphicData, GraphicKind, RgbaColor, ThingDef};
+    use crate::defs::{GlowerProps, GraphicData, GraphicKind, RgbaColor, ThingDef};
     use crate::fixtures::{MapSpec, RenderSpec, RoofCell, SceneFixture, TerrainCell, ThingSpawn};
     use crate::linking::{LinkDrawerType, LinkFlags};
     use crate::world::world_from_fixture;
@@ -377,5 +448,52 @@ mod tests {
         assert_eq!(overlays.len(), 1);
         assert_eq!(overlays[0].vertices[0].color[3], 0.0);
         assert!(overlays[0].vertices[1].color[3] > 0.0);
+    }
+
+    #[test]
+    fn glower_thing_brightens_nearby_cells() {
+        let world = world_from_fixture(&SceneFixture {
+            schema_version: 2,
+            map: MapSpec {
+                width: 3,
+                height: 1,
+                terrain: soil(3),
+                roofs: Vec::new(),
+                fog: Vec::new(),
+                snow_depth: Vec::new(),
+            },
+            render: RenderSpec {
+                day_percent: Some(0.0),
+                ..RenderSpec::default()
+            },
+            things: vec![ThingSpawn {
+                def_name: "Lamp".to_string(),
+                cell_x: 0,
+                cell_z: 0,
+                blocks_movement: false,
+            }],
+            pawns: Vec::new(),
+            camera: None,
+        });
+        let mut lamp = thing_def("Lamp", false, false);
+        lamp.glower = Some(GlowerProps {
+            glow_radius: 1.5,
+            glow_color: RgbaColor {
+                r: 255.0,
+                g: 255.0,
+                b: 255.0,
+                a: 0.0,
+            },
+            overlight_radius: 0.0,
+        });
+        let thing_defs = HashMap::from([("Lamp".to_string(), lamp)]);
+
+        let overlays = build_lighting_overlays(&thing_defs, &world);
+
+        assert_eq!(overlays.len(), 1);
+        let first_center = (world.width() + 1) * (world.height() + 1);
+        let near_alpha = overlays[0].vertices[first_center].color[3];
+        let far_alpha = overlays[0].vertices[first_center + 2].color[3];
+        assert!(near_alpha < far_alpha);
     }
 }
