@@ -130,6 +130,11 @@ colored.
   `blockLight`.
 - Seed propagation from both `render.glow_sources` and ThingDef glowers.
 - Preserve the current overlight behavior near a source where possible.
+- Use a fixed first attenuation rule: cardinal steps cost `1.0`, diagonal
+  steps cost `sqrt(2)`, and propagation stops once accumulated distance exceeds
+  the source radius. A source cell may be a `blockLight` cell: it should still
+  receive and emit its own glow, but propagation should not pass through other
+  blocker cells after entering them.
 - Combine overlapping glow with a deterministic max or stronger-wins rule for
   the first propagation version. Avoid introducing color blending semantics that
   the renderer cannot yet display.
