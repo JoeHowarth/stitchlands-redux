@@ -7,7 +7,7 @@ use crate::defs::ThingDef;
 use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayPass};
 use crate::world::WorldState;
 
-use super::glow_grid::GlowGrid;
+use super::glow_grid::{GlowGrid, GlowSample};
 
 const LIGHTING_OVERLAY_DEPTH: f32 = -0.20;
 const ROOF_ALPHA_FLOOR: f32 = 100.0 / 255.0;
@@ -19,6 +19,20 @@ struct CellLighting {
     block_light: bool,
     roof_forces_alpha: bool,
     roofed_without_support: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SkyLighting {
+    brightness: f32,
+    color: [f32; 3],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LightingSample {
+    brightness: f32,
+    color: [f32; 3],
+    darkness_alpha: f32,
+    source_over_color: [f32; 4],
 }
 
 pub fn build_lighting_overlays(
@@ -103,7 +117,7 @@ fn build_cell_lighting(
     world: &WorldState,
 ) -> Vec<CellLighting> {
     let render = world.render_state();
-    let sky_brightness = sky_brightness(world);
+    let sky_lighting = sky_lighting(world);
     let glow_grid = GlowGrid::from_world(thing_defs, world);
     let mut cells = Vec::with_capacity(world.width() * world.height());
 
@@ -114,14 +128,16 @@ fn build_cell_lighting(
             let block_light = cell_has_block_light(thing_defs, world, cell);
             let holds_roof = cell_holds_roof(thing_defs, world, cell);
             let roof = render.roofs[index];
-            let brightness = (sky_brightness + glow_grid.visual_glow_at(cell)).min(1.0);
-            let mut alpha = ((1.0 - brightness) * MAX_DARKNESS_ALPHA).clamp(0.0, 1.0);
+            let mut glow = glow_grid.visual_glow_sample_at(cell);
+            glow.intensity = glow_grid.visual_glow_at(cell);
+            let lighting = compose_lighting(sky_lighting, glow);
+            let mut color = lighting.source_over_color;
             let roof_forces_alpha = roof.roofed && (roof.thick || !holds_roof);
-            if roof_forces_alpha && alpha < ROOF_ALPHA_FLOOR {
-                alpha = ROOF_ALPHA_FLOOR;
+            if roof_forces_alpha && color[3] < ROOF_ALPHA_FLOOR {
+                color[3] = ROOF_ALPHA_FLOOR;
             }
             cells.push(CellLighting {
-                color: [0.0, 0.0, 0.0, alpha],
+                color,
                 block_light,
                 roof_forces_alpha,
                 roofed_without_support: roof.roofed && !holds_roof,
@@ -132,16 +148,79 @@ fn build_cell_lighting(
     cells
 }
 
-fn sky_brightness(world: &WorldState) -> f32 {
+fn sky_lighting(world: &WorldState) -> SkyLighting {
     let render = world.render_state();
     if let Some(color) = render.sky_glow {
-        return ((color.r + color.g + color.b) / 3.0).clamp(0.0, 1.0);
+        let color = color_rgb01(color);
+        return SkyLighting {
+            brightness: average_rgb(color),
+            color,
+        };
     }
     if let Some(day_percent) = render.day_percent {
         let daylight = 1.0 - (day_percent - 0.5).abs() * 2.0;
-        return (0.12 + daylight.max(0.0) * 0.88).clamp(0.0, 1.0);
+        return SkyLighting {
+            brightness: (0.12 + daylight.max(0.0) * 0.88).clamp(0.0, 1.0),
+            color: [1.0, 1.0, 1.0],
+        };
     }
-    1.0
+    SkyLighting {
+        brightness: 1.0,
+        color: [1.0, 1.0, 1.0],
+    }
+}
+
+fn compose_lighting(sky: SkyLighting, glow: GlowSample) -> LightingSample {
+    let sky_brightness = sky.brightness.clamp(0.0, 1.0);
+    let glow_brightness = glow.intensity.clamp(0.0, 1.0);
+    let brightness = (sky_brightness + glow_brightness).min(1.0);
+    let color = weighted_color(
+        sky.color,
+        sky_brightness,
+        color_rgb01(glow.color),
+        glow_brightness,
+    );
+    let darkness_alpha = ((1.0 - brightness) * MAX_DARKNESS_ALPHA).clamp(0.0, 1.0);
+
+    LightingSample {
+        brightness,
+        color,
+        darkness_alpha,
+        // Source-over colored overlays cannot express RimWorld's per-channel
+        // lighting grid cleanly, so this pass still emits scalar darkness.
+        source_over_color: [0.0, 0.0, 0.0, darkness_alpha],
+    }
+}
+
+fn weighted_color(
+    first_color: [f32; 3],
+    first_weight: f32,
+    second_color: [f32; 3],
+    second_weight: f32,
+) -> [f32; 3] {
+    let total_weight = first_weight + second_weight;
+    if total_weight <= 0.0 {
+        return [0.0, 0.0, 0.0];
+    }
+    [
+        (first_color[0] * first_weight + second_color[0] * second_weight) / total_weight,
+        (first_color[1] * first_weight + second_color[1] * second_weight) / total_weight,
+        (first_color[2] * first_weight + second_color[2] * second_weight) / total_weight,
+    ]
+}
+
+fn color_rgb01(color: crate::defs::RgbaColor) -> [f32; 3] {
+    let max_component = color.r.max(color.g).max(color.b);
+    let scale = if max_component > 1.0 { 255.0 } else { 1.0 };
+    [
+        (color.r / scale).clamp(0.0, 1.0),
+        (color.g / scale).clamp(0.0, 1.0),
+        (color.b / scale).clamp(0.0, 1.0),
+    ]
+}
+
+fn average_rgb(color: [f32; 3]) -> f32 {
+    ((color[0] + color[1] + color[2]) / 3.0).clamp(0.0, 1.0)
 }
 
 fn corner_color(
@@ -245,7 +324,7 @@ mod tests {
     use crate::linking::{LinkDrawerType, LinkFlags};
     use crate::world::world_from_fixture;
 
-    use super::{ROOF_ALPHA_FLOOR, build_lighting_overlays};
+    use super::{ROOF_ALPHA_FLOOR, SkyLighting, build_lighting_overlays, compose_lighting};
 
     fn soil(count: usize) -> Vec<TerrainCell> {
         vec![
@@ -415,5 +494,54 @@ mod tests {
         let near_alpha = overlays[0].vertices[first_center].color[3];
         let far_alpha = overlays[0].vertices[first_center + 2].color[3];
         assert!(near_alpha < far_alpha);
+    }
+
+    #[test]
+    fn lighting_sample_carries_artificial_glow_color_separately_from_darkness_alpha() {
+        let sample = compose_lighting(
+            SkyLighting {
+                brightness: 0.2,
+                color: [0.2, 0.2, 1.0],
+            },
+            super::GlowSample {
+                intensity: 0.4,
+                color: RgbaColor {
+                    r: 255.0,
+                    g: 128.0,
+                    b: 0.0,
+                    a: 0.0,
+                },
+            },
+        );
+
+        assert!((sample.brightness - 0.6).abs() < 0.001);
+        assert!(sample.color[0] > sample.color[2]);
+        assert!(sample.color[1] > 0.3);
+        assert!((sample.darkness_alpha - 0.288).abs() < 0.001);
+        assert_eq!(sample.source_over_color[0], 0.0);
+        assert_eq!(sample.source_over_color[1], 0.0);
+        assert_eq!(sample.source_over_color[2], 0.0);
+        assert_eq!(sample.source_over_color[3], sample.darkness_alpha);
+    }
+
+    #[test]
+    fn lighting_sample_understands_unit_interval_glow_colors() {
+        let sample = compose_lighting(
+            SkyLighting {
+                brightness: 0.0,
+                color: [1.0, 1.0, 1.0],
+            },
+            super::GlowSample {
+                intensity: 0.5,
+                color: RgbaColor {
+                    r: 0.0,
+                    g: 0.25,
+                    b: 1.0,
+                    a: 0.0,
+                },
+            },
+        );
+
+        assert_eq!(sample.color, [0.0, 0.25, 1.0]);
     }
 }
