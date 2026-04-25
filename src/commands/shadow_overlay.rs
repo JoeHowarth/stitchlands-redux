@@ -10,7 +10,6 @@ use crate::world::{ThingState, WorldState};
 const SHADOW_OVERLAY_DEPTH: f32 = -0.18;
 const EDGE_SHADOW_IN_DIST: f32 = 0.45;
 const EDGE_SHADOW_ALPHA: f32 = (255.0 - 195.0) / 255.0;
-const GRAPHIC_SHADOW_CORE_SCALE: f32 = 0.5;
 const DEFAULT_SHADOW_VECTOR: Vec2 = Vec2::new(0.45, -0.35);
 
 pub fn build_shadow_overlays(
@@ -152,6 +151,15 @@ fn build_graphic_shadow_overlay(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
 ) -> Option<ColoredMeshInput> {
+    let shadow_vector = world
+        .render_state()
+        .shadow_vector
+        .unwrap_or(DEFAULT_SHADOW_VECTOR);
+    let shadow_alpha_scale = world
+        .render_state()
+        .shadow_color
+        .map(|color| color.a)
+        .unwrap_or(0.55);
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -161,7 +169,14 @@ fn build_graphic_shadow_overlay(
         else {
             continue;
         };
-        push_graphic_shadow(&mut vertices, &mut indices, thing, shadow);
+        push_graphic_shadow(
+            &mut vertices,
+            &mut indices,
+            thing,
+            shadow,
+            shadow_vector,
+            shadow_alpha_scale,
+        );
     }
 
     mesh_if_not_empty(vertices, indices)
@@ -172,75 +187,64 @@ fn push_graphic_shadow(
     indices: &mut Vec<u32>,
     thing: &ThingState,
     shadow: ShadowData,
+    shadow_vector: Vec2,
+    shadow_alpha_scale: f32,
 ) {
     let half_width = shadow.volume.x.abs() * 0.5;
-    let half_height = shadow.volume.z.abs() * 0.5;
-    let alpha = shadow.volume.y.clamp(0.0, 1.0);
-    if half_width <= 0.0 || half_height <= 0.0 || alpha <= 0.0 {
+    let length = shadow.volume.z.abs();
+    let alpha = (shadow.volume.y * shadow_alpha_scale).clamp(0.0, 1.0);
+    if half_width <= 0.0 || length <= 0.0 || alpha <= 0.0 {
         return;
     }
 
-    let center_x = thing.cell_x as f32 + 0.5 + shadow.offset.x;
-    let center_z = thing.cell_z as f32 + 0.5 + shadow.offset.z;
-    let outer_min_x = center_x - half_width;
-    let outer_max_x = center_x + half_width;
-    let outer_min_z = center_z - half_height;
-    let outer_max_z = center_z + half_height;
-    let inner_half_width = half_width * GRAPHIC_SHADOW_CORE_SCALE;
-    let inner_half_height = half_height * GRAPHIC_SHADOW_CORE_SCALE;
-    let inner_min_x = center_x - inner_half_width;
-    let inner_max_x = center_x + inner_half_width;
-    let inner_min_z = center_z - inner_half_height;
-    let inner_max_z = center_z + inner_half_height;
+    let direction = shadow_vector
+        .try_normalize()
+        .unwrap_or_else(|| DEFAULT_SHADOW_VECTOR.normalize());
+    let perp = Vec2::new(-direction.y, direction.x);
+    let center = Vec2::new(
+        thing.cell_x as f32 + 0.5 + shadow.offset.x,
+        thing.cell_z as f32 + 0.5 + shadow.offset.z,
+    );
+    let near_center = center - direction * (length * 0.15);
+    let far_center = center + direction * (length * 0.85);
+    let core_half_width = half_width * 0.55;
+    let near_outer_left = near_center - perp * half_width;
+    let near_inner_left = near_center - perp * core_half_width;
+    let near_inner_right = near_center + perp * core_half_width;
+    let near_outer_right = near_center + perp * half_width;
+    let far_outer_left = far_center - perp * half_width;
+    let far_inner_left = far_center - perp * core_half_width;
+    let far_inner_right = far_center + perp * core_half_width;
+    let far_outer_right = far_center + perp * half_width;
 
     push_gradient_quad(
         vertices,
         indices,
         [
-            (inner_min_x, inner_min_z, alpha),
-            (inner_min_x, inner_max_z, alpha),
-            (inner_max_x, inner_max_z, alpha),
-            (inner_max_x, inner_min_z, alpha),
+            (near_outer_left.x, near_outer_left.y, 0.0),
+            (near_inner_left.x, near_inner_left.y, 0.0),
+            (far_inner_left.x, far_inner_left.y, alpha),
+            (far_outer_left.x, far_outer_left.y, 0.0),
         ],
     );
     push_gradient_quad(
         vertices,
         indices,
         [
-            (outer_min_x, outer_min_z, 0.0),
-            (outer_min_x, outer_max_z, 0.0),
-            (inner_min_x, inner_max_z, alpha),
-            (inner_min_x, inner_min_z, alpha),
+            (near_inner_left.x, near_inner_left.y, 0.0),
+            (near_inner_right.x, near_inner_right.y, 0.0),
+            (far_inner_right.x, far_inner_right.y, alpha),
+            (far_inner_left.x, far_inner_left.y, alpha),
         ],
     );
     push_gradient_quad(
         vertices,
         indices,
         [
-            (outer_min_x, outer_max_z, 0.0),
-            (outer_max_x, outer_max_z, 0.0),
-            (inner_max_x, inner_max_z, alpha),
-            (inner_min_x, inner_max_z, alpha),
-        ],
-    );
-    push_gradient_quad(
-        vertices,
-        indices,
-        [
-            (outer_max_x, outer_max_z, 0.0),
-            (outer_max_x, outer_min_z, 0.0),
-            (inner_max_x, inner_min_z, alpha),
-            (inner_max_x, inner_max_z, alpha),
-        ],
-    );
-    push_gradient_quad(
-        vertices,
-        indices,
-        [
-            (outer_max_x, outer_min_z, 0.0),
-            (outer_min_x, outer_min_z, 0.0),
-            (inner_min_x, inner_min_z, alpha),
-            (inner_max_x, inner_min_z, alpha),
+            (near_inner_right.x, near_inner_right.y, 0.0),
+            (near_outer_right.x, near_outer_right.y, 0.0),
+            (far_outer_right.x, far_outer_right.y, 0.0),
+            (far_inner_right.x, far_inner_right.y, alpha),
         ],
     );
 }
@@ -500,7 +504,16 @@ mod tests {
                 fog: Vec::new(),
                 snow_depth: Vec::new(),
             },
-            render: RenderSpec::default(),
+            render: RenderSpec {
+                shadow_color: Some(FixtureColor {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                }),
+                shadow_vector: Some(FixtureVector2 { x: 1.0, z: 0.0 }),
+                ..RenderSpec::default()
+            },
             things: vec![ThingSpawn {
                 def_name: "PlantLike".to_string(),
                 cell_x: 1,
@@ -526,22 +539,22 @@ mod tests {
         let overlays = build_shadow_overlays(&thing_defs, &world);
 
         assert_eq!(overlays.len(), 1);
-        assert_eq!(overlays[0].vertices.len(), 20);
-        assert_eq!(overlays[0].indices.len(), 30);
+        assert_eq!(overlays[0].vertices.len(), 12);
+        assert_eq!(overlays[0].indices.len(), 18);
         assert!(
             overlays[0]
                 .vertices
                 .iter()
-                .any(|vertex| (vertex.world_pos[0] - 1.1).abs() < 0.001
-                    && (vertex.world_pos[1] - 1.0).abs() < 0.001
+                .any(|vertex| (vertex.world_pos[0] - 1.58).abs() < 0.001
+                    && (vertex.world_pos[1] - 0.8).abs() < 0.001
                     && vertex.color[3] == 0.0)
         );
         assert!(
             overlays[0]
                 .vertices
                 .iter()
-                .any(|vertex| (vertex.world_pos[0] - 1.4).abs() < 0.001
-                    && (vertex.world_pos[1] - 1.2).abs() < 0.001
+                .any(|vertex| (vertex.world_pos[0] - 2.38).abs() < 0.001
+                    && (vertex.world_pos[1] - 1.73).abs() < 0.001
                     && (vertex.color[3] - 0.35).abs() < 0.001)
         );
     }

@@ -18,6 +18,7 @@
   render: (
     sky_glow: (r: 0.55, g: 0.55, b: 0.58, a: 1.0),
     shadow_color: (r: 0.0, g: 0.0, b: 0.0, a: 0.6),
+    shadow_vector: (x: -0.55, z: 0.35),
   ),
   things: [
     (def_name: "WoodFiredGenerator", cell_x: 2, cell_z: 2, blocks_movement: true),
