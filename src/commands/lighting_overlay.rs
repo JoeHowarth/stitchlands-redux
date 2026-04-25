@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
+
 use crate::cell::Cell;
 use crate::defs::{GlowerProps, RgbaColor, ThingDef};
 use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayPass};
@@ -20,9 +22,9 @@ struct CellLighting {
 pub fn build_lighting_overlays(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
-) -> Vec<ColoredMeshInput> {
+) -> Result<Vec<ColoredMeshInput>> {
     if !has_lighting_inputs(world) && !has_glower_inputs(thing_defs, world) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let cell_lighting = build_cell_lighting(thing_defs, world);
@@ -61,7 +63,7 @@ pub fn build_lighting_overlays(
     }
 
     if vertices.iter().all(|vertex| vertex.color[3] <= 0.0) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let first_center = corner_count as u32;
@@ -80,11 +82,11 @@ pub fn build_lighting_overlays(
         }
     }
 
-    vec![ColoredMeshInput {
+    Ok(vec![ColoredMeshInput {
         pass: OverlayPass::AfterStatic,
         vertices,
         indices,
-    }]
+    }])
 }
 
 fn has_lighting_inputs(world: &WorldState) -> bool {
@@ -379,7 +381,11 @@ mod tests {
             camera: None,
         });
 
-        assert!(build_lighting_overlays(&HashMap::new(), &world).is_empty());
+        assert!(
+            build_lighting_overlays(&HashMap::new(), &world)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -403,7 +409,7 @@ mod tests {
             camera: None,
         });
 
-        let overlays = build_lighting_overlays(&HashMap::new(), &world);
+        let overlays = build_lighting_overlays(&HashMap::new(), &world).unwrap();
 
         assert_eq!(overlays.len(), 1);
         assert!(
@@ -443,7 +449,7 @@ mod tests {
         let thing_defs =
             HashMap::from([("Blocker".to_string(), thing_def("Blocker", true, false))]);
 
-        let overlays = build_lighting_overlays(&thing_defs, &world);
+        let overlays = build_lighting_overlays(&thing_defs, &world).unwrap();
 
         assert_eq!(overlays.len(), 1);
         assert_eq!(overlays[0].vertices[0].color[3], 0.0);
@@ -488,7 +494,7 @@ mod tests {
         });
         let thing_defs = HashMap::from([("Lamp".to_string(), lamp)]);
 
-        let overlays = build_lighting_overlays(&thing_defs, &world);
+        let overlays = build_lighting_overlays(&thing_defs, &world).unwrap();
 
         assert_eq!(overlays.len(), 1);
         let first_center = (world.width() + 1) * (world.height() + 1);

@@ -14,6 +14,7 @@ mod debug_cmd;
 mod fixture_cmd;
 mod lighting_overlay;
 mod linking_sprites;
+mod overlays;
 mod render_cmd;
 mod shadow_overlay;
 mod sky_shadow;
