@@ -14,6 +14,16 @@ land in a shape that helps the later commits. New helpers should therefore be
 small, shared, deterministic, and named around RimWorld concepts rather than
 around a single fixture.
 
+Completed in this worktree so far:
+
+- Planned the successor lighting overlay parity workstream.
+- Added deterministic fixture sky/shadow state derivation.
+- Kept derived shadows darkening-only under the current source-over overlay
+  blend path while retaining RimWorld-style material shadow color.
+- Unified static overlay construction behind an error-returning entry point.
+- Introduced a shared fixture `GlowGrid` boundary for artificial
+  `VisualGlowAt`-style glow, separate from sky brightness.
+
 ## Reference Model
 
 RimWorld's map lighting is a set of overlay systems layered around sprite
@@ -78,9 +88,9 @@ conflation in a more permanent API.
    generated overlay assertions whenever a visual claim depends on relative
    behavior such as morning versus evening direction.
 
-## Next Commit: Sky-Derived Shadow State
+## Completed Commit: Sky-Derived Shadow State
 
-The next implementation commit should add the first shared helper for
+The first implementation commit added the shared helper for
 deterministic fixture sky/shadow state. This is intentionally the first step in
 the broader arc because later static shadows, dynamic shadows, fog, and water
 sun vectors should not each invent their own day-percent interpretation.

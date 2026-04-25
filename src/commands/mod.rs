@@ -12,6 +12,7 @@ use crate::water_assets::WaterAssets;
 pub mod common;
 mod debug_cmd;
 mod fixture_cmd;
+mod glow_grid;
 mod lighting_overlay;
 mod linking_sprites;
 mod overlays;

@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use anyhow::Result;
 
 use crate::cell::Cell;
-use crate::defs::{GlowerProps, RgbaColor, ThingDef};
+use crate::defs::ThingDef;
 use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayPass};
-use crate::world::{GlowSource, WorldState};
+use crate::world::WorldState;
+
+use super::glow_grid::GlowGrid;
 
 const LIGHTING_OVERLAY_DEPTH: f32 = -0.20;
 const ROOF_ALPHA_FLOOR: f32 = 100.0 / 255.0;
@@ -23,7 +25,7 @@ pub fn build_lighting_overlays(
     thing_defs: &HashMap<String, ThingDef>,
     world: &WorldState,
 ) -> Result<Vec<ColoredMeshInput>> {
-    if !has_lighting_inputs(world) && !has_glower_inputs(thing_defs, world) {
+    if !has_lighting_inputs(world) && !GlowGrid::has_inputs(thing_defs, world) {
         return Ok(Vec::new());
     }
 
@@ -93,17 +95,7 @@ fn has_lighting_inputs(world: &WorldState) -> bool {
     let render = world.render_state();
     render.day_percent.is_some()
         || render.sky_glow.is_some()
-        || !render.glow_sources.is_empty()
         || render.roofs.iter().any(|roof| roof.roofed)
-}
-
-fn has_glower_inputs(thing_defs: &HashMap<String, ThingDef>, world: &WorldState) -> bool {
-    world.things().iter().any(|thing| {
-        thing_defs
-            .get(&thing.def_name)
-            .and_then(|def| def.glower)
-            .is_some()
-    })
 }
 
 fn build_cell_lighting(
@@ -112,6 +104,7 @@ fn build_cell_lighting(
 ) -> Vec<CellLighting> {
     let render = world.render_state();
     let sky_brightness = sky_brightness(world);
+    let glow_grid = GlowGrid::from_world(thing_defs, world);
     let mut cells = Vec::with_capacity(world.width() * world.height());
 
     for z in 0..world.height() {
@@ -121,8 +114,7 @@ fn build_cell_lighting(
             let block_light = cell_has_block_light(thing_defs, world, cell);
             let holds_roof = cell_holds_roof(thing_defs, world, cell);
             let roof = render.roofs[index];
-            let brightness =
-                (sky_brightness + artificial_glow_brightness(thing_defs, world, cell)).min(1.0);
+            let brightness = (sky_brightness + glow_grid.visual_glow_at(cell)).min(1.0);
             let mut alpha = ((1.0 - brightness) * MAX_DARKNESS_ALPHA).clamp(0.0, 1.0);
             let roof_forces_alpha = roof.roofed && (roof.thick || !holds_roof);
             if roof_forces_alpha && alpha < ROOF_ALPHA_FLOOR {
@@ -150,84 +142,6 @@ fn sky_brightness(world: &WorldState) -> f32 {
         return (0.12 + daylight.max(0.0) * 0.88).clamp(0.0, 1.0);
     }
     1.0
-}
-
-fn artificial_glow_brightness(
-    thing_defs: &HashMap<String, ThingDef>,
-    world: &WorldState,
-    cell: Cell,
-) -> f32 {
-    let fixture_brightness = world
-        .render_state()
-        .glow_sources
-        .iter()
-        .map(|source| glow_source_brightness(source, cell))
-        .fold(0.0, f32::max);
-
-    let glower_brightness = world
-        .things()
-        .iter()
-        .filter_map(|thing| {
-            let glower = thing_defs.get(&thing.def_name).and_then(|def| def.glower)?;
-            Some(glower_brightness(thing.cell_x, thing.cell_z, glower, cell))
-        })
-        .fold(0.0, f32::max);
-
-    fixture_brightness.max(glower_brightness)
-}
-
-fn glow_source_brightness(source: &GlowSource, cell: Cell) -> f32 {
-    point_glow_brightness(
-        source.cell_x,
-        source.cell_z,
-        source.radius,
-        source.overlight_radius,
-        source.color,
-        cell,
-    )
-}
-
-fn glower_brightness(cell_x: i32, cell_z: i32, glower: GlowerProps, cell: Cell) -> f32 {
-    point_glow_brightness(
-        cell_x,
-        cell_z,
-        glower.glow_radius,
-        glower.overlight_radius,
-        glower.glow_color,
-        cell,
-    )
-}
-
-fn point_glow_brightness(
-    source_x: i32,
-    source_z: i32,
-    radius: f32,
-    overlight_radius: f32,
-    color: RgbaColor,
-    cell: Cell,
-) -> f32 {
-    if radius <= 0.0 {
-        return 0.0;
-    }
-    let dx = cell.x as f32 + 0.5 - (source_x as f32 + 0.5);
-    let dz = cell.z as f32 + 0.5 - (source_z as f32 + 0.5);
-    let distance = (dx * dx + dz * dz).sqrt();
-    let falloff = if overlight_radius > 0.0 && distance <= overlight_radius {
-        1.0
-    } else {
-        (1.0 - distance / radius).clamp(0.0, 1.0)
-    };
-    falloff * color_brightness(color)
-}
-
-fn color_brightness(color: RgbaColor) -> f32 {
-    let average = (color.r + color.g + color.b) / 3.0;
-    let max_component = color.r.max(color.g).max(color.b);
-    if max_component > 1.0 {
-        (average / 255.0).clamp(0.0, 1.0)
-    } else {
-        average.clamp(0.0, 1.0)
-    }
 }
 
 fn corner_color(
