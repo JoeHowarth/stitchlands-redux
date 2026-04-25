@@ -28,7 +28,7 @@ Deferred work that doesn't warrant its own plan folder yet. Add new items here; 
 ### Simulation / systems
 
 - **Autonomous pawn AI.** Pawns idle until right-click. Job queue, needs, mood not yet in scope.
-- **Lighting / shadows.** All sprites flat-tinted.
+- **Lighting / shadows follow-ups.** Overlay lighting, static shadows, graphic shadows, and glower brightness are landed. Remaining parity work includes derived sky/shadow vectors, blocker-aware glow propagation, fog/snow overlays, and dynamic/pawn shadows.
 - **Save / load runtime state.** Can load RimWorld XML + Unity assets; no runtime serialization.
 
 ### Test infra
