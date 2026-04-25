@@ -101,14 +101,33 @@ pub struct GraphicData {
     pub color: RgbaColor,
     pub draw_size: Vec2,
     pub draw_offset: Vec3,
+    pub shadow_data: Option<ShadowData>,
     pub link_type: LinkDrawerType,
     pub link_flags: LinkFlags,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShadowData {
+    pub volume: Vec3,
+    pub offset: Vec3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlowerProps {
+    pub glow_radius: f32,
+    pub glow_color: RgbaColor,
+    pub overlight_radius: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThingDef {
     pub def_name: String,
     pub graphic_data: GraphicData,
+    pub block_light: bool,
+    pub holds_roof: bool,
+    pub cast_edge_shadows: bool,
+    pub static_sun_shadow_height: f32,
+    pub glower: Option<GlowerProps>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -568,6 +587,11 @@ struct RawThingDef {
     def_name: Option<String>,
     is_abstract: bool,
     graphic_data: Option<RawGraphicData>,
+    block_light: Option<bool>,
+    holds_roof: Option<bool>,
+    cast_edge_shadows: Option<bool>,
+    static_sun_shadow_height: Option<f32>,
+    glower: Option<GlowerProps>,
 }
 
 #[derive(Clone, Default)]
@@ -577,8 +601,15 @@ struct RawGraphicData {
     color: Option<RgbaColor>,
     draw_size: Option<Vec2>,
     draw_offset: Option<Vec3>,
+    shadow_data: Option<RawShadowData>,
     link_type: Option<LinkDrawerType>,
     link_flags: Option<LinkFlags>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct RawShadowData {
+    volume: Option<Vec3>,
+    offset: Option<Vec3>,
 }
 
 fn parse_doc_thing_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawThingDef>) {
@@ -589,6 +620,7 @@ fn parse_doc_thing_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawThingDef
             continue;
         };
         let graphic_data = child_node(node, "graphicData").map(parse_raw_graphic_data);
+        let glower = child_node(node, "comps").and_then(parse_glower_props);
         raw.insert(
             key,
             RawThingDef {
@@ -599,6 +631,12 @@ fn parse_doc_thing_raw(doc: &Document<'_>, raw: &mut HashMap<String, RawThingDef
                     .and_then(parse_bool)
                     .unwrap_or(false),
                 graphic_data,
+                block_light: child_text(node, "blockLight").and_then(parse_bool),
+                holds_roof: child_text(node, "holdsRoof").and_then(parse_bool),
+                cast_edge_shadows: child_text(node, "castEdgeShadows").and_then(parse_bool),
+                static_sun_shadow_height: child_text(node, "staticSunShadowHeight")
+                    .and_then(|v| v.parse::<f32>().ok()),
+                glower,
             },
         );
     }
@@ -623,9 +661,32 @@ fn parse_raw_graphic_data(node: Node<'_, '_>) -> RawGraphicData {
         color: child_text(node, "color").and_then(parse_color),
         draw_size: child_node(node, "drawSize").map(parse_vec2),
         draw_offset: child_node(node, "drawOffset").map(parse_vec3),
+        shadow_data: child_node(node, "shadowData").map(parse_raw_shadow_data),
         link_type,
         link_flags: child_node(node, "linkFlags")
             .map(|flags_node| parse_link_flags(flags_node, &context)),
+    }
+}
+
+fn parse_raw_shadow_data(node: Node<'_, '_>) -> RawShadowData {
+    RawShadowData {
+        volume: child_node(node, "volume").and_then(parse_vec3_node_or_text),
+        offset: child_node(node, "offset").and_then(parse_vec3_node_or_text),
+    }
+}
+
+fn merge_raw_shadow_data(
+    child: Option<RawShadowData>,
+    parent: Option<RawShadowData>,
+) -> Option<RawShadowData> {
+    match (child, parent) {
+        (Some(child), Some(parent)) => Some(RawShadowData {
+            volume: child.volume.or(parent.volume),
+            offset: child.offset.or(parent.offset),
+        }),
+        (Some(child), None) => Some(child),
+        (None, Some(parent)) => Some(parent),
+        (None, None) => None,
     }
 }
 
@@ -640,6 +701,7 @@ fn merge_raw_graphic_data(
             color: child.color.or(parent.color),
             draw_size: child.draw_size.or(parent.draw_size),
             draw_offset: child.draw_offset.or(parent.draw_offset),
+            shadow_data: merge_raw_shadow_data(child.shadow_data, parent.shadow_data),
             link_type: child.link_type.or(parent.link_type),
             link_flags: child.link_flags.or(parent.link_flags),
         }),
@@ -657,6 +719,10 @@ fn finalize_graphic_data(raw: RawGraphicData) -> Option<GraphicData> {
         color: raw.color.unwrap_or(RgbaColor::WHITE),
         draw_size: raw.draw_size.unwrap_or(Vec2::new(1.0, 1.0)),
         draw_offset: raw.draw_offset.unwrap_or(Vec3::ZERO),
+        shadow_data: raw.shadow_data.map(|shadow| ShadowData {
+            volume: shadow.volume.unwrap_or(Vec3::ONE),
+            offset: shadow.offset.unwrap_or(Vec3::ZERO),
+        }),
         link_type: raw.link_type.unwrap_or_default(),
         link_flags: raw.link_flags.unwrap_or_default(),
     })
@@ -665,10 +731,7 @@ fn finalize_graphic_data(raw: RawGraphicData) -> Option<GraphicData> {
 /// Resolve `ParentName` inheritance chains into concrete renderable
 /// `ThingDef`s.
 ///
-/// This intentionally resolves only the render fields this project consumes:
-/// `defName` and `graphicData`. RimWorld's XML inheritance is broader, but
-/// carrying every `ThingDef` field through this lightweight render model would
-/// create a lot of unused surface area.
+/// This intentionally resolves only the render fields this project consumes.
 fn resolve_thing_defs_from_raw(raw: HashMap<String, RawThingDef>) -> HashMap<String, ThingDef> {
     fn resolve(
         key: &str,
@@ -697,6 +760,21 @@ fn resolve_thing_defs_from_raw(raw: HashMap<String, RawThingDef>) -> HashMap<Str
                 raw.graphic_data.clone(),
                 parent.as_ref().and_then(|p| p.graphic_data.clone()),
             ),
+            block_light: raw
+                .block_light
+                .or_else(|| parent.as_ref().and_then(|p| p.block_light)),
+            holds_roof: raw
+                .holds_roof
+                .or_else(|| parent.as_ref().and_then(|p| p.holds_roof)),
+            cast_edge_shadows: raw
+                .cast_edge_shadows
+                .or_else(|| parent.as_ref().and_then(|p| p.cast_edge_shadows)),
+            static_sun_shadow_height: raw
+                .static_sun_shadow_height
+                .or_else(|| parent.as_ref().and_then(|p| p.static_sun_shadow_height)),
+            glower: raw
+                .glower
+                .or_else(|| parent.as_ref().and_then(|p| p.glower)),
         };
         stack.pop();
         cache.insert(key.to_string(), merged.clone());
@@ -723,6 +801,11 @@ fn resolve_thing_defs_from_raw(raw: HashMap<String, RawThingDef>) -> HashMap<Str
             ThingDef {
                 def_name,
                 graphic_data,
+                block_light: merged.block_light.unwrap_or(false),
+                holds_roof: merged.holds_roof.unwrap_or(false),
+                cast_edge_shadows: merged.cast_edge_shadows.unwrap_or(false),
+                static_sun_shadow_height: merged.static_sun_shadow_height.unwrap_or(0.0),
+                glower: merged.glower,
             },
         );
     }
@@ -1062,9 +1145,54 @@ fn parse_graphic_data(node: Node<'_, '_>) -> Option<GraphicData> {
         color,
         draw_size,
         draw_offset,
+        shadow_data: child_node(node, "shadowData")
+            .map(parse_raw_shadow_data)
+            .map(|shadow| ShadowData {
+                volume: shadow.volume.unwrap_or(Vec3::ONE),
+                offset: shadow.offset.unwrap_or(Vec3::ZERO),
+            }),
         link_type,
         link_flags,
     })
+}
+
+fn parse_glower_props(comps_node: Node<'_, '_>) -> Option<GlowerProps> {
+    comps_node
+        .children()
+        .filter(|node| node.is_element())
+        .find(|node| is_glower_comp(*node))
+        .map(|node| GlowerProps {
+            glow_radius: child_text(node, "glowRadius")
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(14.0),
+            glow_color: child_text(node, "glowColor")
+                .and_then(parse_color)
+                .unwrap_or(RgbaColor {
+                    r: 255.0 * 1.45,
+                    g: 255.0 * 1.45,
+                    b: 255.0 * 1.45,
+                    a: 0.0,
+                }),
+            overlight_radius: child_text(node, "overlightRadius")
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(0.0),
+        })
+}
+
+fn is_glower_comp(node: Node<'_, '_>) -> bool {
+    node.attribute("Class")
+        .map(class_name_is_glower)
+        .unwrap_or(false)
+        || child_text(node, "compClass")
+            .map(class_name_is_glower)
+            .unwrap_or(false)
+}
+
+fn class_name_is_glower(name: &str) -> bool {
+    matches!(
+        name.rsplit('.').next().unwrap_or(name),
+        "CompProperties_Glower" | "CompGlower"
+    )
 }
 
 fn parse_link_flags(node: Node<'_, '_>, context: &str) -> LinkFlags {
@@ -1203,7 +1331,11 @@ fn parse_body_override_map(
 }
 
 fn parse_color(input: &str) -> Option<RgbaColor> {
-    let cleaned = input.replace(',', " ");
+    let cleaned = input
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .replace(',', " ");
     let mut parts = cleaned.split_whitespace();
     let r = parts.next()?.parse::<f32>().ok()?;
     let g = parts.next()?.parse::<f32>().ok()?;
@@ -1236,6 +1368,19 @@ fn parse_vec3(node: Node<'_, '_>) -> Vec3 {
         .and_then(|t| t.parse::<f32>().ok())
         .unwrap_or(0.0);
     Vec3::new(x, y, z)
+}
+
+fn parse_vec3_node_or_text(node: Node<'_, '_>) -> Option<Vec3> {
+    if let Some(value) = node.text().and_then(parse_vec3_inline) {
+        return Some(value);
+    }
+    if child_node(node, "x").is_some()
+        || child_node(node, "y").is_some()
+        || child_node(node, "z").is_some()
+    {
+        return Some(parse_vec3(node));
+    }
+    None
 }
 
 fn parse_vec2_inline(input: &str) -> Option<Vec2> {
@@ -1356,6 +1501,64 @@ mod tests {
     }
 
     #[test]
+    fn parses_thing_lighting_shadow_and_glower_fields() {
+        let xml = r#"
+        <Defs>
+            <ThingDef>
+                <defName>LitBuilding</defName>
+                <blockLight>true</blockLight>
+                <holdsRoof>true</holdsRoof>
+                <castEdgeShadows>true</castEdgeShadows>
+                <staticSunShadowHeight>0.35</staticSunShadowHeight>
+                <graphicData>
+                    <texPath>Things/Building/LitBuilding</texPath>
+                    <shadowData>
+                        <volume>(1.2, 0.4, 0.8)</volume>
+                        <offset><x>0.1</x><y>0.2</y><z>0.3</z></offset>
+                    </shadowData>
+                </graphicData>
+                <comps>
+                    <li Class="CompProperties_Glower">
+                        <glowRadius>7.5</glowRadius>
+                        <glowColor>(217,112,33,0)</glowColor>
+                        <overlightRadius>4.25</overlightRadius>
+                    </li>
+                </comps>
+            </ThingDef>
+        </Defs>
+        "#;
+        let doc = Document::parse(xml).unwrap();
+        let mut defs = HashMap::new();
+        parse_doc_thing_defs(&doc, &mut defs);
+
+        let thing = defs.get("LitBuilding").unwrap();
+        assert!(thing.block_light);
+        assert!(thing.holds_roof);
+        assert!(thing.cast_edge_shadows);
+        assert_eq!(thing.static_sun_shadow_height, 0.35);
+        assert_eq!(
+            thing.graphic_data.shadow_data,
+            Some(ShadowData {
+                volume: Vec3::new(1.2, 0.4, 0.8),
+                offset: Vec3::new(0.1, 0.2, 0.3),
+            })
+        );
+        assert_eq!(
+            thing.glower,
+            Some(GlowerProps {
+                glow_radius: 7.5,
+                glow_color: RgbaColor {
+                    r: 217.0,
+                    g: 112.0,
+                    b: 33.0,
+                    a: 0.0,
+                },
+                overlight_radius: 4.25,
+            })
+        );
+    }
+
+    #[test]
     fn audits_missing_thingdefs_with_inherited_graphic_data() {
         let xml = r#"
         <Defs>
@@ -1395,9 +1598,15 @@ mod tests {
                     color: RgbaColor::WHITE,
                     draw_size: Vec2::ONE,
                     draw_offset: Vec3::ZERO,
+                    shadow_data: None,
                     link_type: LinkDrawerType::None,
                     link_flags: LinkFlags::EMPTY,
                 },
+                block_light: false,
+                holds_roof: false,
+                cast_edge_shadows: false,
+                static_sun_shadow_height: 0.0,
+                glower: None,
             },
         );
 
@@ -1416,24 +1625,42 @@ mod tests {
         let xml = r#"
         <Defs>
             <ThingDef Abstract="True" Name="BaseThing">
+                <blockLight>true</blockLight>
+                <holdsRoof>true</holdsRoof>
+                <castEdgeShadows>true</castEdgeShadows>
+                <staticSunShadowHeight>0.45</staticSunShadowHeight>
                 <graphicData>
                     <texPath>Things/Base</texPath>
                     <graphicClass>Graphic_Appearances</graphicClass>
                     <drawSize><x>2.0</x><y>3.0</y></drawSize>
                     <color>1, 0, 0, 1</color>
+                    <shadowData>
+                        <volume><x>1.1</x><y>1.2</y><z>1.3</z></volume>
+                    </shadowData>
                     <linkType>CornerFiller</linkType>
                     <linkFlags>
                         <li>Wall</li>
                     </linkFlags>
                 </graphicData>
+                <comps>
+                    <li>
+                        <compClass>CompGlower</compClass>
+                        <glowRadius>9</glowRadius>
+                    </li>
+                </comps>
             </ThingDef>
             <ThingDef ParentName="BaseThing">
                 <defName>InheritedThing</defName>
             </ThingDef>
             <ThingDef ParentName="BaseThing">
                 <defName>OverrideThing</defName>
+                <blockLight>false</blockLight>
+                <staticSunShadowHeight>0.75</staticSunShadowHeight>
                 <graphicData>
                     <color>0, 1, 0, 1</color>
+                    <shadowData>
+                        <offset>(0.2, 0.3, 0.4)</offset>
+                    </shadowData>
                 </graphicData>
             </ThingDef>
         </Defs>
@@ -1446,6 +1673,18 @@ mod tests {
         assert_eq!(inherited.graphic_data.tex_path, "Things/Base");
         assert_eq!(inherited.graphic_data.kind, GraphicKind::Appearances);
         assert_eq!(inherited.graphic_data.draw_size, Vec2::new(2.0, 3.0));
+        assert!(inherited.block_light);
+        assert!(inherited.holds_roof);
+        assert!(inherited.cast_edge_shadows);
+        assert_eq!(inherited.static_sun_shadow_height, 0.45);
+        assert_eq!(
+            inherited.graphic_data.shadow_data,
+            Some(ShadowData {
+                volume: Vec3::new(1.1, 1.2, 1.3),
+                offset: Vec3::ZERO,
+            })
+        );
+        assert_eq!(inherited.glower.unwrap().glow_radius, 9.0);
         assert_eq!(
             inherited.graphic_data.link_type,
             LinkDrawerType::CornerFiller
@@ -1464,6 +1703,16 @@ mod tests {
             }
         );
         assert_eq!(override_thing.graphic_data.draw_size, Vec2::new(2.0, 3.0));
+        assert!(!override_thing.block_light);
+        assert!(override_thing.holds_roof);
+        assert_eq!(override_thing.static_sun_shadow_height, 0.75);
+        assert_eq!(
+            override_thing.graphic_data.shadow_data,
+            Some(ShadowData {
+                volume: Vec3::new(1.1, 1.2, 1.3),
+                offset: Vec3::new(0.2, 0.3, 0.4),
+            })
+        );
     }
 
     fn parse_terrain_xml(xml: &str) -> HashMap<String, TerrainDef> {

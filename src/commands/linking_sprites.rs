@@ -425,9 +425,15 @@ mod tests {
                 color: RgbaColor::WHITE,
                 draw_size: Vec2::ONE,
                 draw_offset: Vec3::ZERO,
+                shadow_data: None,
                 link_type: LinkDrawerType::CornerFiller,
                 link_flags: LinkFlags::WALL,
             },
+            block_light: false,
+            holds_roof: false,
+            cast_edge_shadows: false,
+            static_sun_shadow_height: 0.0,
+            glower: None,
         }
     }
 
