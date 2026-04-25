@@ -18,18 +18,22 @@ Completed on this branch so far:
 
 - Planned the successor lighting overlay parity workstream.
 - Added deterministic fixture sky/shadow state derivation.
-- Kept derived shadows darkening-only under the current source-over overlay
+- Initially kept derived shadows darkening-only under the source-over overlay
   blend path while retaining RimWorld-style material shadow color.
 - Unified static overlay construction behind an error-returning entry point.
 - Introduced a shared fixture `GlowGrid` boundary for artificial
   `VisualGlowAt`-style glow, separate from sky brightness.
 - Added blocker-aware `GlowGrid` propagation with fixed cardinal/diagonal
   attenuation costs and internal color-carrying samples.
+- Split lighting overlay sampling into explicit sky color, artificial glow
+  color, combined brightness, and current source-over darkness emission.
+- Added renderer overlay blend modes and moved shadow overlays onto a multiply
+  path so derived material shadow colors can darken without source-over
+  brightening artifacts.
 
-The current position is the lighting color parity milestone. Known missing
-scope is scheduled by dependency below rather than deferred indefinitely: color
-comes next, then blend modes, then environmental overlays, then dynamic overlay
-work.
+The current position is the environmental overlay milestone. Known missing
+scope is scheduled by dependency below rather than deferred indefinitely: fog
+and snow overlays come next, then dynamic overlay work.
 
 ## Reference Model
 
@@ -84,15 +88,16 @@ conflation in a more permanent API.
    blockers, not pathing movement flags. The model carries both propagated
    intensity and source color, while the current lighting overlay still emits
    black-alpha until the rendering blend model is ready for color.
-4. **Lighting color and overlay parity: next.** Make artificial glow color, sky color,
-   and darkness explicit in the lighting model. This milestone should consume
-   the color data carried by the blocker-aware glow grid instead of inventing a
-   separate color path.
-5. **Renderer blend modes.** Add per-overlay blend behavior, especially a
-   multiply/darken path for shadows before non-black derived shadow colors are
-   emitted to the renderer. This milestone removes the current source-over
-   limitation that forces derived shadows to use black RGB plus alpha.
-6. **Fog and snow overlays.** Render fixture fog and snow grids after sky,
+4. **Lighting color and overlay parity: complete.** Artificial glow color, sky
+   color, combined brightness, and source-over darkness emission are now
+   represented explicitly in the lighting overlay model. The renderer still
+   displays lighting through scalar darkness until additive/tint lighting gets
+   a dedicated blend path.
+5. **Renderer blend modes: complete for shadows.** Colored overlays now carry a
+   blend mode, and shadow overlays use a multiply/darken path. This removes the
+   source-over limitation that forced derived shadows to use black RGB plus
+   alpha.
+6. **Fog and snow overlays: next.** Render fixture fog and snow grids after sky,
    glow, color, and blend-mode semantics are clear enough to avoid baking in
    temporary darkness-overlay behavior.
 7. **Dynamic lighting and shadows.** Add dynamic glower updates and pawn/dynamic
@@ -199,11 +204,11 @@ sky/shadow state:
 - If `render.shadow_color` is absent, use a documented default sky shadow color
   and lerp white to that color by `shadow_strength`, matching the shape of
   `SkyManager`'s `Color.Lerp(Color.white, curSky.colors.shadow, strength)`.
-  The helper should return both the RimWorld-style material shadow color and the
-  current renderer's source-over overlay emission color. Until a multiply/darken
-  shadow pipeline exists, derived overlay emission must keep RGB black and put
-  strength in alpha; lerping white into an alpha-blended overlay can brighten
-  dark pixels instead of only darkening them.
+  The helper returns both the RimWorld-style material shadow color and the
+  renderer overlay emission color. Before multiply blending existed, derived
+  overlay emission stayed black-alpha to avoid source-over brightening; after
+  the multiply blend commit, derived overlay emission can use the material
+  shadow color directly.
 
 This rule is not full RimWorld sky parity. It is a deterministic fixture rule
 that preserves the important shape: shadow direction moves with time of day,
@@ -218,8 +223,8 @@ from glow rather than directly from raw `day_percent`.
 - Return a small value object with at least `shadow_vector`,
   `shadow_strength`, `sun_glow`, `material_shadow_color`,
   `overlay_shadow_color`, and `shadow_alpha_scale`. `material_shadow_color`
-  keeps the RimWorld/SkyManager concept available for a later shadow shader;
-  current source-over geometry should use `overlay_shadow_color`.
+  keeps the RimWorld/SkyManager concept available to the multiply shadow path;
+  shadow geometry should use `overlay_shadow_color`.
 - Keep explicit `render.shadow_vector` as the highest-priority vector override.
 - Keep explicit `render.shadow_color` as the highest-priority color override.
 - Make missing required inputs an error in the fixture/shadow build path. Do not
@@ -241,8 +246,8 @@ from glow rather than directly from raw `day_percent`.
   shadow overlay is requested.
 - Add a unit test proving shadow strength comes from derived `sun_glow`, not raw
   `day_percent`.
-- Add a unit test proving derived source-over overlay color stays darkening-only
-  even when material shadow color is a partial white-to-shadow lerp.
+- Add a unit test proving derived overlay color uses the material shadow color
+  once shadow overlays render through the multiply path.
 - Use paired fixture coverage or direct overlay vertex/color assertions for
   visual-relative behavior. One screenshot is not enough to prove that shadows
   changed because only `render.day_percent` changed.
@@ -253,11 +258,7 @@ from glow rather than directly from raw `day_percent`.
 
 ## Scheduled Follow-Up Milestones
 
-- **Lighting color parity, next.** Widen the lighting model so artificial glow
-  color, sky color, and darkness are represented explicitly.
-- **Renderer blend modes, after lighting color parity.** Add per-overlay
-  blending, including a principled darken/multiply path for shadows.
-- **Fog and snow overlays, after blend modes.** Render the existing fixture fog
+- **Fog and snow overlays, next.** Render the existing fixture fog
   and snow grids as first-class overlay systems.
 - **Dynamic overlays, after static/environment overlays.** Add dynamic glower
   updates and pawn/dynamic thing shadows using the same shared systems.

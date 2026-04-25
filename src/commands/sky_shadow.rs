@@ -56,11 +56,14 @@ pub fn sky_shadow_state(render: &RenderState) -> Result<SkyShadowState> {
                     Some(shadow_color) => {
                         (shadow_color, shadow_color, shadow_color.a.clamp(0.0, 1.0))
                     }
-                    None => (
-                        derived_material_shadow_color(shadow_strength),
-                        source_over_shadow_color(),
-                        DEFAULT_SHADOW_ALPHA_SCALE * shadow_strength,
-                    ),
+                    None => {
+                        let material_shadow_color = derived_material_shadow_color(shadow_strength);
+                        (
+                            material_shadow_color,
+                            material_shadow_color,
+                            DEFAULT_SHADOW_ALPHA_SCALE * shadow_strength,
+                        )
+                    }
                 };
             Ok(SkyShadowState {
                 shadow_vector,
@@ -110,15 +113,6 @@ fn derived_shadow_vector(day_percent: f32, sun_glow: f32) -> Vec2 {
 
 fn derived_material_shadow_color(shadow_strength: f32) -> RgbaColor {
     lerp_color(RgbaColor::WHITE, DEFAULT_SKY_SHADOW_COLOR, shadow_strength)
-}
-
-fn source_over_shadow_color() -> RgbaColor {
-    RgbaColor {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
-        a: 1.0,
-    }
 }
 
 fn inverse_lerp(min: f32, max: f32, value: f32) -> f32 {
@@ -254,14 +248,12 @@ mod tests {
     }
 
     #[test]
-    fn derived_overlay_color_stays_darkening_only_for_source_over_blending() {
+    fn derived_overlay_color_uses_material_shadow_color_for_multiply_blending() {
         let partial = sky_shadow_state(&render_state(Some(0.275), None, None)).unwrap();
 
         assert!(partial.shadow_strength > 0.0 && partial.shadow_strength < 1.0);
         assert!(partial.material_shadow_color.r > 0.0);
-        assert_eq!(partial.overlay_shadow_color.r, 0.0);
-        assert_eq!(partial.overlay_shadow_color.g, 0.0);
-        assert_eq!(partial.overlay_shadow_color.b, 0.0);
+        assert_eq!(partial.overlay_shadow_color, partial.material_shadow_color);
         assert!(partial.shadow_alpha_scale > 0.0);
     }
 }
