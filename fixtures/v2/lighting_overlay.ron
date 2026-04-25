@@ -1,0 +1,62 @@
+// Small deterministic scene for the fixture-only lighting overlay path.
+// It combines dark sky, roofed cells, static blockers, and one artificial
+// glow source. Fog and snow grids are present for schema coverage; rendering
+// support for those grids lands in later passes.
+(
+  schema_version: 2,
+  map: (
+    width: 5,
+    height: 5,
+    terrain: [
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+    ],
+    roofs: [
+      (roofed: false), (roofed: false), (roofed: false), (roofed: false), (roofed: false),
+      (roofed: false), (roofed: true), (roofed: true, thick: true), (roofed: true), (roofed: false),
+      (roofed: false), (roofed: true), (roofed: true, thick: true), (roofed: true), (roofed: false),
+      (roofed: false), (roofed: true), (roofed: true), (roofed: true), (roofed: false),
+      (roofed: false), (roofed: false), (roofed: false), (roofed: false), (roofed: false),
+    ],
+    fog: [
+      false, false, false, false, false,
+      false, false, true, true, false,
+      false, true, true, true, false,
+      false, false, true, false, false,
+      false, false, false, false, false,
+    ],
+    snow_depth: [
+      0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.1, 0.2, 0.1, 0.0,
+      0.0, 0.2, 0.6, 0.2, 0.0,
+      0.0, 0.1, 0.2, 0.1, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0,
+    ],
+  ),
+  render: (
+    sky_glow: (r: 0.18, g: 0.18, b: 0.22, a: 1.0),
+    shadow_color: (r: 0.0, g: 0.0, b: 0.0, a: 0.65),
+    glow_sources: [
+      (
+        cell_x: 2,
+        cell_z: 2,
+        radius: 2.25,
+        color: (r: 255.0, g: 220.0, b: 160.0, a: 0.0),
+        overlight_radius: 1.0,
+      ),
+    ],
+  ),
+  things: [
+    (def_name: "Wall", cell_x: 1, cell_z: 2, blocks_movement: true),
+    (def_name: "Wall", cell_x: 2, cell_z: 1, blocks_movement: true),
+    (def_name: "Wall", cell_x: 3, cell_z: 2, blocks_movement: true),
+  ],
+  pawns: [],
+  camera: (
+    center_x: 2.5,
+    center_z: 2.5,
+  ),
+)

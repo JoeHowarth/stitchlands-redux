@@ -74,6 +74,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_lighting_overlay_fixture() {
+        let path = std::path::Path::new("fixtures/v2/lighting_overlay.ron");
+        let fixture = load_fixture(path).expect("lighting_overlay.ron should parse");
+        assert_eq!(
+            fixture.map.width * fixture.map.height,
+            fixture.map.roofs.len()
+        );
+        assert_eq!(
+            fixture.map.width * fixture.map.height,
+            fixture.map.snow_depth.len()
+        );
+        assert_eq!(fixture.render.glow_sources.len(), 1);
+    }
+
+    #[test]
     fn parses_render_state_fields() {
         let path = std::env::temp_dir().join(format!(
             "stitchlands-render-state-fixture-{}.ron",
