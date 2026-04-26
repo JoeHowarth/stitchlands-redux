@@ -70,8 +70,8 @@ pub fn prepare_asset_setup(options: AssetSetupOptions) -> Result<AssetSetup> {
 
     let resolver = AssetResolver::new(
         data_dir.clone(),
-        texture_roots.clone(),
-        packed_roots.clone(),
+        texture_roots,
+        packed_roots,
         typetree_registries.clone(),
         packed_index,
     );
