@@ -1,0 +1,29 @@
+// Baseline fixture for static sun shadow parity work.
+// One isolated wall tile makes the current full-footprint CPU extrusion easy to
+// compare against the later SectionLayer_SunShadows-style silhouette pass.
+(
+  schema_version: 2,
+  map: (
+    width: 5,
+    height: 5,
+    terrain: [
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+    ],
+  ),
+  render: (
+    shadow_color: (r: 0.0, g: 0.0, b: 0.0, a: 0.65),
+    shadow_vector: (x: 0.42, z: -0.35),
+  ),
+  things: [
+    (def_name: "Wall", cell_x: 2, cell_z: 2, blocks_movement: true),
+  ],
+  pawns: [],
+  camera: (
+    center_x: 2.5,
+    center_z: 2.5,
+  ),
+)
