@@ -28,7 +28,7 @@ Deferred work that doesn't warrant its own plan folder yet. Add new items here; 
 ### Simulation / systems
 
 - **Autonomous pawn AI.** Pawns idle until right-click. Job queue, needs, mood not yet in scope.
-- **Lighting / shadows follow-ups.** Overlay lighting, static shadows, graphic shadows, and glower brightness are landed. Remaining parity work includes derived sky/shadow vectors, blocker-aware glow propagation, fog/snow overlays, and dynamic/pawn shadows.
+- **Dynamic lighting / pawn shadow follow-ups.** Overlay lighting, derived sky/shadow vectors, static shadows, graphic shadows, glower brightness, and blocker-aware glow propagation are landed. Fog/snow overlays are active in `plans/fog-snow-overlays/`; dynamic glower updates and pawn/dynamic thing shadows remain deferred.
 - **Save / load runtime state.** Can load RimWorld XML + Unity assets; no runtime serialization.
 
 ### Test infra
@@ -40,3 +40,4 @@ Deferred work that doesn't warrant its own plan folder yet. Add new items here; 
 Longer-form retrospective notes live alongside the shipped feature:
 
 - `plans/archive/terrain-walls-linking/followups.md` — full context on deferred wall/terrain linking items (many summarized above).
+- `plans/archive/lighting-overlay-parity/plan.md` — shipped lighting, glow, shadow, blend-mode, and static sun shadow foundation.
