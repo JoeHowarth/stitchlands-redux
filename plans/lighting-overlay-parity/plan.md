@@ -27,13 +27,16 @@ Completed on this branch so far:
   attenuation costs and internal color-carrying samples.
 - Split lighting overlay sampling into explicit sky color, artificial glow
   color, combined brightness, and current source-over darkness emission.
-- Added renderer overlay blend modes and moved shadow overlays onto a multiply
-  path so derived material shadow colors can darken without source-over
-  brightening artifacts.
+- Added renderer overlay blend-mode plumbing and moved shadow overlays onto a
+  multiply path so derived material shadow colors can darken without
+  source-over brightening artifacts.
 
-The current position is the environmental overlay milestone. Known missing
-scope is scheduled by dependency below rather than deferred indefinitely: fog
-and snow overlays come next, then dynamic overlay work.
+The current position is a porting-correction checkpoint for static sun shadows.
+Do not move to fog/snow overlays until the static shadow path is brought closer
+to RimWorld's `SectionLayer_SunShadows` / `Lighting/SunShadow` system boundary.
+Known missing scope is scheduled by dependency below rather than deferred
+indefinitely: static sun shadow parity comes next, then fog/snow overlays, then
+dynamic overlay work.
 
 ## Reference Model
 
@@ -73,6 +76,26 @@ shadow material color come from `SkyManager` and material state. The current
 the shared glow work should make that split explicit instead of preserving the
 conflation in a more permanent API.
 
+## Porting Gate
+
+Before each new overlay milestone, write down the exact RimWorld source files
+and methods being ported. For that system, identify the authored inputs,
+runtime state, mesh topology, material or shader behavior, shader uniforms, and
+neighbor/silhouette rules. The implementation should then preserve those
+boundaries first and add renderer-specific adapters only at the edges.
+
+If this renderer cannot port a Unity shader or section-mesh mechanism exactly
+yet, the substitute must be narrow, explicitly temporary, and shaped around the
+same RimWorld mesh and data semantics. A full-view screenshot is not enough to
+accept the substitute; add direct mesh/color assertions and deterministic
+zoomed screenshots or crops that prove the specific visual claim.
+
+The current static sun shadow extrusion is temporary. It fixed the detached
+shifted-quad artifact, but it is still not a full port of
+`SectionLayer_SunShadows` plus the `Lighting/SunShadow` shader. The next commit
+sequence should replace or constrain that approximation rather than layering
+fog/snow work on top of it.
+
 ## Workstream Arc
 
 1. **Deterministic sky/shadow state: complete.** Shadow vector, shadow strength,
@@ -93,19 +116,30 @@ conflation in a more permanent API.
    represented explicitly in the lighting overlay model. The renderer still
    displays lighting through scalar darkness until additive/tint lighting gets
    a dedicated blend path.
-5. **Renderer blend modes: complete for shadows.** Colored overlays now carry a
-   blend mode, and shadow overlays use a multiply/darken path. This removes the
-   source-over limitation that forced derived shadows to use black RGB plus
-   alpha.
-6. **Fog and snow overlays: next.** Render fixture fog and snow grids after sky,
-   glow, color, and blend-mode semantics are clear enough to avoid baking in
-   temporary darkness-overlay behavior.
-7. **Dynamic lighting and shadows.** Add dynamic glower updates and pawn/dynamic
+5. **Renderer blend modes: partial plumbing complete.** Colored overlays now
+   carry a blend mode, and shadow overlays can use a multiply/darken path. This
+   removes the source-over limitation that forced derived shadows to use black
+   RGB plus alpha, but it does not by itself complete shadow parity.
+6. **Static sun shadow parity: next.** Port `SectionLayer_SunShadows` semantics
+   before adding new environmental overlays. Preserve base footprint vertices,
+   exposed edge vertices based on neighboring building shadow height, and
+   `SkyManager.SetSunShadowVector` / `MapSunLightDirection` semantics. Either
+   implement a WGSL shader-equivalent projection path or keep a narrow CPU
+   fallback that starts from the same RimWorld mesh topology. Add regression
+   coverage for exposed/silhouette edges and for the no-stacked-dark-triangle
+   artifact class.
+7. **Fog and snow overlays: after static shadow parity.** Render fixture fog and
+   snow grids only after sky, glow, color, blend-mode, and static-shadow
+   semantics are stable enough to avoid baking in temporary darkness-overlay
+   behavior.
+8. **Dynamic lighting and shadows.** Add dynamic glower updates and pawn/dynamic
    thing shadows after static/environment overlay paths stabilize, reusing the
    same glow, shadow-state, and renderer mechanisms.
-8. **Visual tuning and regression checks: ongoing.** Add paired deterministic
+9. **Visual tuning and regression checks: ongoing.** Add paired deterministic
    fixtures or generated overlay assertions whenever a visual claim depends on
-   relative behavior such as morning versus evening direction.
+   relative behavior such as morning versus evening direction. Every overlay
+   milestone should include zoomed visual inspection of affected cells, not only
+   whole-scene screenshots.
 
 ## Completed Commit: Blocker-Aware GlowGrid Propagation
 
@@ -258,8 +292,11 @@ from glow rather than directly from raw `day_percent`.
 
 ## Scheduled Follow-Up Milestones
 
-- **Fog and snow overlays, next.** Render the existing fixture fog
-  and snow grids as first-class overlay systems.
+- **Static sun shadow parity, next.** Replace or constrain the current
+  temporary CPU extrusion with a closer port of `SectionLayer_SunShadows` and
+  the `Lighting/SunShadow` shader boundary.
+- **Fog and snow overlays, after static shadow parity.** Render the existing
+  fixture fog and snow grids as first-class overlay systems.
 - **Dynamic overlays, after static/environment overlays.** Add dynamic glower
   updates and pawn/dynamic thing shadows using the same shared systems.
 

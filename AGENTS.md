@@ -27,6 +27,13 @@
 
 - Use repository-relative paths in communication (for example `src/renderer.rs`), not absolute system paths.
 
+## RimWorld Porting Policy
+
+- When decompiled RimWorld source is available for a system, prefer a direct port of the system boundary over a visually plausible substitute.
+- Preserve RimWorld's authored inputs, runtime state, mesh topology, material colors, shader uniforms, neighbor rules, and silhouette rules before adding renderer-specific adapters.
+- If the exact Unity shader or section-mesh infrastructure is not available yet, keep any fallback narrow, clearly named as temporary, and shaped around the same RimWorld data and mesh semantics.
+- Treat the static sun shadow bug as the cautionary example: CPU-extruding every footprint side looked plausible at full view, but diverged from `SectionLayer_SunShadows` and produced stacked dark triangles when zoomed.
+
 ## Plans
 
 - See `plans/README.md` for the plan-folder lifecycle (active vs `plans/archive/`, status convention, where deferred items go).
