@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
@@ -8,7 +9,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3};
-use image::RgbaImage;
+use image::{ImageEncoder, RgbaImage};
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
@@ -1536,9 +1537,7 @@ impl Renderer {
 
         let image = image::RgbaImage::from_raw(readback.width, readback.height, pixels)
             .context("failed to build screenshot image buffer")?;
-        image
-            .save(output_path)
-            .with_context(|| format!("saving screenshot to {}", output_path.display()))?;
+        write_png_if_changed(output_path, &image)?;
         Ok(())
     }
 
@@ -1840,6 +1839,59 @@ fn texture_key(image: &RgbaImage) -> TextureKey {
         width: image.width(),
         height: image.height(),
         hash: hasher.finish(),
+    }
+}
+
+fn write_png_if_changed(output_path: &Path, image: &RgbaImage) -> Result<()> {
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded)
+        .write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ColorType::Rgba8.into(),
+        )
+        .with_context(|| format!("encoding screenshot for {}", output_path.display()))?;
+
+    if fs::read(output_path).is_ok_and(|existing| existing == encoded) {
+        return Ok(());
+    }
+
+    fs::write(output_path, encoded)
+        .with_context(|| format!("saving screenshot to {}", output_path.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use image::{Rgba, RgbaImage};
+
+    use super::write_png_if_changed;
+
+    #[test]
+    fn write_png_if_changed_skips_identical_existing_file() {
+        let path = std::env::temp_dir().join(format!(
+            "stitchlands-render-skip-{}-{}.png",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let image = RgbaImage::from_pixel(2, 2, Rgba([10, 20, 30, 255]));
+
+        write_png_if_changed(&path, &image).unwrap();
+        let original_permissions = std::fs::metadata(&path).unwrap().permissions();
+        let mut permissions = original_permissions.clone();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).unwrap();
+
+        write_png_if_changed(&path, &image).unwrap();
+
+        std::fs::set_permissions(&path, original_permissions).unwrap();
+        std::fs::remove_file(path).unwrap();
     }
 }
 
