@@ -93,8 +93,16 @@ zoomed screenshots or crops that prove the specific visual claim.
 The current static sun shadow extrusion is temporary. It fixed the detached
 shifted-quad artifact, but it is still not a full port of
 `SectionLayer_SunShadows` plus the `Lighting/SunShadow` shader. The next commit
-sequence should replace or constrain that approximation rather than layering
-fog/snow work on top of it.
+sequence must replace that approximation rather than layering fog/snow work on
+top of it.
+
+For `SectionLayer_SunShadows`, a CPU-projected replacement is no longer an
+acceptable temporary substitute. The failed CPU fallback proved the boundary
+matters: projecting edge vertices in `src/commands/shadow_overlay.rs` can still
+darken non-casting far edges and can split each side into visibly mismatched
+triangles. The next implementation must keep mesh construction and cast-vector
+projection separate: Rust builds the section-style vertex/color topology, and a
+dedicated renderer path projects sun-shadow vertices from shader state.
 
 ## Workstream Arc
 
@@ -121,13 +129,28 @@ fog/snow work on top of it.
    removes the source-over limitation that forced derived shadows to use black
    RGB plus alpha, but it does not by itself complete shadow parity.
 6. **Static sun shadow parity: next.** Port `SectionLayer_SunShadows` semantics
-   before adding new environmental overlays. Preserve base footprint vertices,
-   exposed edge vertices based on neighboring building shadow height, and
-   `SkyManager.SetSunShadowVector` / `MapSunLightDirection` semantics. Either
-   implement a WGSL shader-equivalent projection path or keep a narrow CPU
-   fallback that starts from the same RimWorld mesh topology. Add regression
-   coverage for exposed/silhouette edges and for the no-stacked-dark-triangle
-   artifact class.
+   before adding new environmental overlays. Preserve RimWorld's authored
+   boundary exactly enough to keep responsibilities clear:
+   `src/commands/shadow_overlay.rs` should emit the unprojected
+   `SectionLayer_SunShadows` mesh topology, and the renderer should project the
+   cast geometry through a dedicated sun-shadow shader path equivalent to
+   `Lighting/SunShadow`.
+
+   The Rust mesh builder should emit each caster cell's transparent base
+   footprint and high-alpha duplicate vertices only for RimWorld-exposed sides:
+   west, east, and south sides whose neighboring building is absent or has a
+   lower `staticSunShadowHeight`, matching `Verse/SectionLayer_SunShadows.cs`.
+   It should not turn the sky shadow vector into CPU world offsets.
+
+   The renderer should carry `SkyManager.SetSunShadowVector` /
+   `MapSunLightDirection` semantics explicitly: pass the derived shadow vector
+   and shadow strength/material state as shader data, keep authored
+   `staticSunShadowHeight` in vertex color alpha, and let WGSL perform the
+   displacement. Add regression coverage for exposed/silhouette edge topology,
+   shader uniform plumbing, and the no-stacked-dark-triangle artifact class.
+   Acceptance requires deterministic zoomed screenshots or crops proving that,
+   for a down-right cast vector, only the close bottom/right silhouette sides
+   cast visible shadows while far left/top sides do not.
 7. **Fog and snow overlays: after static shadow parity.** Render fixture fog and
    snow grids only after sky, glow, color, blend-mode, and static-shadow
    semantics are stable enough to avoid baking in temporary darkness-overlay
@@ -292,9 +315,11 @@ from glow rather than directly from raw `day_percent`.
 
 ## Scheduled Follow-Up Milestones
 
-- **Static sun shadow parity, next.** Replace or constrain the current
-  temporary CPU extrusion with a closer port of `SectionLayer_SunShadows` and
-  the `Lighting/SunShadow` shader boundary.
+- **Static sun shadow parity, next.** Replace the current temporary CPU
+  extrusion with a real `SectionLayer_SunShadows` / `Lighting/SunShadow`
+  boundary: unprojected section mesh topology in the overlay builder, cast
+  displacement in a dedicated renderer shader path, and zoomed visual
+  acceptance for the known far-edge and split-triangle artifact cases.
 - **Fog and snow overlays, after static shadow parity.** Render the existing
   fixture fog and snow grids as first-class overlay systems.
 - **Dynamic overlays, after static/environment overlays.** Add dynamic glower
