@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -53,7 +53,18 @@ pub(crate) struct ViewerLaunch {
 }
 
 pub(crate) fn run_viewer(launch: ViewerLaunch) -> Result<()> {
-    let mut app = App::new(launch);
+    let mut app = App::new(launch, VecDeque::new());
+    let event_loop = EventLoop::new()?;
+    event_loop.run_app(&mut app)?;
+    Ok(())
+}
+
+pub(crate) fn run_viewer_batch(launches: Vec<ViewerLaunch>) -> Result<()> {
+    let mut launches = VecDeque::from(launches);
+    let Some(first) = launches.pop_front() else {
+        return Ok(());
+    };
+    let mut app = App::new(first, launches);
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -82,10 +93,11 @@ struct App {
     runtime: Option<V2Runtime>,
     runtime_tick_limit: Option<u64>,
     runtime_finished: bool,
+    pending_launches: VecDeque<ViewerLaunch>,
 }
 
 impl App {
-    fn new(launch: ViewerLaunch) -> Self {
+    fn new(launch: ViewerLaunch, pending_launches: VecDeque<ViewerLaunch>) -> Self {
         Self {
             static_sprites: launch.static_sprites,
             dynamic_sprites: launch.dynamic_sprites,
@@ -110,7 +122,32 @@ impl App {
             runtime: launch.runtime,
             runtime_tick_limit: launch.runtime_tick_limit,
             runtime_finished: false,
+            pending_launches,
         }
+    }
+
+    fn load_launch(&mut self, launch: ViewerLaunch) {
+        self.static_sprites = launch.static_sprites;
+        self.dynamic_sprites = launch.dynamic_sprites;
+        self.edge_sprites = launch.edge_sprites;
+        self.static_overlays = launch.static_overlays;
+        self.noise_image = launch.noise_image;
+        self.water_assets = Some(launch.water_assets);
+        self.screenshot_path = launch.screenshot_path;
+        self.initial_camera_center = launch.initial_camera_center;
+        self.screenshot_taken = false;
+        self.renderer_options = launch.renderer_options;
+        self.hidden_window = launch.hidden_window;
+        self.fixed_step = launch.fixed_step;
+        self.base_dynamic_inputs.clear();
+        self.pawn_node_textures.clear();
+        self.overlay_image =
+            RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).expect("1x1 overlay texture");
+        self.overlay_texture_id = None;
+        self.map_bounds = None;
+        self.runtime = launch.runtime;
+        self.runtime_tick_limit = launch.runtime_tick_limit;
+        self.runtime_finished = false;
     }
 
     fn dynamic_with_overlays(&self) -> Vec<SpriteInstance> {
@@ -128,10 +165,7 @@ impl App {
             self.base_dynamic_inputs.clone()
         }
     }
-}
-
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    fn prepare_renderer(&mut self, event_loop: &ActiveEventLoop) {
         let first = self
             .static_sprites
             .first()
@@ -145,17 +179,22 @@ impl ApplicationHandler for App {
             .count();
         let total_sprites = self.static_sprites.len() + self.dynamic_sprites.len();
         self.map_bounds = infer_map_bounds(&self.static_sprites);
-        let attrs = Window::default_attributes().with_title(format!(
+        let title = format!(
             "stitchlands-redux | sprites={} first={} fallback={} | pan: WASD/Arrows zoom: wheel/QE",
             total_sprites, first.def_name, fallback_count
-        ));
-        let attrs = if self.hidden_window {
-            attrs.with_visible(false)
+        );
+        let window = if let Some(window) = self.window.as_ref() {
+            window.set_title(&title);
+            window.clone()
         } else {
-            attrs
+            let attrs = Window::default_attributes().with_title(title);
+            let attrs = if self.hidden_window {
+                attrs.with_visible(false)
+            } else {
+                attrs
+            };
+            Arc::new(event_loop.create_window(attrs).expect("create window"))
         };
-
-        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let static_inputs: Vec<SpriteInput> = self
             .static_sprites
             .drain(..)
@@ -216,6 +255,24 @@ impl ApplicationHandler for App {
 
         self.renderer = Some(renderer);
         self.window = Some(window);
+    }
+
+    fn finish_or_load_next(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(next) = self.pending_launches.pop_front() else {
+            event_loop.exit();
+            return;
+        };
+        self.load_launch(next);
+        self.prepare_renderer(event_loop);
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.prepare_renderer(event_loop);
     }
 
     fn window_event(
@@ -305,10 +362,10 @@ impl ApplicationHandler for App {
                                 );
                             }
                             if self.screenshot_path.is_none() || self.screenshot_taken {
-                                event_loop.exit();
+                                self.finish_or_load_next(event_loop);
                             }
                         } else if captured {
-                            event_loop.exit();
+                            self.finish_or_load_next(event_loop);
                         }
                     }
                     Err(err) => {

@@ -68,6 +68,27 @@ fn main() -> Result<()> {
                 runtime_tick_limit: spec.runtime_tick_limit,
             })
         }
+        crate::commands::CommandAction::LaunchBatch(specs) => {
+            let launches = specs
+                .into_iter()
+                .map(|spec| crate::viewer::ViewerLaunch {
+                    static_sprites: spec.static_sprites,
+                    dynamic_sprites: spec.dynamic_sprites,
+                    edge_sprites: spec.edge_sprites,
+                    static_overlays: spec.static_overlays,
+                    noise_image: spec.noise_image,
+                    water_assets: spec.water_assets,
+                    screenshot_path: spec.screenshot,
+                    initial_camera_center: spec.camera_focus,
+                    renderer_options: spec.render_options,
+                    hidden_window: spec.hide_window,
+                    fixed_step: spec.fixed_step,
+                    runtime: spec.runtime,
+                    runtime_tick_limit: spec.runtime_tick_limit,
+                })
+                .collect();
+            crate::viewer::run_viewer_batch(launches)
+        }
     }
 }
 

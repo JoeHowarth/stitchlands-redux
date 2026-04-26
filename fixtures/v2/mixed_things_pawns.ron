@@ -14,6 +14,9 @@
       (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
     ],
   ),
+  render: (
+    day_percent: 0.5,
+  ),
   things: [
     (def_name: "Steel", cell_x: 2, cell_z: 2, blocks_movement: false),
     (def_name: "WoodLog", cell_x: 3, cell_z: 3, blocks_movement: false),

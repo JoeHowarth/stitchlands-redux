@@ -55,6 +55,7 @@ pub struct ViewArgs {
 pub enum Command {
     Render(RenderCmd),
     Fixture(FixtureCmd),
+    RenderFixtures(RenderFixturesCmd),
     Debug(DebugCmdArgs),
 }
 
@@ -100,6 +101,26 @@ pub struct FixtureCmd {
     pub fixed_dt: Option<f32>,
     #[command(flatten)]
     pub view: ViewArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RenderFixturesCmd {
+    #[arg(long, default_value = "fixtures/v2")]
+    pub fixture_dir: PathBuf,
+    #[arg(long, default_value = "fixtures/renders")]
+    pub output_dir: PathBuf,
+    #[arg(long)]
+    pub ticks: Option<u64>,
+    #[arg(long)]
+    pub fixed_dt: Option<f32>,
+    #[arg(long, default_value_t = 1024)]
+    pub viewport_width: u32,
+    #[arg(long, default_value_t = 1024)]
+    pub viewport_height: u32,
+    #[arg(long, default_value_t = 6.0)]
+    pub camera_zoom: f32,
+    #[arg(long, value_parser = parse_clear_color, default_value = "0.05,0.08,0.10,1")]
+    pub clear_color: [f64; 4],
 }
 
 #[derive(Subcommand, Debug)]

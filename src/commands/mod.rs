@@ -32,6 +32,7 @@ pub struct DispatchContext<'a> {
 pub enum CommandAction {
     Done,
     Launch(Box<LaunchSpec>),
+    LaunchBatch(Vec<LaunchSpec>),
 }
 
 pub struct LaunchSpec {
@@ -54,6 +55,7 @@ pub fn dispatch(ctx: &mut DispatchContext<'_>, command: Command) -> Result<Comma
     match command {
         Command::Debug(debug) => debug_cmd::run(ctx, debug.command),
         Command::Fixture(cmd) => fixture_cmd::run_fixture(ctx, cmd),
+        Command::RenderFixtures(cmd) => fixture_cmd::run_render_fixtures(ctx, cmd),
         Command::Render(render) => render_cmd::run(ctx, render),
     }
 }

@@ -41,6 +41,9 @@
       (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
     ],
   ),
+  render: (
+    day_percent: 0.5,
+  ),
   things: [
     // Isolated wall (atlas index 0 — no neighbors)
     (def_name: "Wall", cell_x: 2, cell_z: 2, blocks_movement: true),

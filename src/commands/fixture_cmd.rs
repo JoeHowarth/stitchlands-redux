@@ -1,11 +1,13 @@
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use glam::{Vec2, Vec3};
 use log::{info, warn};
 
 use crate::cell::Cell;
-use crate::cli::FixtureCmd;
+use crate::cli::{FixtureCmd, RenderFixturesCmd, ViewArgs};
 use crate::defs::{ApparelDef, ApparelLayerDef, BodyTypeDefRender};
 use crate::linking::LinkDrawerType;
 use crate::pawn::{
@@ -34,6 +36,60 @@ use super::{CommandAction, DispatchContext, LaunchSpec};
 const ROUGH_ALPHA_ADD_PATH: &str = "Other/RoughAlphaAdd";
 
 pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<CommandAction> {
+    build_fixture_action(ctx, cmd)
+}
+
+pub fn run_render_fixtures(
+    ctx: &mut DispatchContext<'_>,
+    cmd: RenderFixturesCmd,
+) -> Result<CommandAction> {
+    fs::create_dir_all(&cmd.output_dir)
+        .with_context(|| format!("creating fixture render dir '{}'", cmd.output_dir.display()))?;
+    let mut scenes = fixture_ron_files(&cmd.fixture_dir)?;
+    scenes.sort();
+    let mut specs = Vec::with_capacity(scenes.len());
+
+    for scene in scenes {
+        let stem = scene
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .with_context(|| format!("fixture path has no UTF-8 stem: '{}'", scene.display()))?;
+        let screenshot = cmd.output_dir.join(format!("{stem}.png"));
+        info!(
+            "rendering fixture '{}' -> '{}'",
+            scene.display(),
+            screenshot.display()
+        );
+        let action = build_fixture_action(
+            ctx,
+            FixtureCmd {
+                scene,
+                ticks: cmd.ticks,
+                fixed_dt: cmd.fixed_dt,
+                view: ViewArgs {
+                    screenshot: Some(screenshot),
+                    no_window: true,
+                    hidden_window: true,
+                    viewport_width: cmd.viewport_width,
+                    viewport_height: cmd.viewport_height,
+                    camera_zoom: cmd.camera_zoom,
+                    clear_color: cmd.clear_color,
+                },
+            },
+        )?;
+        match action {
+            CommandAction::Launch(spec) => specs.push(*spec),
+            CommandAction::Done => {}
+            CommandAction::LaunchBatch(_) => {
+                anyhow::bail!("fixture render unexpectedly returned a nested batch")
+            }
+        }
+    }
+
+    Ok(CommandAction::LaunchBatch(specs))
+}
+
+fn build_fixture_action(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<CommandAction> {
     let (should_run_renderer, render_options, hide_window) = crate::cli::render_runtime(&cmd.view);
     let fixture = crate::fixtures::load_fixture(&cmd.scene)?;
     let mut world = world_from_fixture(&fixture);
@@ -190,6 +246,20 @@ pub fn run_fixture(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Result<Com
         hide_window,
         fixed_step: true,
     })))
+}
+
+fn fixture_ron_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let entries =
+        fs::read_dir(dir).with_context(|| format!("reading fixture dir '{}'", dir.display()))?;
+    let mut out = Vec::new();
+    for entry in entries {
+        let entry = entry.with_context(|| format!("reading entry in '{}'", dir.display()))?;
+        let path = entry.path();
+        if path.extension().is_some_and(|extension| extension == "ron") {
+            out.push(path);
+        }
+    }
+    Ok(out)
 }
 
 struct SpriteLayers {

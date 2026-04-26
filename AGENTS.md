@@ -20,6 +20,9 @@
 ## Work Completion Policy
 
 - After each piece of work, run formatting, tests, and lint checks.
+- After every commit, render all fixture RON files with
+  `cargo run -- render-fixtures`; outputs must go under `fixtures/renders/`
+  with filenames matching the source fixture stems.
 - Fix any lint findings instead of suppressing them locally.
 - Commit the completed piece of work once checks are passing.
 

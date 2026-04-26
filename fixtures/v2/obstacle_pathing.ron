@@ -14,6 +14,9 @@
       (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"), (terrain_def: "Concrete"),
     ],
   ),
+  render: (
+    day_percent: 0.5,
+  ),
   things: [
     // Vertical wall strip — pawns must path around it and the walls link via
     // CornerFiller into a vertical bar (atlas index 5, N+S bits set).
