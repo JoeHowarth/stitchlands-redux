@@ -1,0 +1,38 @@
+// Focused fixture for first-class fog and snow overlay rendering.
+//
+// Fog forms an authored plus shape. Snow uses a diagonal depth ramp so visual
+// strength depends on the fixture's `snow_depth` values and neighbor averaging.
+(
+  schema_version: 2,
+  map: (
+    width: 5,
+    height: 5,
+    terrain: [
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+      (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"), (terrain_def: "Soil"),
+    ],
+    fog: [
+      false, false, true,  false, false,
+      false, false, true,  false, false,
+      true,  true,  true,  true,  true,
+      false, false, true,  false, false,
+      false, false, true,  false, false,
+    ],
+    snow_depth: [
+      0.00, 0.00, 0.05, 0.10, 0.20,
+      0.00, 0.05, 0.10, 0.25, 0.40,
+      0.05, 0.10, 0.25, 0.50, 0.70,
+      0.10, 0.25, 0.50, 0.75, 0.90,
+      0.20, 0.40, 0.70, 0.90, 1.00,
+    ],
+  ),
+  things: [],
+  pawns: [],
+  camera: (
+    center_x: 2.5,
+    center_z: 2.5,
+  ),
+)

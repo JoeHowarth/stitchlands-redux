@@ -12,6 +12,7 @@ use crate::water_assets::WaterAssets;
 pub mod common;
 mod debug_cmd;
 mod fixture_cmd;
+mod fog_overlay;
 mod glow_grid;
 mod lighting_overlay;
 mod linking_sprites;
@@ -19,6 +20,8 @@ mod overlays;
 mod render_cmd;
 mod shadow_overlay;
 mod sky_shadow;
+mod snow_overlay;
+mod solid_overlay_mesh;
 
 pub use common::DefSet;
 
