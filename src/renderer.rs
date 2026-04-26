@@ -32,6 +32,8 @@ pub struct Renderer {
     edge_pipeline: wgpu::RenderPipeline,
     overlay_pipeline: wgpu::RenderPipeline,
     overlay_multiply_pipeline: wgpu::RenderPipeline,
+    sun_shadow_pipeline: wgpu::RenderPipeline,
+    sun_shadow_layout: wgpu::BindGroupLayout,
     water_depth_pipeline: wgpu::RenderPipeline,
     water_surface_pipeline: wgpu::RenderPipeline,
     noise_bind_group: wgpu::BindGroup,
@@ -96,9 +98,14 @@ type GroupedSpriteInstances = HashMap<TextureId, Vec<(usize, InstanceData)>>;
 struct ColoredMeshBatch {
     pass: OverlayPass,
     blend_mode: OverlayBlendMode,
+    sun_shadow: Option<SunShadowBatch>,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+}
+
+struct SunShadowBatch {
+    bind_group: wgpu::BindGroup,
 }
 
 fn multiply_overlay_blend_state() -> wgpu::BlendState {
@@ -152,6 +159,27 @@ struct CameraUniform {
     screen_width: f32,
     screen_height: f32,
     _pad0: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SunShadowUniform {
+    cast_vector: [f32; 4],
+    material_color: [f32; 4],
+}
+
+impl SunShadowUniform {
+    fn from_params(params: SunShadowParams) -> Self {
+        Self {
+            cast_vector: [
+                params.shadow_vector[0],
+                params.shadow_vector[1],
+                params.shadow_strength,
+                0.0,
+            ],
+            material_color: params.material_color,
+        }
+    }
 }
 
 #[repr(C)]
@@ -517,10 +545,33 @@ impl Renderer {
                 "colored_overlay_multiply.wgsl"
             ))),
         });
+        let sun_shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("sun-shadow-shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("sun_shadow.wgsl"))),
+        });
+        let sun_shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("sun-shadow-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
         let overlay_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("colored-overlay-pipeline-layout"),
                 bind_group_layouts: &[&camera_layout],
+                push_constant_ranges: &[],
+            });
+        let sun_shadow_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("sun-shadow-pipeline-layout"),
+                bind_group_layouts: &[&camera_layout, &sun_shadow_layout],
                 push_constant_ranges: &[],
             });
         let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -572,6 +623,30 @@ impl Renderer {
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
             });
+        let sun_shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sun-shadow-pipeline"),
+            layout: Some(&sun_shadow_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &sun_shadow_shader,
+                entry_point: "vs_main",
+                buffers: &[ColoredVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &sun_shadow_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(multiply_overlay_blend_state()),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
 
         let water_depth_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("water-depth-shader"),
@@ -838,6 +913,8 @@ impl Renderer {
             edge_pipeline,
             overlay_pipeline,
             overlay_multiply_pipeline,
+            sun_shadow_pipeline,
+            sun_shadow_layout,
             water_depth_pipeline,
             water_surface_pipeline,
             noise_bind_group,
@@ -1026,6 +1103,15 @@ impl Renderer {
             if overlay.vertices.is_empty() || overlay.indices.is_empty() {
                 continue;
             }
+            match (overlay.blend_mode, overlay.sun_shadow.is_some()) {
+                (OverlayBlendMode::SunShadow, false) => {
+                    anyhow::bail!("sun shadow overlays require sun shadow parameters");
+                }
+                (OverlayBlendMode::Alpha | OverlayBlendMode::Multiply, true) => {
+                    anyhow::bail!("sun shadow parameters require the sun shadow blend mode");
+                }
+                _ => {}
+            }
             let vertex_count = overlay.vertices.len() as u32;
             if let Some(index) = overlay
                 .indices
@@ -1051,9 +1137,29 @@ impl Renderer {
                     contents: bytemuck::cast_slice(&overlay.indices),
                     usage: wgpu::BufferUsages::INDEX,
                 });
+            let sun_shadow = overlay.sun_shadow.map(|params| {
+                let uniform = SunShadowUniform::from_params(params);
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("sun-shadow-uniform-buffer"),
+                        contents: bytemuck::bytes_of(&uniform),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("sun-shadow-bind-group"),
+                    layout: &self.sun_shadow_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buffer.as_entire_binding(),
+                    }],
+                });
+                SunShadowBatch { bind_group }
+            });
             batches.push(ColoredMeshBatch {
                 pass: overlay.pass,
                 blend_mode: overlay.blend_mode,
+                sun_shadow,
                 vertex_buffer,
                 index_buffer,
                 index_count: overlay.indices.len() as u32,
@@ -1458,8 +1564,12 @@ impl Renderer {
                 pass.set_pipeline(match batch.blend_mode {
                     OverlayBlendMode::Alpha => &self.overlay_pipeline,
                     OverlayBlendMode::Multiply => &self.overlay_multiply_pipeline,
+                    OverlayBlendMode::SunShadow => &self.sun_shadow_pipeline,
                 });
                 current_blend_mode = Some(batch.blend_mode);
+            }
+            if let Some(sun_shadow) = &batch.sun_shadow {
+                pass.set_bind_group(1, &sun_shadow.bind_group, &[]);
             }
             pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
             pass.set_index_buffer(batch.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -1753,14 +1863,23 @@ pub enum OverlayPass {
 pub enum OverlayBlendMode {
     Alpha,
     Multiply,
+    SunShadow,
 }
 
 #[derive(Debug, Clone)]
 pub struct ColoredMeshInput {
     pub pass: OverlayPass,
     pub blend_mode: OverlayBlendMode,
+    pub sun_shadow: Option<SunShadowParams>,
     pub vertices: Vec<ColoredVertex>,
     pub indices: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SunShadowParams {
+    pub shadow_vector: [f32; 2],
+    pub shadow_strength: f32,
+    pub material_color: [f32; 4],
 }
 
 #[repr(C)]

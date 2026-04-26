@@ -101,6 +101,7 @@ pub fn build_lighting_overlays(
     Ok(vec![ColoredMeshInput {
         pass: OverlayPass::AfterStatic,
         blend_mode: OverlayBlendMode::Alpha,
+        sun_shadow: None,
         vertices,
         indices,
     }])
