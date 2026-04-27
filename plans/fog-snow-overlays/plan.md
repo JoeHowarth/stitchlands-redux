@@ -82,32 +82,28 @@ plan before writing code.
 
 ## Current Local State
 
-- `src/commands/fog_overlay.rs` ports the fog alpha topology directly onto a
-  colored overlay. This is acceptable for now because RimWorld fog is primarily
-  a material color plus the fog-of-war alpha mask.
+- `src/commands/fog_overlay.rs` ports the fog alpha topology onto a textured
+  overlay using the packed `Misc/FogOfWar` texture that backs
+  `MatBases.FogOfWar`. Vertex coverage still follows `SectionLayer_FogOfWar`,
+  while texture luminance gives the local render visible non-uniformity.
 - Fog color follows `SkyManager` material-color behavior for fixture state:
   the base `Color32(77, 69, 66, 255)` fog color is multiplied by
-  `render.sky_glow` when authored.
+  `render.sky_glow` when authored. Local fog opacity is scaled below full alpha
+  so the material reads as fog rather than a solid sheet.
 - `src/commands/snow_overlay.rs` ports the snow grid sampling and
   `vertexWeights` alpha averaging, then emits a textured overlay using the
   packed `Other/Snow` texture that backs `MatBases.Snow`. This keeps the
   `SectionLayer_Snow` alpha semantics while moving the render path away from a
   flat white colored mesh.
 - `src/renderer.rs` now has a parallel textured overlay input and pipeline.
-  The snow shader samples the material texture and multiplies by vertex color,
-  with alpha still coming from the RimWorld snow depth averaging rules.
+  Fog and snow sample their material textures and multiply by vertex color,
+  with alpha still coming from the RimWorld coverage/depth rules.
 - `src/commands/solid_overlay_mesh.rs` is the shared 9-vertex solid-cell
   topology. Keep using it for fog and snow unless direct decompile evidence
   says otherwise.
 - `fixtures/v2/fog_snow_overlays.ron` is now a larger visual fixture with a
   roofed room, pawns, fog banks, and a snow ramp. It is intended for visual
   inspection of overlay composition and material-backed snow detail.
-
-## Deferred Follow-ups
-
-- Material-backed fog may be useful if later visual parity needs it. Keep the
-  current fog path colored until a fixture or reference comparison shows that
-  `MatBases.FogOfWar` texture/material behavior is visibly missing.
 
 ## Next Slice: Material-Backed Snow Overlay
 
@@ -147,9 +143,6 @@ Recommended implementation steps:
    added. RimWorld stores pollution blend in the red vertex channel and assigns
    `Other/SnowPolluted` through `_PollutedTex` at
    `Verse/SectionLayer_Snow.cs:91-104`.
-6. Keep fog on the colored overlay path for now. A later material-backed fog
-   adapter may be useful, but snow is the visible mismatch.
-
 Acceptance for this next slice:
 
 - The snow overlay no longer renders as a flat white sheet at high depth; the

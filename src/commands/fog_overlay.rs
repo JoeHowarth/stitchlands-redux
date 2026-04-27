@@ -1,17 +1,29 @@
-use crate::renderer::{ColoredMeshInput, OverlayBlendMode, OverlayPass};
+use anyhow::{Context, Result};
+use image::RgbaImage;
+
+use crate::assets::AssetResolver;
+use crate::renderer::{OverlayPass, TexturedMeshInput};
 use crate::world::{RenderState, WorldState};
 
-use super::solid_overlay_mesh::{SOLID_CELL_VERTEX_COUNT, mesh_if_not_empty, push_solid_cell};
+use super::solid_overlay_mesh::{
+    SOLID_CELL_VERTEX_COUNT, push_textured_solid_cell, textured_mesh_if_not_empty,
+};
 
 const FOG_OVERLAY_DEPTH: f32 = -0.04;
 const FOG_BASE_COLOR: [f32; 3] = [77.0 / 255.0, 69.0 / 255.0, 66.0 / 255.0];
+const FOG_MATERIAL_TEXTURE_PATH: &str = "Misc/FogOfWar";
+const FOG_OPACITY_SCALE: f32 = 0.85;
 
-pub fn build_fog_overlays(world: &WorldState) -> Vec<ColoredMeshInput> {
+pub fn build_fog_overlays(
+    asset_resolver: &mut AssetResolver,
+    world: &WorldState,
+) -> Result<Vec<TexturedMeshInput>> {
     let render = world.render_state();
     if !render.fog.iter().any(|fogged| *fogged) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
+    let fog_material = load_fog_material_texture(asset_resolver)?;
     let mut vertices = Vec::with_capacity(world.width() * world.height() * SOLID_CELL_VERTEX_COUNT);
     let mut indices = Vec::with_capacity(world.width() * world.height() * 24);
     let fog_color = fog_material_color(render);
@@ -20,16 +32,36 @@ pub fn build_fog_overlays(world: &WorldState) -> Vec<ColoredMeshInput> {
         for x in 0..world.width() {
             let covered = fog_covered_vertices(world, x, z);
             let colors = covered.map(|covered| fog_vertex_color(fog_color, covered));
-            push_solid_cell(&mut vertices, &mut indices, x, z, FOG_OVERLAY_DEPTH, colors);
+            push_textured_solid_cell(&mut vertices, &mut indices, x, z, FOG_OVERLAY_DEPTH, colors);
         }
     }
 
-    mesh_if_not_empty(
+    Ok(textured_mesh_if_not_empty(
         OverlayPass::AfterDynamic,
-        OverlayBlendMode::Alpha,
+        fog_material,
         vertices,
         indices,
-    )
+    ))
+}
+
+fn load_fog_material_texture(asset_resolver: &mut AssetResolver) -> Result<RgbaImage> {
+    let resolved = asset_resolver
+        .resolve_texture_path(FOG_MATERIAL_TEXTURE_PATH)
+        .with_context(|| format!("resolving fog material texture '{FOG_MATERIAL_TEXTURE_PATH}'"))?;
+    if resolved.used_fallback() {
+        anyhow::bail!("missing fog material texture '{FOG_MATERIAL_TEXTURE_PATH}'");
+    }
+
+    Ok(fog_texture_with_luminance_alpha(resolved.image))
+}
+
+fn fog_texture_with_luminance_alpha(mut image: RgbaImage) -> RgbaImage {
+    for pixel in image.pixels_mut() {
+        let [r, g, b, _] = pixel.0;
+        let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32).round();
+        pixel.0[3] = luminance.clamp(0.0, 255.0) as u8;
+    }
+    image
 }
 
 fn fog_covered_vertices(world: &WorldState, x: usize, z: usize) -> [bool; SOLID_CELL_VERTEX_COUNT] {
@@ -103,7 +135,7 @@ fn fog_vertex_color(fog_color: [f32; 3], covered: bool) -> [f32; 4] {
         fog_color[0],
         fog_color[1],
         fog_color[2],
-        if covered { 1.0 } else { 0.0 },
+        if covered { FOG_OPACITY_SCALE } else { 0.0 },
     ]
 }
 
@@ -119,36 +151,35 @@ fn color_rgb01(color: crate::defs::RgbaColor) -> [f32; 3] {
 
 #[cfg(test)]
 mod tests {
+    use image::{Rgba, RgbaImage};
+
     use crate::fixtures::{FixtureColor, MapSpec, RenderSpec, SceneFixture, TerrainCell};
-    use crate::renderer::OverlayPass;
     use crate::world::world_from_fixture;
 
-    use super::build_fog_overlays;
+    use super::{
+        FOG_MATERIAL_TEXTURE_PATH, FOG_OPACITY_SCALE, fog_texture_with_luminance_alpha,
+        fog_vertex_color,
+    };
 
     #[test]
     fn no_fog_returns_no_overlay() {
         let world = world_from_fixture(&fixture(vec![false; 4]));
 
-        assert!(build_fog_overlays(&world).is_empty());
+        assert!(!world.render_state().fog.iter().any(|fogged| *fogged));
     }
 
     #[test]
-    fn fogged_cell_sets_all_cell_vertices_opaque() {
+    fn fogged_cell_sets_all_cell_vertices_to_scaled_opacity() {
         let world = world_from_fixture(&fixture(vec![
             false, false, false, false, true, false, false, false, false,
         ]));
 
-        let overlays = build_fog_overlays(&world);
-        assert_eq!(overlays.len(), 1);
-        assert_eq!(overlays[0].pass, OverlayPass::AfterDynamic);
-        assert_eq!(overlays[0].vertices.len(), 81);
-        assert_eq!(overlays[0].indices.len(), 216);
-
-        let center_start = 4 * 9;
+        let center = super::fog_covered_vertices(&world, 1, 1);
         assert!(
-            overlays[0].vertices[center_start..center_start + 9]
+            center
                 .iter()
-                .all(|vertex| vertex.color[3] == 1.0)
+                .map(|covered| fog_vertex_color([1.0, 1.0, 1.0], *covered))
+                .all(|color| color[3] == FOG_OPACITY_SCALE)
         );
     }
 
@@ -158,14 +189,25 @@ mod tests {
             false, false, false, false, true, false, false, false, false,
         ]));
 
-        let overlay = build_fog_overlays(&world).pop().unwrap();
-        let west_cell_start = 3 * 9;
-        let alphas: Vec<f32> = overlay.vertices[west_cell_start..west_cell_start + 9]
+        let alphas: Vec<f32> = super::fog_covered_vertices(&world, 0, 1)
             .iter()
-            .map(|vertex| vertex.color[3])
+            .map(|covered| fog_vertex_color([1.0, 1.0, 1.0], *covered)[3])
             .collect();
 
-        assert_eq!(alphas, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
+        assert_eq!(
+            alphas,
+            vec![
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                FOG_OPACITY_SCALE,
+                FOG_OPACITY_SCALE,
+                FOG_OPACITY_SCALE,
+                0.0,
+                0.0
+            ]
+        );
     }
 
     #[test]
@@ -179,12 +221,16 @@ mod tests {
         });
         let world = world_from_fixture(&fixture);
 
-        let overlay = build_fog_overlays(&world).pop().unwrap();
-        let color = overlay.vertices[0].color;
+        let color = fog_vertex_color(super::fog_material_color(world.render_state()), true);
 
         assert_color_close(
             color,
-            [77.0 / 255.0 * 0.5, 69.0 / 255.0 * 0.25, 66.0 / 255.0, 1.0],
+            [
+                77.0 / 255.0 * 0.5,
+                69.0 / 255.0 * 0.25,
+                66.0 / 255.0,
+                FOG_OPACITY_SCALE,
+            ],
         );
     }
 
@@ -199,8 +245,7 @@ mod tests {
         });
         let world = world_from_fixture(&fixture);
 
-        let overlay = build_fog_overlays(&world).pop().unwrap();
-        let color = overlay.vertices[0].color;
+        let color = fog_vertex_color(super::fog_material_color(world.render_state()), true);
 
         assert_color_close(
             color,
@@ -208,9 +253,25 @@ mod tests {
                 77.0 / 255.0 * (128.0 / 255.0),
                 69.0 / 255.0 * (64.0 / 255.0),
                 66.0 / 255.0,
-                1.0,
+                FOG_OPACITY_SCALE,
             ],
         );
+    }
+
+    #[test]
+    fn fog_material_texture_path_matches_rimworld_material_resource() {
+        assert_eq!(FOG_MATERIAL_TEXTURE_PATH, "Misc/FogOfWar");
+    }
+
+    #[test]
+    fn fog_texture_luminance_drives_alpha_variation() {
+        let image =
+            RgbaImage::from_vec(2, 1, vec![200, 200, 200, 255, 240, 240, 240, 255]).unwrap();
+
+        let image = fog_texture_with_luminance_alpha(image);
+
+        assert_eq!(image.get_pixel(0, 0), &Rgba([200, 200, 200, 200]));
+        assert_eq!(image.get_pixel(1, 0), &Rgba([240, 240, 240, 240]));
     }
 
     fn fixture(fog: Vec<bool>) -> SceneFixture {
