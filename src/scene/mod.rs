@@ -66,6 +66,42 @@ pub enum MaterialKind {
     SolidColor,
 }
 
+impl MaterialKind {
+    pub fn sprite_bucket(self) -> SpriteBucket {
+        match self {
+            Self::Terrain => SpriteBucket::Terrain,
+            Self::TerrainWater | Self::WaterDepth => SpriteBucket::TerrainWater,
+            Self::Cutout | Self::SolidColor => SpriteBucket::Base,
+            Self::TerrainEdge
+            | Self::LightOverlay
+            | Self::EdgeShadow
+            | Self::SunShadow
+            | Self::FogOfWar
+            | Self::Snow
+            | Self::Transparent => SpriteBucket::NonSprite,
+        }
+    }
+
+    pub fn colored_overlay_family(self) -> bool {
+        matches!(
+            self,
+            Self::LightOverlay | Self::EdgeShadow | Self::SunShadow
+        )
+    }
+
+    pub fn textured_overlay_family(self) -> bool {
+        matches!(self, Self::FogOfWar | Self::Snow)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum SpriteBucket {
+    Base,
+    Terrain,
+    TerrainWater,
+    NonSprite,
+}
+
 pub const MATERIAL_KIND_INITIAL_SET: [MaterialKind; 12] = [
     MaterialKind::Cutout,
     MaterialKind::Terrain,

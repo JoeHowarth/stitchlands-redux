@@ -11,7 +11,7 @@ mod path;
 mod pawn;
 mod renderer;
 mod runtime;
-mod scene;
+pub mod scene;
 mod viewer;
 mod water_assets;
 mod world;

@@ -14,8 +14,8 @@ use super::textures::TextureRegistry;
 use super::{SunShadowUniform, WATER_DEPTH_FORMAT, validate_textured_mesh_input};
 use crate::scene::{
     ColoredMeshInput, EdgeFan, EdgeFanInstance, EdgeSpriteInput, EdgeVertex, FAN_TRI_INDICES,
-    LAYER_ORDERINGS, LAYER_SEQUENCE, Layer, MATERIAL_KIND_INITIAL_SET, MaterialKind,
-    OverlayBlendMode, SpriteParams, SpriteRecord, TextureHandle, TexturedMeshInput,
+    Layer, MaterialKind, OverlayBlendMode, SpriteBucket, SpriteParams, SpriteRecord, TextureHandle,
+    TexturedMeshInput,
 };
 
 pub(crate) struct SpriteBatch {
@@ -358,13 +358,6 @@ impl FrameRenderer {
         camera: &mut CameraState,
         screenshot_path: Option<&Path>,
     ) -> Result<bool> {
-        debug_assert_eq!(LAYER_SEQUENCE.len(), 7);
-        debug_assert_eq!(LAYER_ORDERINGS.len(), 4);
-        debug_assert_eq!(MATERIAL_KIND_INITIAL_SET.len(), 12);
-        for layer in LAYER_SEQUENCE {
-            let _ = layer.ordering();
-        }
-
         camera.set_frame_time(gpu, self.frame_epoch.elapsed().as_secs_f32());
 
         let surface_tex = gpu.surface.get_current_texture()?;
@@ -492,13 +485,15 @@ impl FrameRenderer {
         let mut terrain_instances = Vec::new();
         let mut static_instances = Vec::new();
         for sprite in self.static_instances.iter().cloned() {
-            if matches!(
-                sprite.material,
-                MaterialKind::Terrain | MaterialKind::TerrainWater | MaterialKind::WaterDepth
-            ) {
-                terrain_instances.push(sprite);
-            } else {
-                static_instances.push(sprite);
+            match sprite.material.sprite_bucket() {
+                SpriteBucket::Terrain | SpriteBucket::TerrainWater => {
+                    terrain_instances.push(sprite);
+                }
+                SpriteBucket::Base => static_instances.push(sprite),
+                SpriteBucket::NonSprite => {
+                    debug_assert!(false, "non-sprite material submitted as a sprite");
+                    static_instances.push(sprite);
+                }
             }
         }
 
@@ -600,10 +595,7 @@ impl FrameRenderer {
             .iter()
             .filter(|batch| batch.layer == layer)
         {
-            debug_assert!(matches!(
-                batch.material,
-                MaterialKind::LightOverlay | MaterialKind::EdgeShadow | MaterialKind::SunShadow
-            ));
+            debug_assert!(batch.material.colored_overlay_family());
             if current_blend_mode != Some(batch.blend_mode) {
                 pass.set_pipeline(match batch.blend_mode {
                     OverlayBlendMode::Alpha => &pipelines.overlay,
@@ -633,10 +625,7 @@ impl FrameRenderer {
             .iter()
             .filter(|batch| batch.layer == layer)
         {
-            debug_assert!(matches!(
-                batch.material,
-                MaterialKind::FogOfWar | MaterialKind::Snow
-            ));
+            debug_assert!(batch.material.textured_overlay_family());
             if !pipeline_set {
                 pass.set_pipeline(&pipelines.textured_overlay);
                 pipeline_set = true;
@@ -798,13 +787,13 @@ fn group_sprite_instances(
     let mut base_grouped: GroupedSpriteInstances = HashMap::new();
     let mut water_grouped: GroupedSpriteInstances = HashMap::new();
     for (index, sprite) in instances.iter().enumerate() {
-        let bucket = if matches!(
-            sprite.material,
-            MaterialKind::TerrainWater | MaterialKind::WaterDepth
-        ) {
-            &mut water_grouped
-        } else {
-            &mut base_grouped
+        let bucket = match sprite.material.sprite_bucket() {
+            SpriteBucket::TerrainWater => &mut water_grouped,
+            SpriteBucket::Base | SpriteBucket::Terrain => &mut base_grouped,
+            SpriteBucket::NonSprite => {
+                debug_assert!(false, "non-sprite material submitted as a sprite");
+                &mut base_grouped
+            }
         };
         bucket
             .entry(sprite.texture)

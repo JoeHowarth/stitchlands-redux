@@ -22,7 +22,24 @@ Landed in `bd60cb7`. Acceptance gates passed (zero fixture diff, fmt/clippy/test
 
 ## After Commit 2 — `src/scene/` extraction
 
-_(empty until landed)_
+First slice landed in `e820d9a`. It extracted the neutral `scene` records,
+renamed `TextureId` to `TextureHandle`, moved GPU byte-layout descriptors back
+to renderer-owned helpers, and replaced `is_water` / `is_terrain` routing with
+`MaterialKind`.
+
+- **Path-backed scene textures were intentionally deferred, but they block
+  Commit 3.** `SpriteInput`, `TexturedMeshInput`, and `EdgeSpriteInput` still
+  carry `RgbaImage`, and overlay builders still resolve material backing
+  textures directly. That was kept out of `e820d9a` to avoid mixing the
+  mechanical type extraction with `LaunchSpec` / `viewer` / `TextureRegistry`
+  plumbing. Do this before the shared `build_scene` work: introduce a single
+  path-backed scene texture form, move fog/snow material texture resolution to
+  renderer ingest, and add the path-cache test required by `plan-v3.md`.
+- **Graphic shadows need explicit material classification.** They currently
+  use `MaterialKind::SunShadow` only because Commit 2's material table did not
+  name graphic shadows separately. RimWorld treats graphic shadow data
+  separately from projected static sun shadows; revisit when adding material
+  subkinds or shadow pipeline parity.
 
 ## After Commit 3 — Single `build_scene`
 
