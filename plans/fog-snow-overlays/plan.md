@@ -80,6 +80,76 @@ plan before writing code.
 - Add paired fixtures or fixture variants when a visual claim depends on
   relative depth or neighboring cells.
 
+## Current Local State
+
+- `src/commands/fog_overlay.rs` ports the fog alpha topology directly onto a
+  colored overlay. This is acceptable for now because RimWorld fog is primarily
+  a material color plus the fog-of-war alpha mask.
+- `src/commands/snow_overlay.rs` ports the snow grid sampling and
+  `vertexWeights` alpha averaging, but it currently emits a flat white
+  `ColoredMeshInput`. That is useful for verifying `SnowGrid` semantics, but it
+  is not the final RimWorld-shaped render path because `MatBases.Snow` is a
+  material-backed overlay, not a pure white source-over quad.
+- `src/commands/solid_overlay_mesh.rs` is the shared 9-vertex solid-cell
+  topology. Keep using it for fog and snow unless direct decompile evidence
+  says otherwise.
+- `fixtures/v2/fog_snow_overlays.ron` is now a larger visual fixture with a
+  roofed room, pawns, fog banks, and a snow ramp. It is intended for visual
+  inspection of overlay composition, not as a proof that the snow material is
+  final.
+
+## Next Slice: Material-Backed Snow Overlay
+
+Goal: replace the flat white snow approximation with a renderer path shaped
+like RimWorld's `LayerSubMesh` plus `MatBases.Snow`, while preserving the
+already-ported `SectionLayer_Snow` mesh and alpha rules.
+
+Do not solve this by globally lowering snow alpha, changing fixture depths only,
+or tinting the existing colored overlay until it looks plausible. Those are
+visual patches; the desired move is toward RimWorld's material-backed section
+overlay architecture.
+
+Recommended implementation steps:
+
+1. Add a renderer input type for textured/material overlays. It should be
+   parallel to `ColoredMeshInput`, but carry per-vertex UVs and a texture or
+   material handle in addition to per-vertex color. Keep the public type generic
+   enough for later material-backed overlays, but name the snow builder around
+   `SectionLayer_Snow`.
+2. Add a textured overlay pipeline and WGSL shader. The shader should sample the
+   snow material texture, multiply by vertex color, and use vertex alpha from
+   `SectionLayer_Snow` depth averaging for source-over blending.
+3. Locate the texture backing `Resources/Materials/Misc/Snow`. RimWorld loads
+   the material through `Verse/MatLoader.cs:63-84`, so the ideal local adapter is
+   a small material-resource lookup that can resolve the material's main
+   texture. If that is too large for the first pass, use a narrowly named
+   constant such as `SNOW_MATERIAL_TEXTURE_PATH` only after verifying the
+   texture against the packed assets; do not bury it as an arbitrary visual
+   choice.
+4. Change `build_snow_overlays` to emit the textured/material overlay while
+   preserving the existing snow sampling order, out-of-bounds behavior,
+   `vertexWeights`, visibility threshold, and tests for per-vertex alpha.
+5. Keep pollution out of this slice unless a fixture/runtime pollution grid is
+   added. RimWorld stores pollution blend in the red vertex channel and assigns
+   `Other/SnowPolluted` through `_PollutedTex` at
+   `Verse/SectionLayer_Snow.cs:91-104`.
+6. Keep fog on the colored overlay path for now. A later material-backed fog
+   adapter may be useful, but snow is the visible mismatch.
+
+Acceptance for this next slice:
+
+- The snow overlay no longer renders as a flat white sheet at high depth; the
+  `fog_snow_overlays` render should show texture/detail from the snow material
+  while still following authored `snow_depth`.
+- Existing snow unit tests still prove RimWorld's depth sampling and
+  `vertexWeights` alpha values.
+- Add at least one renderer-facing assertion or small unit test for the new
+  textured/material overlay input so invalid UV/index data fails before GPU
+  submission.
+- `cargo run -- render-fixtures` should regenerate
+  `fixtures/renders/fog_snow_overlays.png` for inspection. The render output
+  remains ignored by git unless policy changes.
+
 ## Acceptance
 
 - A fixture fog grid renders visible fog only on authored fogged cells.
