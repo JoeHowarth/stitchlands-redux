@@ -33,6 +33,7 @@ pub struct Renderer {
     edge_pipeline: wgpu::RenderPipeline,
     overlay_pipeline: wgpu::RenderPipeline,
     overlay_multiply_pipeline: wgpu::RenderPipeline,
+    textured_overlay_pipeline: wgpu::RenderPipeline,
     sun_shadow_pipeline: wgpu::RenderPipeline,
     sun_shadow_layout: wgpu::BindGroupLayout,
     water_depth_pipeline: wgpu::RenderPipeline,
@@ -59,6 +60,7 @@ pub struct Renderer {
     dynamic_instances: Vec<SpriteInstance>,
     edge_fans: Vec<EdgeFanInstance>,
     overlay_batches: Vec<ColoredMeshBatch>,
+    textured_overlay_batches: Vec<TexturedMeshBatch>,
     next_texture_id: u32,
     terrain_sprite_batches: Vec<SpriteBatch>,
     static_sprite_batches: Vec<SpriteBatch>,
@@ -100,6 +102,14 @@ struct ColoredMeshBatch {
     pass: OverlayPass,
     blend_mode: OverlayBlendMode,
     sun_shadow: Option<SunShadowBatch>,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
+struct TexturedMeshBatch {
+    pass: OverlayPass,
+    bind_group: wgpu::BindGroup,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
@@ -540,6 +550,10 @@ impl Renderer {
             label: Some("colored-overlay-shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("colored_overlay.wgsl"))),
         });
+        let textured_overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("textured-overlay-shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("textured_overlay.wgsl"))),
+        });
         let overlay_multiply_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("colored-overlay-multiply-shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
@@ -567,6 +581,12 @@ impl Renderer {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("colored-overlay-pipeline-layout"),
                 bind_group_layouts: &[&camera_layout],
+                push_constant_ranges: &[],
+            });
+        let textured_overlay_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("textured-overlay-pipeline-layout"),
+                bind_group_layouts: &[&camera_layout, &texture_layout],
                 push_constant_ranges: &[],
             });
         let sun_shadow_pipeline_layout =
@@ -599,6 +619,31 @@ impl Renderer {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
+        let textured_overlay_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("textured-overlay-pipeline"),
+                layout: Some(&textured_overlay_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &textured_overlay_shader,
+                    entry_point: "vs_main",
+                    buffers: &[TexturedVertex::desc()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &textured_overlay_shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            });
         let overlay_multiply_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("colored-overlay-multiply-pipeline"),
@@ -914,6 +959,7 @@ impl Renderer {
             edge_pipeline,
             overlay_pipeline,
             overlay_multiply_pipeline,
+            textured_overlay_pipeline,
             sun_shadow_pipeline,
             sun_shadow_layout,
             water_depth_pipeline,
@@ -940,6 +986,7 @@ impl Renderer {
             dynamic_instances: Vec::new(),
             edge_fans: Vec::new(),
             overlay_batches: Vec::new(),
+            textured_overlay_batches: Vec::new(),
             next_texture_id: 1,
             terrain_sprite_batches: Vec::new(),
             static_sprite_batches: Vec::new(),
@@ -959,6 +1006,7 @@ impl Renderer {
         };
         out.set_static_sprites(sprites)?;
         out.set_static_overlays(Vec::new())?;
+        out.set_static_textured_overlays(Vec::new())?;
         out.set_dynamic_sprites(Vec::new())?;
         Ok(out)
     }
@@ -1170,6 +1218,54 @@ impl Renderer {
         Ok(())
     }
 
+    pub fn set_static_textured_overlays(&mut self, overlays: Vec<TexturedMeshInput>) -> Result<()> {
+        let mut batches = Vec::new();
+        for overlay in overlays {
+            if overlay.vertices.is_empty() || overlay.indices.is_empty() {
+                continue;
+            }
+            validate_textured_mesh_input(&overlay)?;
+            let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("textured-overlay-sampler"),
+                address_mode_u: wgpu::AddressMode::Repeat,
+                address_mode_v: wgpu::AddressMode::Repeat,
+                address_mode_w: wgpu::AddressMode::Repeat,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+            let bind_group = self.create_texture_bind_group_with_sampler(
+                &overlay.image,
+                "textured-overlay-texture",
+                &sampler,
+            );
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("textured-overlay-vertex-buffer"),
+                    contents: bytemuck::cast_slice(&overlay.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let index_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("textured-overlay-index-buffer"),
+                    contents: bytemuck::cast_slice(&overlay.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            batches.push(TexturedMeshBatch {
+                pass: overlay.pass,
+                bind_group,
+                vertex_buffer,
+                index_buffer,
+                index_count: overlay.indices.len() as u32,
+            });
+        }
+        self.textured_overlay_batches = batches;
+        Ok(())
+    }
+
     pub fn set_dynamic_sprites(&mut self, sprites: Vec<SpriteInput>) -> Result<()> {
         let instances = self.instances_from_sprites(sprites);
         self.set_dynamic_instances(instances)
@@ -1294,13 +1390,22 @@ impl Renderer {
     }
 
     fn create_texture_bind_group(&self, image: &RgbaImage) -> wgpu::BindGroup {
+        self.create_texture_bind_group_with_sampler(image, "sprite-texture", &self.sampler)
+    }
+
+    fn create_texture_bind_group_with_sampler(
+        &self,
+        image: &RgbaImage,
+        label: &str,
+        sampler: &wgpu::Sampler,
+    ) -> wgpu::BindGroup {
         let tex_size = wgpu::Extent3d {
             width: image.width(),
             height: image.height(),
             depth_or_array_layers: 1,
         };
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("sprite-texture"),
+            label: Some(label),
             size: tex_size,
             mip_level_count: 1,
             sample_count: 1,
@@ -1335,7 +1440,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    resource: wgpu::BindingResource::Sampler(sampler),
                 },
             ],
         })
@@ -1418,6 +1523,7 @@ impl Renderer {
 
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             self.draw_overlay_pass(&mut pass, OverlayPass::BeforeWorld);
+            self.draw_textured_overlay_pass(&mut pass, OverlayPass::BeforeWorld);
             self.draw_world_batches(
                 &mut pass,
                 &self.terrain_sprite_batches,
@@ -1425,6 +1531,7 @@ impl Renderer {
                 Some(&self.edge_sprite_batches),
             )?;
             self.draw_overlay_pass(&mut pass, OverlayPass::AfterTerrain);
+            self.draw_textured_overlay_pass(&mut pass, OverlayPass::AfterTerrain);
             self.draw_world_batches(
                 &mut pass,
                 &self.static_sprite_batches,
@@ -1432,6 +1539,7 @@ impl Renderer {
                 None,
             )?;
             self.draw_overlay_pass(&mut pass, OverlayPass::AfterStatic);
+            self.draw_textured_overlay_pass(&mut pass, OverlayPass::AfterStatic);
             self.draw_world_batches(
                 &mut pass,
                 &self.dynamic_sprite_batches,
@@ -1439,6 +1547,7 @@ impl Renderer {
                 None,
             )?;
             self.draw_overlay_pass(&mut pass, OverlayPass::AfterDynamic);
+            self.draw_textured_overlay_pass(&mut pass, OverlayPass::AfterDynamic);
         }
 
         let readback = if screenshot_path.is_some() {
@@ -1570,6 +1679,28 @@ impl Renderer {
             if let Some(sun_shadow) = &batch.sun_shadow {
                 pass.set_bind_group(1, &sun_shadow.bind_group, &[]);
             }
+            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+            pass.set_index_buffer(batch.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..batch.index_count, 0, 0..1);
+        }
+    }
+
+    fn draw_textured_overlay_pass<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        overlay_pass: OverlayPass,
+    ) {
+        let mut pipeline_set = false;
+        for batch in self
+            .textured_overlay_batches
+            .iter()
+            .filter(|batch| batch.pass == overlay_pass)
+        {
+            if !pipeline_set {
+                pass.set_pipeline(&self.textured_overlay_pipeline);
+                pipeline_set = true;
+            }
+            pass.set_bind_group(1, &batch.bind_group, &[]);
             pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
             pass.set_index_buffer(batch.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..batch.index_count, 0, 0..1);
@@ -1868,7 +1999,10 @@ mod tests {
 
     use image::{Rgba, RgbaImage};
 
-    use super::write_png_if_changed;
+    use super::{
+        OverlayPass, TexturedMeshInput, TexturedVertex, validate_textured_mesh_input,
+        write_png_if_changed,
+    };
 
     #[test]
     fn write_png_if_changed_skips_identical_existing_file() {
@@ -1892,6 +2026,46 @@ mod tests {
 
         std::fs::set_permissions(&path, original_permissions).unwrap();
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn textured_mesh_validation_rejects_out_of_bounds_indices() {
+        let overlay = TexturedMeshInput {
+            pass: OverlayPass::AfterTerrain,
+            image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])),
+            vertices: vec![TexturedVertex {
+                world_pos: [0.0, 0.0, 0.0],
+                uv: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            }],
+            indices: vec![1],
+        };
+
+        let err = validate_textured_mesh_input(&overlay).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("textured overlay index 1 is out of bounds")
+        );
+    }
+
+    #[test]
+    fn textured_mesh_validation_rejects_non_finite_uvs() {
+        let overlay = TexturedMeshInput {
+            pass: OverlayPass::AfterTerrain,
+            image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])),
+            vertices: vec![TexturedVertex {
+                world_pos: [0.0, 0.0, 0.0],
+                uv: [f32::NAN, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            }],
+            indices: vec![0],
+        };
+
+        let err = validate_textured_mesh_input(&overlay).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("textured overlay vertex 0 contains a non-finite value")
+        );
     }
 }
 
@@ -1927,6 +2101,36 @@ pub struct ColoredMeshInput {
     pub indices: Vec<u32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct TexturedMeshInput {
+    pub pass: OverlayPass,
+    pub image: RgbaImage,
+    pub vertices: Vec<TexturedVertex>,
+    pub indices: Vec<u32>,
+}
+
+fn validate_textured_mesh_input(overlay: &TexturedMeshInput) -> Result<()> {
+    let vertex_count = overlay.vertices.len() as u32;
+    if let Some(index) = overlay
+        .indices
+        .iter()
+        .copied()
+        .find(|index| *index >= vertex_count)
+    {
+        anyhow::bail!(
+            "textured overlay index {index} is out of bounds for {vertex_count} vertices"
+        );
+    }
+    if let Some((vertex_idx, _)) = overlay.vertices.iter().enumerate().find(|(_, vertex)| {
+        vertex.world_pos.iter().any(|value| !value.is_finite())
+            || vertex.uv.iter().any(|value| !value.is_finite())
+            || vertex.color.iter().any(|value| !value.is_finite())
+    }) {
+        anyhow::bail!("textured overlay vertex {vertex_idx} contains a non-finite value");
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SunShadowParams {
     pub shadow_vector: [f32; 2],
@@ -1955,6 +2159,40 @@ impl ColoredVertex {
                 wgpu::VertexAttribute {
                     offset: 12,
                     shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
+pub struct TexturedVertex {
+    pub world_pos: [f32; 3],
+    pub uv: [f32; 2],
+    pub color: [f32; 4],
+}
+
+impl TexturedVertex {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<TexturedVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 12,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: 20,
+                    shader_location: 2,
                     format: wgpu::VertexFormat::Float32x4,
                 },
             ],

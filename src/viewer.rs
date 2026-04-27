@@ -14,7 +14,7 @@ use winit::window::{Window, WindowId};
 
 use crate::renderer::{
     ColoredMeshInput, EdgeSpriteInput, Renderer, RendererOptions, SpriteInput, SpriteInstance,
-    SpriteParams, TextureId,
+    SpriteParams, TextureId, TexturedMeshInput,
 };
 use crate::runtime::v2::{
     InteractionOutcome, V2Runtime,
@@ -41,6 +41,7 @@ pub(crate) struct ViewerLaunch {
     pub(crate) dynamic_sprites: Vec<RenderSprite>,
     pub(crate) edge_sprites: Vec<EdgeSpriteInput>,
     pub(crate) static_overlays: Vec<ColoredMeshInput>,
+    pub(crate) static_textured_overlays: Vec<TexturedMeshInput>,
     pub(crate) noise_image: RgbaImage,
     pub(crate) water_assets: WaterAssets,
     pub(crate) screenshot_path: Option<std::path::PathBuf>,
@@ -75,6 +76,7 @@ struct App {
     dynamic_sprites: Vec<RenderSprite>,
     edge_sprites: Vec<EdgeSpriteInput>,
     static_overlays: Vec<ColoredMeshInput>,
+    static_textured_overlays: Vec<TexturedMeshInput>,
     noise_image: RgbaImage,
     water_assets: Option<WaterAssets>,
     screenshot_path: Option<std::path::PathBuf>,
@@ -103,6 +105,7 @@ impl App {
             dynamic_sprites: launch.dynamic_sprites,
             edge_sprites: launch.edge_sprites,
             static_overlays: launch.static_overlays,
+            static_textured_overlays: launch.static_textured_overlays,
             noise_image: launch.noise_image,
             water_assets: Some(launch.water_assets),
             screenshot_path: launch.screenshot_path,
@@ -131,6 +134,7 @@ impl App {
         self.dynamic_sprites = launch.dynamic_sprites;
         self.edge_sprites = launch.edge_sprites;
         self.static_overlays = launch.static_overlays;
+        self.static_textured_overlays = launch.static_textured_overlays;
         self.noise_image = launch.noise_image;
         self.water_assets = Some(launch.water_assets);
         self.screenshot_path = launch.screenshot_path;
@@ -227,6 +231,11 @@ impl App {
         renderer
             .set_static_overlays(static_overlays)
             .expect("set static overlays");
+        let static_textured_overlays: Vec<TexturedMeshInput> =
+            self.static_textured_overlays.drain(..).collect();
+        renderer
+            .set_static_textured_overlays(static_textured_overlays)
+            .expect("set static textured overlays");
         self.base_dynamic_inputs.clear();
         self.pawn_node_textures.clear();
         self.overlay_texture_id = Some(renderer.register_texture(self.overlay_image.clone()));

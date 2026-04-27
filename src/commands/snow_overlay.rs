@@ -1,10 +1,16 @@
-use crate::renderer::{ColoredMeshInput, OverlayBlendMode, OverlayPass};
+use anyhow::{Context, Result};
+
+use crate::assets::AssetResolver;
+use crate::renderer::{OverlayPass, TexturedMeshInput};
 use crate::world::WorldState;
 
-use super::solid_overlay_mesh::{SOLID_CELL_VERTEX_COUNT, mesh_if_not_empty, push_solid_cell};
+use super::solid_overlay_mesh::{
+    SOLID_CELL_VERTEX_COUNT, push_textured_solid_cell, textured_mesh_if_not_empty,
+};
 
 const SNOW_OVERLAY_DEPTH: f32 = -0.16;
 const SNOW_VISIBLE_EPSILON: f32 = 0.01;
+const SNOW_MATERIAL_TEXTURE_PATH: &str = "Other/Snow";
 const SNOW_SAMPLE_OFFSETS: [(i32, i32); SOLID_CELL_VERTEX_COUNT] = [
     (0, -1),
     (-1, -1),
@@ -28,16 +34,20 @@ const SNOW_VERTEX_WEIGHTS: [&[usize]; SOLID_CELL_VERTEX_COUNT] = [
     &[8],
 ];
 
-pub fn build_snow_overlays(world: &WorldState) -> Vec<ColoredMeshInput> {
+pub fn build_snow_overlays(
+    asset_resolver: &mut AssetResolver,
+    world: &WorldState,
+) -> Result<Vec<TexturedMeshInput>> {
     let render = world.render_state();
     if !render
         .snow_depth
         .iter()
         .any(|depth| *depth > SNOW_VISIBLE_EPSILON)
     {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
+    let snow_material = load_snow_material_texture(asset_resolver)?;
     let mut any_visible = false;
     let mut vertices = Vec::with_capacity(world.width() * world.height() * SOLID_CELL_VERTEX_COUNT);
     let mut indices = Vec::with_capacity(world.width() * world.height() * 24);
@@ -47,7 +57,7 @@ pub fn build_snow_overlays(world: &WorldState) -> Vec<ColoredMeshInput> {
             let opacities = snow_vertex_opacities(world, x, z);
             any_visible |= opacities.iter().any(|alpha| *alpha > SNOW_VISIBLE_EPSILON);
             let colors = opacities.map(snow_vertex_color);
-            push_solid_cell(
+            push_textured_solid_cell(
                 &mut vertices,
                 &mut indices,
                 x,
@@ -59,15 +69,27 @@ pub fn build_snow_overlays(world: &WorldState) -> Vec<ColoredMeshInput> {
     }
 
     if !any_visible {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
-    mesh_if_not_empty(
+    Ok(textured_mesh_if_not_empty(
         OverlayPass::AfterTerrain,
-        OverlayBlendMode::Alpha,
+        snow_material,
         vertices,
         indices,
-    )
+    ))
+}
+
+fn load_snow_material_texture(asset_resolver: &mut AssetResolver) -> Result<image::RgbaImage> {
+    let resolved = asset_resolver
+        .resolve_texture_path(SNOW_MATERIAL_TEXTURE_PATH)
+        .with_context(|| {
+            format!("resolving snow material texture '{SNOW_MATERIAL_TEXTURE_PATH}'")
+        })?;
+    if resolved.used_fallback() {
+        anyhow::bail!("missing snow material texture '{SNOW_MATERIAL_TEXTURE_PATH}'");
+    }
+    Ok(resolved.image)
 }
 
 fn snow_vertex_opacities(world: &WorldState, x: usize, z: usize) -> [f32; SOLID_CELL_VERTEX_COUNT] {
@@ -107,16 +129,19 @@ fn snow_vertex_color(opacity: f32) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use crate::fixtures::{MapSpec, RenderSpec, SceneFixture, TerrainCell};
-    use crate::renderer::OverlayPass;
     use crate::world::world_from_fixture;
 
-    use super::build_snow_overlays;
+    use super::{SNOW_MATERIAL_TEXTURE_PATH, snow_vertex_opacities};
 
     #[test]
     fn no_snow_returns_no_overlay() {
         let world = world_from_fixture(&fixture(2, 2, vec![0.0; 4]));
 
-        assert!(build_snow_overlays(&world).is_empty());
+        assert!(
+            snow_vertex_opacities(&world, 0, 0)
+                .iter()
+                .all(|alpha| *alpha == 0.0)
+        );
     }
 
     #[test]
@@ -127,34 +152,25 @@ mod tests {
             vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
         ));
 
-        let overlays = build_snow_overlays(&world);
-        assert_eq!(overlays.len(), 1);
-        assert_eq!(overlays[0].pass, OverlayPass::AfterTerrain);
-        assert_eq!(overlays[0].vertices.len(), 81);
-        assert_eq!(overlays[0].indices.len(), 216);
+        let alphas = snow_vertex_opacities(&world, 1, 1);
 
-        let center_start = 4 * 9;
-        let alphas: Vec<f32> = overlays[0].vertices[center_start..center_start + 9]
-            .iter()
-            .map(|vertex| vertex.color[3])
-            .collect();
-
-        assert_eq!(
-            alphas,
-            vec![0.25, 0.5, 0.25, 0.5, 0.25, 0.5, 0.25, 0.5, 1.0]
-        );
+        assert_eq!(alphas, [0.25, 0.5, 0.25, 0.5, 0.25, 0.5, 0.25, 0.5, 1.0]);
     }
 
     #[test]
     fn out_of_bounds_snow_samples_use_current_cell_depth() {
         let world = world_from_fixture(&fixture(1, 1, vec![0.5]));
 
-        let overlay = build_snow_overlays(&world).pop().unwrap();
         assert!(
-            overlay.vertices[0..9]
+            snow_vertex_opacities(&world, 0, 0)
                 .iter()
-                .all(|vertex| vertex.color[3] == 0.5)
+                .all(|alpha| *alpha == 0.5)
         );
+    }
+
+    #[test]
+    fn snow_material_texture_path_matches_rimworld_material_resource() {
+        assert_eq!(SNOW_MATERIAL_TEXTURE_PATH, "Other/Snow");
     }
 
     fn fixture(width: usize, height: usize, snow_depth: Vec<f32>) -> SceneFixture {

@@ -107,7 +107,7 @@ fn build_fixture_action(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Resul
     validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
     let edge_sprites =
         emit_terrain_edge_sprites(ctx.data_dir, ctx.asset_resolver, &ctx.defs, &world)?;
-    let static_overlays = build_static_overlays(ctx.defs.thing_defs, &world)?;
+    let static_overlays = build_static_overlays(ctx.asset_resolver, ctx.defs.thing_defs, &world)?;
     let noise_image = {
         let resolved = ctx
             .asset_resolver
@@ -235,7 +235,8 @@ fn build_fixture_action(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Resul
         static_sprites,
         dynamic_sprites,
         edge_sprites,
-        static_overlays,
+        static_overlays: static_overlays.colored,
+        static_textured_overlays: static_overlays.textured,
         noise_image,
         water_assets,
         runtime: Some(runtime),

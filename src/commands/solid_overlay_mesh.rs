@@ -1,4 +1,9 @@
-use crate::renderer::{ColoredMeshInput, ColoredVertex, OverlayBlendMode, OverlayPass};
+use image::RgbaImage;
+
+use crate::renderer::{
+    ColoredMeshInput, ColoredVertex, OverlayBlendMode, OverlayPass, TexturedMeshInput,
+    TexturedVertex,
+};
 
 pub const SOLID_CELL_VERTEX_COUNT: usize = 9;
 
@@ -36,6 +41,27 @@ pub fn push_solid_cell(
     indices.extend(SOLID_CELL_TRI_INDICES.iter().map(|index| base + index));
 }
 
+pub fn push_textured_solid_cell(
+    vertices: &mut Vec<TexturedVertex>,
+    indices: &mut Vec<u32>,
+    x: usize,
+    z: usize,
+    depth: f32,
+    colors: [[f32; 4]; SOLID_CELL_VERTEX_COUNT],
+) {
+    let base = vertices.len() as u32;
+    for (idx, (offset_x, offset_z)) in SOLID_CELL_VERTEX_OFFSETS.iter().enumerate() {
+        let world_x = x as f32 + offset_x;
+        let world_z = z as f32 + offset_z;
+        vertices.push(TexturedVertex {
+            world_pos: [world_x, world_z, depth],
+            uv: [world_x, world_z],
+            color: colors[idx],
+        });
+    }
+    indices.extend(SOLID_CELL_TRI_INDICES.iter().map(|index| base + index));
+}
+
 pub fn mesh_if_not_empty(
     pass: OverlayPass,
     blend_mode: OverlayBlendMode,
@@ -49,6 +75,23 @@ pub fn mesh_if_not_empty(
         pass,
         blend_mode,
         sun_shadow: None,
+        vertices,
+        indices,
+    }]
+}
+
+pub fn textured_mesh_if_not_empty(
+    pass: OverlayPass,
+    image: RgbaImage,
+    vertices: Vec<TexturedVertex>,
+    indices: Vec<u32>,
+) -> Vec<TexturedMeshInput> {
+    if vertices.is_empty() || indices.is_empty() {
+        return Vec::new();
+    }
+    vec![TexturedMeshInput {
+        pass,
+        image,
         vertices,
         indices,
     }]

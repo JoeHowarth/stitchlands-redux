@@ -86,19 +86,24 @@ plan before writing code.
   colored overlay. This is acceptable for now because RimWorld fog is primarily
   a material color plus the fog-of-war alpha mask.
 - `src/commands/snow_overlay.rs` ports the snow grid sampling and
-  `vertexWeights` alpha averaging, but it currently emits a flat white
-  `ColoredMeshInput`. That is useful for verifying `SnowGrid` semantics, but it
-  is not the final RimWorld-shaped render path because `MatBases.Snow` is a
-  material-backed overlay, not a pure white source-over quad.
+  `vertexWeights` alpha averaging, then emits a textured overlay using the
+  packed `Other/Snow` texture that backs `MatBases.Snow`. This keeps the
+  `SectionLayer_Snow` alpha semantics while moving the render path away from a
+  flat white colored mesh.
+- `src/renderer.rs` now has a parallel textured overlay input and pipeline.
+  The snow shader samples the material texture and multiplies by vertex color,
+  with alpha still coming from the RimWorld snow depth averaging rules.
 - `src/commands/solid_overlay_mesh.rs` is the shared 9-vertex solid-cell
   topology. Keep using it for fog and snow unless direct decompile evidence
   says otherwise.
 - `fixtures/v2/fog_snow_overlays.ron` is now a larger visual fixture with a
   roofed room, pawns, fog banks, and a snow ramp. It is intended for visual
-  inspection of overlay composition, not as a proof that the snow material is
-  final.
+  inspection of overlay composition and material-backed snow detail.
 
 ## Next Slice: Material-Backed Snow Overlay
+
+Implemented in the current local stack. Keep this section as the acceptance
+record until the plan is archived.
 
 Goal: replace the flat white snow approximation with a renderer path shaped
 like RimWorld's `LayerSubMesh` plus `MatBases.Snow`, while preserving the
