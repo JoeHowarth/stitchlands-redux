@@ -1,6 +1,5 @@
 use anyhow::Result;
 
-use crate::assets::AssetResolver;
 use crate::scene::{Layer, MaterialKind, SceneTexture, TexturedMeshInput};
 use crate::world::WorldState;
 
@@ -34,10 +33,7 @@ const SNOW_VERTEX_WEIGHTS: [&[usize]; SOLID_CELL_VERTEX_COUNT] = [
     &[8],
 ];
 
-pub fn build_snow_overlays(
-    _asset_resolver: &mut AssetResolver,
-    world: &WorldState,
-) -> Result<Vec<TexturedMeshInput>> {
+pub fn build_snow_overlays(world: &WorldState) -> Result<Vec<TexturedMeshInput>> {
     let render = world.render_state();
     if !render
         .snow_depth

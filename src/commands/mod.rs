@@ -15,8 +15,8 @@ mod fixture_cmd;
 mod fog_overlay;
 mod glow_grid;
 mod lighting_overlay;
-mod linking_sprites;
-mod overlays;
+pub(crate) mod linking_sprites;
+pub(crate) mod overlays;
 mod render_cmd;
 mod shadow_overlay;
 mod sky_shadow;
@@ -39,8 +39,8 @@ pub enum CommandAction {
 }
 
 pub struct LaunchSpec {
-    pub static_sprites: Vec<crate::viewer::RenderSprite>,
-    pub dynamic_sprites: Vec<crate::viewer::RenderSprite>,
+    pub static_sprites: Vec<crate::scene::SceneSprite>,
+    pub dynamic_sprites: Vec<crate::scene::SceneSprite>,
     pub edge_sprites: Vec<crate::scene::EdgeSpriteInput>,
     pub static_overlays: Vec<crate::scene::ColoredMeshInput>,
     pub static_textured_overlays: Vec<crate::scene::TexturedMeshInput>,

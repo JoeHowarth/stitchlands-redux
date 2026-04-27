@@ -1,10 +1,7 @@
-use std::path::Path;
-
 use anyhow::{Context, Result};
 use glam::{Vec2, Vec3};
 use log::warn;
 
-use crate::assets::AssetResolver;
 use crate::cell::Cell;
 use crate::defs::{GraphicKind, ThingDef};
 use crate::linking::{
@@ -12,9 +9,9 @@ use crate::linking::{
     perimeter_alphas_from_neighbor_matches,
 };
 use crate::scene::{
-    EdgeFan, EdgeSpriteInput, EdgeType, EdgeVertex, MaterialKind, SceneTexture, SpriteParams,
+    EdgeFan, EdgeSpriteInput, EdgeType, EdgeVertex, MaterialKind, SceneSprite, SceneTexture,
+    SpriteParams,
 };
-use crate::viewer::RenderSprite;
 use crate::world::{
     DEPTH_TERRAIN_EDGE, DEPTH_WALL, DEPTH_WALL_CORNER, ThingState, WorldState, cardinal_neighbors,
     diagonal_neighbors, neighbors_8,
@@ -38,13 +35,11 @@ const CORNER_FILL_SIZE: f32 = 0.5;
 const CORNER_FILL_Z_SHIFT: f32 = 0.09;
 
 pub fn emit_linked_thing_sprites(
-    _data_dir: &Path,
-    _asset_resolver: &mut AssetResolver,
     defs: &DefSet<'_>,
     thing: &ThingState,
     thing_def: &ThingDef,
     world: &WorldState,
-) -> Result<Vec<RenderSprite>> {
+) -> Result<Vec<SceneSprite>> {
     let atlas_path = linked_atlas_path(thing_def);
     let cell = Cell::new(thing.cell_x, thing.cell_z);
     let self_flags = thing_def.graphic_data.link_flags;
@@ -61,7 +56,7 @@ pub fn emit_linked_thing_sprites(
     ];
 
     let mut sprites = Vec::with_capacity(1);
-    sprites.push(RenderSprite {
+    sprites.push(SceneSprite {
         def_name: format!("Thing::{}", thing_def.def_name),
         texture: SceneTexture::single(atlas_path.as_str()),
         params: SpriteParams {
@@ -71,6 +66,7 @@ pub fn emit_linked_thing_sprites(
             uv_rect,
         },
         pawn_id: None,
+        node_id: None,
         material: MaterialKind::Cutout,
     });
 
@@ -101,7 +97,7 @@ pub fn emit_linked_thing_sprites(
                 continue;
             }
             let (ox, oz) = corner_offsets[i];
-            sprites.push(RenderSprite {
+            sprites.push(SceneSprite {
                 def_name: format!("Thing::{}", thing_def.def_name),
                 texture: SceneTexture::single(atlas_path.as_str()),
                 params: SpriteParams {
@@ -115,6 +111,7 @@ pub fn emit_linked_thing_sprites(
                     uv_rect: CORNER_FILL_UV_RECT,
                 },
                 pawn_id: None,
+                node_id: None,
                 material: MaterialKind::Cutout,
             });
         }
@@ -334,8 +331,6 @@ const FAN_LOCAL_XY: [(f32, f32); 9] = [
 /// For each cell, emit one fan per unique neighboring terrain whose
 /// `render_precedence >= self.render_precedence`.
 pub fn emit_terrain_edge_sprites(
-    _data_dir: &Path,
-    _asset_resolver: &mut AssetResolver,
     defs: &DefSet<'_>,
     world: &WorldState,
 ) -> Result<Vec<EdgeSpriteInput>> {

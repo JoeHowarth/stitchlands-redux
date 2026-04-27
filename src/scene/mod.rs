@@ -5,6 +5,8 @@ use glam::{Vec2, Vec3};
 
 use crate::defs::{GraphicKind, ThingDef};
 
+pub mod builder;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Layer {
     BeforeWorld,
@@ -176,6 +178,16 @@ pub struct SpriteInput {
 }
 
 #[derive(Debug, Clone)]
+pub struct SceneSprite {
+    pub def_name: String,
+    pub texture: SceneTexture,
+    pub params: SpriteParams,
+    pub pawn_id: Option<usize>,
+    pub node_id: Option<String>,
+    pub material: MaterialKind,
+}
+
+#[derive(Debug, Clone)]
 pub struct SpriteRecord {
     pub texture: TextureHandle,
     pub params: SpriteParams,
@@ -240,6 +252,15 @@ pub struct EdgeSpriteInput {
     pub texture: SceneTexture,
     pub fan: EdgeFan,
     pub material: MaterialKind,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Scene {
+    pub static_sprites: Vec<SceneSprite>,
+    pub dynamic_sprites: Vec<SceneSprite>,
+    pub edge_sprites: Vec<EdgeSpriteInput>,
+    pub static_overlays: Vec<ColoredMeshInput>,
+    pub static_textured_overlays: Vec<TexturedMeshInput>,
 }
 
 #[derive(Debug, Clone)]

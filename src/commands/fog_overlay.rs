@@ -1,6 +1,5 @@
 use anyhow::Result;
 
-use crate::assets::AssetResolver;
 use crate::scene::{Layer, MaterialKind, SceneTexture, SceneTextureTransform, TexturedMeshInput};
 use crate::world::{RenderState, WorldState};
 
@@ -13,10 +12,7 @@ const FOG_BASE_COLOR: [f32; 3] = [77.0 / 255.0, 69.0 / 255.0, 66.0 / 255.0];
 const FOG_MATERIAL_TEXTURE_PATH: &str = "Misc/FogOfWar";
 const FOG_OPACITY_SCALE: f32 = 0.85;
 
-pub fn build_fog_overlays(
-    _asset_resolver: &mut AssetResolver,
-    world: &WorldState,
-) -> Result<Vec<TexturedMeshInput>> {
+pub fn build_fog_overlays(world: &WorldState) -> Result<Vec<TexturedMeshInput>> {
     let render = world.render_state();
     if !render.fog.iter().any(|fogged| *fogged) {
         return Ok(Vec::new());

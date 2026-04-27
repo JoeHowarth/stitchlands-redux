@@ -1,30 +1,92 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 
 use crate::cell::Cell;
 use crate::interaction::{
     InteractionAction, InteractionState, on_cursor_moved, on_escape, on_left_click, on_right_click,
 };
-use crate::pawn::{PawnComposeConfig, PawnRenderInput, compose_pawn};
-use crate::scene::{FULL_UV_RECT, SpriteParams};
+use crate::pawn::PawnComposeConfig;
+#[cfg(test)]
+use crate::pawn::compose_pawn;
+pub use crate::scene::builder::PawnVisualProfile;
+use crate::scene::builder::{OwnedSceneDefs, build_scene};
+use crate::scene::{FULL_UV_RECT, MaterialKind, Scene, SpriteParams, SpriteRecord, TextureHandle};
 use crate::world::{
     WorldState, issue_move_intent, pawn_id_at_cell, pawn_is_idle, selected_pawn, tick_world,
 };
 
-pub mod render_bridge;
+/// Append interaction-driven overlay markers (selected-path trail, hover
+/// highlight, selection ring) on top of the per-frame dynamic sprite list.
+/// The base list comes from `V2Runtime::build_scene`; this is the seam where
+/// non-world UI markers attach.
+pub fn apply_interaction_overlays(
+    base_dynamic: &[SpriteRecord],
+    overlay_texture: TextureHandle,
+    frame: &V2FrameOutput,
+) -> Vec<SpriteRecord> {
+    let mut out = base_dynamic.to_vec();
 
-#[derive(Debug, Clone)]
-pub struct PawnVisualProfile {
-    pub pawn_id: usize,
-    pub base_render_input: PawnRenderInput,
+    for cell in &frame.selected_path_cells {
+        out.push(SpriteRecord {
+            texture: overlay_texture,
+            params: SpriteParams {
+                world_pos: Vec3::new(cell.x as f32 + 0.5, cell.z as f32 + 0.5, -0.23),
+                size: Vec2::new(0.36, 0.36),
+                tint: [0.35, 1.00, 0.45, 0.65],
+                uv_rect: FULL_UV_RECT,
+            },
+            material: MaterialKind::SolidColor,
+        });
+    }
+
+    if let Some(Cell { x, z }) = frame.hovered_cell {
+        out.push(SpriteRecord {
+            texture: overlay_texture,
+            params: SpriteParams {
+                world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.22),
+                size: Vec2::new(1.04, 1.04),
+                tint: [0.20, 0.90, 1.00, 0.28],
+                uv_rect: FULL_UV_RECT,
+            },
+            material: MaterialKind::SolidColor,
+        });
+    }
+
+    if let Some(selected_pos) = frame.selected_world_pos {
+        out.push(SpriteRecord {
+            texture: overlay_texture,
+            params: SpriteParams {
+                world_pos: Vec3::new(selected_pos.x, selected_pos.y, -0.21),
+                size: Vec2::new(1.16, 1.16),
+                tint: [1.00, 0.90, 0.20, 0.30],
+                uv_rect: FULL_UV_RECT,
+            },
+            material: MaterialKind::SolidColor,
+        });
+    } else if let Some(Cell { x, z }) = frame.selected_cell {
+        out.push(SpriteRecord {
+            texture: overlay_texture,
+            params: SpriteParams {
+                world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -0.21),
+                size: Vec2::new(1.10, 1.10),
+                tint: [1.00, 0.90, 0.20, 0.30],
+                uv_rect: FULL_UV_RECT,
+            },
+            material: MaterialKind::SolidColor,
+        });
+    }
+
+    out
 }
 
 #[derive(Debug, Clone)]
 pub struct V2RuntimeConfig {
     pub fixed_dt_seconds: f32,
     pub compose_config: PawnComposeConfig,
+    pub scene_defs: Option<OwnedSceneDefs>,
+    pub pawn_profiles: HashMap<usize, PawnVisualProfile>,
 }
 
 impl Default for V2RuntimeConfig {
@@ -32,20 +94,14 @@ impl Default for V2RuntimeConfig {
         Self {
             fixed_dt_seconds: 1.0 / 60.0,
             compose_config: PawnComposeConfig::default(),
+            scene_defs: None,
+            pawn_profiles: HashMap::new(),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct FramePawnNode {
-    pub pawn_id: usize,
-    pub node_id: String,
-    pub params: SpriteParams,
-}
-
-#[derive(Debug, Clone)]
 pub struct V2FrameOutput {
-    pub pawn_nodes: Vec<FramePawnNode>,
     pub hovered_cell: Option<Cell>,
     pub selected_cell: Option<Cell>,
     pub selected_world_pos: Option<Vec2>,
@@ -65,7 +121,8 @@ pub enum InteractionOutcome {
 pub struct V2Runtime {
     world: WorldState,
     interaction: InteractionState,
-    pawn_visual_profiles: HashMap<usize, PawnVisualProfile>,
+    pawn_profiles: HashMap<usize, PawnVisualProfile>,
+    scene_defs: Option<OwnedSceneDefs>,
     compose_config: PawnComposeConfig,
     fixed_dt_seconds: f32,
     step_accumulator: Duration,
@@ -75,18 +132,12 @@ pub struct V2Runtime {
 }
 
 impl V2Runtime {
-    pub fn new(
-        world: WorldState,
-        pawn_visual_profiles: Vec<PawnVisualProfile>,
-        config: V2RuntimeConfig,
-    ) -> Self {
+    pub fn new(world: WorldState, config: V2RuntimeConfig) -> Self {
         Self {
             world,
             interaction: InteractionState::default(),
-            pawn_visual_profiles: pawn_visual_profiles
-                .into_iter()
-                .map(|profile| (profile.pawn_id, profile))
-                .collect(),
+            pawn_profiles: config.pawn_profiles,
+            scene_defs: config.scene_defs,
             compose_config: config.compose_config,
             fixed_dt_seconds: config.fixed_dt_seconds.max(0.0001),
             step_accumulator: Duration::ZERO,
@@ -190,42 +241,43 @@ impl V2Runtime {
             .and_then(|id| pawn_is_idle(&self.world, id))
     }
 
-    pub fn frame_output(&self) -> V2FrameOutput {
-        let mut pawn_nodes = Vec::new();
-        let mut ordered_pawns = self.world.pawns().iter().collect::<Vec<_>>();
-        ordered_pawns.sort_by(|a, b| {
-            a.cell_z
-                .cmp(&b.cell_z)
-                .then(a.cell_x.cmp(&b.cell_x))
-                .then(a.id.cmp(&b.id))
-        });
-
-        for pawn in ordered_pawns {
-            let Some(profile) = self.pawn_visual_profiles.get(&pawn.id) else {
+    /// Count of pawn-node sprites this runtime would emit for the current
+    /// world snapshot, computed by running the same compose pipeline that
+    /// `build_scene` uses but without producing the rest of the scene.
+    /// Lets tests assert pawn rendering survives a code change without
+    /// needing an `AssetResolver` or a GPU.
+    #[cfg(test)]
+    pub fn pawn_node_count(&self) -> usize {
+        let mut total = 0;
+        for pawn in self.world.pawns() {
+            let Some(profile) = self.pawn_profiles.get(&pawn.id) else {
                 continue;
             };
             let mut render_input = profile.base_render_input.clone();
             render_input.facing = pawn.facing;
-            render_input.world_pos = glam::Vec3::new(pawn.world_pos.x, pawn.world_pos.y, 0.0);
-
+            render_input.world_pos = Vec3::new(pawn.world_pos.x, pawn.world_pos.y, 0.0);
             let composed = compose_pawn(&render_input, &self.compose_config);
-            for node in composed.nodes {
-                pawn_nodes.push(FramePawnNode {
-                    pawn_id: pawn.id,
-                    node_id: node.id,
-                    params: SpriteParams {
-                        world_pos: node.world_pos,
-                        size: node.size,
-                        tint: node.tint,
-                        uv_rect: FULL_UV_RECT,
-                    },
-                });
-            }
+            total += composed.nodes.len();
         }
+        total
+    }
 
+    pub fn build_scene(&self) -> anyhow::Result<Scene> {
+        let scene_defs = self
+            .scene_defs
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("runtime scene defs are not configured"))?;
+        build_scene(
+            &scene_defs.as_refs(),
+            &self.world,
+            &self.pawn_profiles,
+            &self.compose_config,
+        )
+    }
+
+    pub fn frame_output(&self) -> V2FrameOutput {
         let selected = selected_pawn(&self.world, self.interaction.selected_pawn_id);
         V2FrameOutput {
-            pawn_nodes,
             hovered_cell: self.interaction.hovered_cell,
             selected_cell: self.interaction.selected_cell,
             selected_world_pos: selected.map(|pawn| pawn.world_pos),
@@ -274,12 +326,18 @@ mod tests {
 
     fn runtime_for_fixture(fixture: SceneFixture) -> V2Runtime {
         let world = world_from_fixture(&fixture);
-        let profiles = world
+        let pawn_profiles = world
             .pawns()
             .iter()
-            .map(|pawn| profile_for(pawn.id, &pawn.label))
+            .map(|pawn| (pawn.id, profile_for(pawn.id, &pawn.label)))
             .collect();
-        V2Runtime::new(world, profiles, V2RuntimeConfig::default())
+        V2Runtime::new(
+            world,
+            V2RuntimeConfig {
+                pawn_profiles,
+                ..V2RuntimeConfig::default()
+            },
+        )
     }
 
     fn open_world_fixture() -> SceneFixture {
@@ -338,7 +396,10 @@ mod tests {
 
         let frame = runtime.frame_output();
         assert!(!frame.selected_path_cells.is_empty());
-        assert!(!frame.pawn_nodes.is_empty());
+        assert!(
+            runtime.pawn_node_count() > 0,
+            "scene assembly must produce at least one pawn-node sprite for a fixture with pawns"
+        );
     }
 
     #[test]

@@ -107,7 +107,7 @@ impl Renderer {
         }
 
         let gpu = GpuContext::new(window, options).await?;
-        let textures = TextureRegistry::new(&gpu);
+        let textures = TextureRegistry::new(&gpu.device);
         let mut camera = CameraState::new(&gpu, initial_camera_center, options.initial_zoom);
         let pipelines = PipelineSet::build(&gpu, &textures, &camera, &noise_image, &water_assets);
         let frame = FrameRenderer::new(&gpu, &pipelines, options.clear_color);
@@ -143,7 +143,8 @@ impl Renderer {
     }
 
     pub fn register_texture(&mut self, image: RgbaImage) -> TextureHandle {
-        self.textures.register_texture(&self.gpu, image)
+        self.textures
+            .register_texture(&self.gpu.device, &self.gpu.queue, image)
     }
 
     pub fn resolve_texture(
@@ -152,7 +153,7 @@ impl Renderer {
         texture: &SceneTexture,
     ) -> Result<TextureHandle> {
         self.textures
-            .resolve_texture(&self.gpu, asset_resolver, texture)
+            .resolve_texture(&self.gpu.device, &self.gpu.queue, asset_resolver, texture)
     }
 
     pub fn set_static_sprites(
@@ -232,7 +233,8 @@ impl Renderer {
             .map(|sprite| {
                 Ok(SpriteRecord {
                     texture: self.textures.resolve_texture(
-                        &self.gpu,
+                        &self.gpu.device,
+                        &self.gpu.queue,
                         asset_resolver,
                         &sprite.texture,
                     )?,

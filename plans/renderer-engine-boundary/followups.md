@@ -43,7 +43,92 @@ to renderer-owned helpers, and replaced `is_water` / `is_terrain` routing with
 
 ## After Commit 3 — Single `build_scene`
 
-_(empty until landed)_
+Initial slice landed in `ace4195` (single seam, both paths through
+`crate::scene::builder::build_scene`). That commit shipped two unprompted
+scope expansions — feature-flagged `SceneBuildOptions` and a
+`SceneBuildOutput` that bundled pawn profiles with the scene — which
+were unwound in `f312728` along with several smaller cleanups. Test gates
+were closed in `29f4107`.
+
+Items addressed in `f312728`:
+
+- Split `compute_pawn_profiles` from `build_scene`. Builder now has a
+  symmetric two-step contract: profiles once at scene init, then
+  `build_scene` per frame with the resulting `&HashMap`. Pawns missing
+  from the map are an error, not a silent fallback.
+- Drop dead parameters across the builder: `data_dir` from `build_scene`
+  and the linking helpers, `_asset_resolver` from `build_fog_overlays`
+  and `build_snow_overlays` (path-backed scene textures resolve at
+  renderer ingest, so the resolver isn't needed during scene assembly).
+- `FrameContext` removed entirely. Plan-v3 listed it as a forward seam,
+  but the parameter was unused (`_frame: &FrameContext`) and the
+  underscore prefix violates "dead parameters should be removed, not
+  silenced." Reintroduce when the first render-only frame field arrives
+  (sub-tick interpolation alpha, animation phase, override sun direction
+  for screenshots) — at which point the *constraint* still holds:
+  render-only state lives on the parameter, never on `WorldState`.
+- Skip launch-time `dynamic_sprites` for runtime-driven fixtures. The
+  first redraw rebuilds them from `runtime.build_scene` anyway, so the
+  fixture-time path no longer wastes work resolving textures for sprites
+  that get immediately overwritten.
+- `compose_dynamic_sprites` renamed to `apply_interaction_overlays` and
+  inlined into `runtime/v2/mod.rs`. Pawn composition moved into
+  `build_scene` in Commit 3, leaving the function as a 1-file vestige
+  with a misleading name.
+- `validate_layer_ownership` deleted. The function reverse-engineered
+  layer from `def_name` string prefixes; the source of truth (which Vec
+  the sprite sits in) made the check redundant theater.
+- Borrow gymnastics in viewer redraw replaced with a free
+  `populate_dynamic_records` function that takes split borrows.
+
+Items addressed in `29f4107`:
+
+- `TextureRegistry::upload_count` counter, incremented only when
+  `register_texture` allocates a new wgpu texture. Headless wgpu test
+  asserts upload count after two same-bytes uploads is 1 (and bumps to 2
+  for distinct bytes, proving the dedupe is content-keyed). Closes the
+  per-frame "no double upload" gate.
+- `V2Runtime::pawn_node_count()` runs the same compose pipeline as
+  `build_scene` without needing an `AssetResolver` or GPU. Restores the
+  coverage previously implicit in the deleted
+  `V2FrameOutput::pawn_nodes` assertion.
+- `TextureRegistry` methods now take `&wgpu::Device, &wgpu::Queue`
+  refs instead of `&GpuContext`. The registry never touched the surface;
+  threading only what it needs makes the headless test trivial and is a
+  small architectural improvement on its own.
+
+### Deferred from Commit 3
+
+These were intentionally not addressed in 3a/3b. Each has a trigger so
+the followup doesn't rot.
+
+- **`OwnedSceneDefs` Arc-share.** `V2Runtime` clones every def hashmap
+  at construction and re-borrows them as a `DefSet<'_>` per frame. One
+  clone, not per-tick — tolerable but wasteful. **Trigger:** `DefSet`
+  construction or runtime setup shows up in a startup profile, OR a
+  second `V2Runtime` instance per process becomes a feature. Real fix is
+  `Arc<HashMap<...>>` inside `DefSet` (or `Arc<DefSet<'static>>`) so the
+  runtime borrows cheaply instead of cloning.
+- **`SceneSprite` `String` → `Arc<str>` (or small enum).** `def_name:
+  String` and `node_id: Option<String>` allocate per sprite per frame.
+  At a few pawns it's noise; at realistic populations it's measurable.
+  **Trigger:** per-frame pawn-node count exceeds ~500 in a real fixture,
+  OR allocation shows up in a frame profile. Push `Arc<str>` upstream
+  through `PawnNode::id` at the same time so the saving is end-to-end.
+- **`FrameContext` reintroduction.** Currently absent. **Trigger:** the
+  first render-only frame field needed by `build_scene` — most likely
+  sub-tick interpolation alpha when smooth pawn movement between integer
+  cells lands. At that point reintroduce `FrameContext` with just the
+  field that has a reader, not the full plan-v3 shape. The constraint
+  *render-only state lives on the parameter, not WorldState* still
+  applies.
+
+### Open from earlier commits
+
+- **Graphic shadows still piggyback on `MaterialKind::SunShadow`.**
+  RimWorld treats graphic shadow data separately from projected static
+  sun shadows. **Trigger:** adding material subkinds, or any shadow
+  pipeline parity work that needs to distinguish the two.
 
 ## After Commit 4 — `RenderPassStep` + offscreen targets
 

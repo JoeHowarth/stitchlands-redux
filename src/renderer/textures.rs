@@ -4,7 +4,6 @@ use std::hash::{Hash, Hasher};
 use anyhow::{Context, Result};
 use image::RgbaImage;
 
-use super::gpu_context::GpuContext;
 use crate::assets::{AssetResolver, TextureQuery};
 use crate::scene::{SceneTexture, SceneTextureTransform, TextureHandle};
 
@@ -22,6 +21,7 @@ pub(crate) struct TextureRegistry {
     path_textures: TexturePathCache,
     texture_keys: HashMap<TextureKey, TextureHandle>,
     next_texture_id: u32,
+    upload_count: usize,
 }
 
 struct TextureEntry {
@@ -59,37 +59,35 @@ impl TexturePathCache {
 }
 
 impl TextureRegistry {
-    pub(crate) fn new(gpu: &GpuContext) -> Self {
-        let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sprite-sampler"),
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        let layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("texture-layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("texture-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
 
         Self {
             layout,
@@ -98,12 +96,14 @@ impl TextureRegistry {
             path_textures: TexturePathCache::default(),
             texture_keys: HashMap::new(),
             next_texture_id: 1,
+            upload_count: 0,
         }
     }
 
     pub(crate) fn resolve_texture(
         &mut self,
-        gpu: &GpuContext,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         resolver: &mut AssetResolver,
         texture: &SceneTexture,
     ) -> Result<TextureHandle> {
@@ -120,13 +120,22 @@ impl TextureRegistry {
                 anyhow::bail!("missing scene texture '{}'", texture.tex_path);
             }
 
-            Ok(self.register_texture(gpu, transform_image(resolved.image, texture.transform)))
+            Ok(self.register_texture(
+                device,
+                queue,
+                transform_image(resolved.image, texture.transform),
+            ))
         });
         self.path_textures = path_textures;
         result
     }
 
-    pub(crate) fn register_texture(&mut self, gpu: &GpuContext, image: RgbaImage) -> TextureHandle {
+    pub(crate) fn register_texture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        image: RgbaImage,
+    ) -> TextureHandle {
         let key = texture_key(&image);
         if let Some(id) = self.texture_keys.get(&key).copied() {
             return id;
@@ -134,11 +143,22 @@ impl TextureRegistry {
 
         let id = TextureHandle(self.next_texture_id);
         self.next_texture_id += 1;
-        let view = self.create_texture_view(gpu, &image, "sprite-texture");
-        let bind_group = self.create_bind_group_for_view(&gpu.device, &view, &self.sampler);
+        let view = create_texture_view(device, queue, &image, "sprite-texture");
+        let bind_group = self.create_bind_group_for_view(device, &view, &self.sampler);
         self.texture_keys.insert(key, id);
         self.textures.insert(id, TextureEntry { view, bind_group });
+        self.upload_count += 1;
         id
+    }
+
+    /// Number of GPU texture uploads performed since registry construction.
+    /// Increments only when `register_texture` allocates a new wgpu texture
+    /// (cache miss); same-bytes and same-`SceneTexture` calls do not bump it.
+    /// Used by the runtime contract test that asserts per-frame scene rebuilds
+    /// don't re-upload textures.
+    #[cfg(test)]
+    pub(crate) fn upload_count(&self) -> usize {
+        self.upload_count
     }
 
     pub(crate) fn bind_group(&self, texture: TextureHandle) -> Option<&wgpu::BindGroup> {
@@ -153,45 +173,6 @@ impl TextureRegistry {
     ) -> Option<wgpu::BindGroup> {
         let entry = self.textures.get(&texture)?;
         Some(self.create_bind_group_for_view(device, &entry.view, sampler))
-    }
-
-    fn create_texture_view(
-        &self,
-        gpu: &GpuContext,
-        image: &RgbaImage,
-        label: &str,
-    ) -> wgpu::TextureView {
-        let tex_size = wgpu::Extent3d {
-            width: image.width(),
-            height: image.height(),
-            depth_or_array_layers: 1,
-        };
-        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: tex_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        gpu.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            image.as_raw(),
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * image.width()),
-                rows_per_image: Some(image.height()),
-            },
-            tex_size,
-        );
-        texture.create_view(&wgpu::TextureViewDescriptor::default())
     }
 
     fn create_bind_group_for_view(
@@ -215,6 +196,45 @@ impl TextureRegistry {
             ],
         })
     }
+}
+
+fn create_texture_view(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    image: &RgbaImage,
+    label: &str,
+) -> wgpu::TextureView {
+    let tex_size = wgpu::Extent3d {
+        width: image.width(),
+        height: image.height(),
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: tex_size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::ImageCopyTexture {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        image.as_raw(),
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * image.width()),
+            rows_per_image: Some(image.height()),
+        },
+        tex_size,
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 fn texture_key(image: &RgbaImage) -> TextureKey {
@@ -243,9 +263,10 @@ fn transform_image(mut image: RgbaImage, transform: SceneTextureTransform) -> Rg
 
 #[cfg(test)]
 mod tests {
-    use super::{TextureHandle, TexturePathCache};
+    use super::{TextureHandle, TexturePathCache, TextureRegistry};
     use crate::defs::GraphicKind;
     use crate::scene::{SceneTexture, SceneTextureTransform};
+    use image::RgbaImage;
 
     #[test]
     fn path_cache_reuses_handle_for_same_scene_texture() {
@@ -288,5 +309,69 @@ mod tests {
 
         assert_eq!(cache.get(&single), Some(TextureHandle(1)));
         assert_eq!(cache.get(&random), Some(TextureHandle(2)));
+    }
+
+    /// Construct a real wgpu device without a window/surface, then assert that
+    /// uploading the same image bytes twice does not allocate a second GPU
+    /// texture. This is the runtime contract referenced by
+    /// `plans/renderer-engine-boundary/plan-v3.md` Commit 3 done-when:
+    /// per-frame scene rebuilds in the live runtime path must not re-upload
+    /// textures. The path-cache test above proves the SceneTexture-keyed
+    /// dedupe; this proves the byte-hash dedupe inside `register_texture`.
+    #[test]
+    fn register_texture_dedupes_by_image_bytes() {
+        let Some((device, queue)) = headless_device() else {
+            eprintln!("skipping: no wgpu adapter available for headless test");
+            return;
+        };
+
+        let mut registry = TextureRegistry::new(&device);
+        let image = synthetic_rgba(8, 8, [200, 50, 75, 255]);
+        let identical = synthetic_rgba(8, 8, [200, 50, 75, 255]);
+
+        assert_eq!(registry.upload_count(), 0);
+        let first = registry.register_texture(&device, &queue, image);
+        assert_eq!(registry.upload_count(), 1);
+
+        let second = registry.register_texture(&device, &queue, identical);
+        assert_eq!(first, second, "same bytes must reuse the same handle");
+        assert_eq!(
+            registry.upload_count(),
+            1,
+            "second upload of identical bytes must not allocate a new texture"
+        );
+
+        // Different bytes should bump the counter — proves the dedupe is
+        // content-keyed, not always-cached.
+        let other = synthetic_rgba(8, 8, [10, 220, 60, 255]);
+        let third = registry.register_texture(&device, &queue, other);
+        assert_ne!(first, third);
+        assert_eq!(registry.upload_count(), 2);
+    }
+
+    fn synthetic_rgba(width: u32, height: u32, pixel: [u8; 4]) -> RgbaImage {
+        let mut data = Vec::with_capacity((width * height) as usize * 4);
+        for _ in 0..(width * height) {
+            data.extend_from_slice(&pixel);
+        }
+        RgbaImage::from_raw(width, height, data).expect("synthetic image builds")
+    }
+
+    fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))?;
+        pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("headless-device-test"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+            },
+            None,
+        ))
+        .ok()
     }
 }

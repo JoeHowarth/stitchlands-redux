@@ -105,7 +105,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             index, selected.def_name, size.x, size.y, draw_offset.x, draw_offset.y, draw_offset.z
         );
 
-        render_sprites.push(crate::viewer::RenderSprite {
+        render_sprites.push(crate::scene::SceneSprite {
             def_name: selected.def_name.clone(),
             texture: SceneTexture::for_thing(selected, index),
             params: SpriteParams {
@@ -115,6 +115,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
                 uv_rect: FULL_UV_RECT,
             },
             pawn_id: None,
+            node_id: None,
             material: MaterialKind::Cutout,
         });
     }

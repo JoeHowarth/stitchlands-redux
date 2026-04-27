@@ -1,31 +1,17 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use glam::{Vec2, Vec3};
-use log::{info, warn};
+use glam::Vec2;
+use log::info;
 
 use crate::cell::Cell;
 use crate::cli::{FixtureCmd, RenderFixturesCmd, ViewArgs};
-use crate::defs::{ApparelDef, ApparelLayerDef, BodyTypeDefRender};
-use crate::linking::LinkDrawerType;
-use crate::pawn::{
-    ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData, PawnDrawFlags,
-    PawnFacing, PawnRenderInput, compose_pawn,
-};
-use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
-use crate::scene::{FULL_UV_RECT, MaterialKind, SceneTexture, SpriteParams};
-use crate::viewer::RenderSprite;
-use crate::water_assets::{WaterAssets, water_shader_params};
+use crate::runtime::v2::{V2Runtime, V2RuntimeConfig};
+use crate::scene::builder::{OwnedSceneDefs, build_scene, compute_pawn_profiles};
+use crate::water_assets::WaterAssets;
 use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
 
-use super::common::{
-    apparel_worn_data_for_facing, build_apparel_tex_path, build_full_apparel_layer_override,
-    map_explicit_skip_flags, resolve_directional_tex_path,
-};
-use super::linking_sprites::{emit_linked_thing_sprites, emit_terrain_edge_sprites};
-use super::overlays::build_static_overlays;
 use super::{CommandAction, DispatchContext, LaunchSpec};
 
 /// RimWorld ships this noise mask as the shared FadeRough / Water alpha
@@ -103,11 +89,8 @@ fn build_fixture_action(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Resul
         let _ = issue_move_intent(&mut world, first_pawn_id, start);
         tick_world(&mut world, 0.0);
     }
-    let sprites = build_world_sprites(ctx, &world)?;
-    validate_layer_ownership(&sprites.static_sprites, &sprites.dynamic_sprites)?;
-    let edge_sprites =
-        emit_terrain_edge_sprites(ctx.data_dir, ctx.asset_resolver, &ctx.defs, &world)?;
-    let static_overlays = build_static_overlays(ctx.asset_resolver, ctx.defs.thing_defs, &world)?;
+    let pawn_profiles = compute_pawn_profiles(&ctx.defs, ctx.asset_resolver, &world)?;
+    let scene = build_scene(&ctx.defs, &world, &pawn_profiles, &ctx.compose_config)?;
     let noise_image = {
         let resolved = ctx
             .asset_resolver
@@ -186,8 +169,8 @@ fn build_fixture_action(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Resul
         world.things().len(),
         blocking_things,
         world.pawns().len(),
-        sprites.static_sprites.len(),
-        sprites.dynamic_sprites.len(),
+        scene.static_sprites.len(),
+        scene.dynamic_sprites.len(),
         roofed_cells,
         thick_roof_cells,
         fogged_cells,
@@ -203,17 +186,24 @@ fn build_fixture_action(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Resul
         glow_color_total
     );
 
-    let SpriteLayers {
+    // Drop the launch-time dynamic_sprites: V2Runtime owns dynamic-sprite
+    // production from the first redraw onward, and the viewer's launch path
+    // would otherwise resolve textures for sprites that get immediately
+    // overwritten on the next frame.
+    let crate::scene::Scene {
         static_sprites,
-        dynamic_sprites,
-        pawn_visual_profiles,
-    } = sprites;
+        edge_sprites,
+        static_overlays,
+        static_textured_overlays,
+        ..
+    } = scene;
     let mut runtime = V2Runtime::new(
         world,
-        pawn_visual_profiles,
         V2RuntimeConfig {
             fixed_dt_seconds: cmd.fixed_dt.unwrap_or(1.0 / 60.0),
             compose_config: ctx.compose_config.clone(),
+            scene_defs: Some(OwnedSceneDefs::from_refs(&ctx.defs)),
+            pawn_profiles,
         },
     );
 
@@ -233,10 +223,10 @@ fn build_fixture_action(ctx: &mut DispatchContext<'_>, cmd: FixtureCmd) -> Resul
 
     Ok(CommandAction::Launch(Box::new(LaunchSpec {
         static_sprites,
-        dynamic_sprites,
+        dynamic_sprites: Vec::new(),
         edge_sprites,
-        static_overlays: static_overlays.colored,
-        static_textured_overlays: static_overlays.textured,
+        static_overlays,
+        static_textured_overlays,
         noise_image,
         water_assets,
         runtime: Some(runtime),
@@ -261,409 +251,4 @@ fn fixture_ron_files(dir: &Path) -> Result<Vec<PathBuf>> {
         }
     }
     Ok(out)
-}
-
-struct SpriteLayers {
-    static_sprites: Vec<RenderSprite>,
-    dynamic_sprites: Vec<RenderSprite>,
-    pawn_visual_profiles: Vec<PawnVisualProfile>,
-}
-
-fn build_world_sprites(
-    ctx: &mut DispatchContext<'_>,
-    world: &crate::world::WorldState,
-) -> Result<SpriteLayers> {
-    let mut static_sprites = Vec::new();
-    let mut dynamic_sprites = Vec::new();
-    let mut pawn_visual_profiles = Vec::new();
-
-    for z in 0..world.height() {
-        for x in 0..world.width() {
-            let tile = &world.terrain()[z * world.width() + x];
-            let terrain_def = ctx
-                .defs
-                .terrain_defs
-                .get(&tile.terrain_def)
-                .with_context(|| format!("missing TerrainDef '{}'", tile.terrain_def))?;
-            let water_params = water_shader_params(terrain_def);
-            let material = if water_params.is_some() {
-                MaterialKind::TerrainWater
-            } else {
-                MaterialKind::Terrain
-            };
-            let tint = water_params
-                .map(|p| p.to_tint())
-                .unwrap_or([1.0, 1.0, 1.0, 1.0]);
-            static_sprites.push(RenderSprite {
-                def_name: format!("Terrain::{}", terrain_def.def_name),
-                texture: SceneTexture::single(terrain_def.texture_path.as_str()),
-                params: SpriteParams {
-                    world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -1.0),
-                    size: Vec2::new(1.0, 1.0),
-                    tint,
-                    uv_rect: FULL_UV_RECT,
-                },
-                pawn_id: None,
-                material,
-            });
-        }
-    }
-
-    let mut things = world.things().to_vec();
-    things.sort_by(|a, b| {
-        a.cell_z
-            .cmp(&b.cell_z)
-            .then(a.cell_x.cmp(&b.cell_x))
-            .then(a.id.cmp(&b.id))
-    });
-    for thing in things {
-        let thing_def = ctx
-            .defs
-            .thing_defs
-            .get(&thing.def_name)
-            .with_context(|| format!("missing ThingDef '{}'", thing.def_name))?;
-        if thing_def.graphic_data.link_type != LinkDrawerType::None {
-            let linked = emit_linked_thing_sprites(
-                ctx.data_dir,
-                ctx.asset_resolver,
-                &ctx.defs,
-                &thing,
-                thing_def,
-                world,
-            )?;
-            static_sprites.extend(linked);
-            continue;
-        }
-        let draw_offset = thing_def.graphic_data.draw_offset;
-        static_sprites.push(RenderSprite {
-            def_name: format!("Thing::{}", thing_def.def_name),
-            texture: SceneTexture::for_thing(thing_def, thing.id),
-            params: SpriteParams {
-                world_pos: Vec3::new(
-                    thing.cell_x as f32 + 0.5 + draw_offset.x,
-                    thing.cell_z as f32 + 0.5 + draw_offset.z,
-                    -0.8 + draw_offset.y * 0.01,
-                ),
-                size: thing_def.graphic_data.draw_size.max(Vec2::splat(1.1)),
-                tint: [
-                    thing_def.graphic_data.color.r,
-                    thing_def.graphic_data.color.g,
-                    thing_def.graphic_data.color.b,
-                    thing_def.graphic_data.color.a,
-                ],
-                uv_rect: FULL_UV_RECT,
-            },
-            pawn_id: None,
-            material: MaterialKind::Cutout,
-        });
-    }
-
-    let mut pawns = world.pawns().to_vec();
-    pawns.sort_by(|a, b| {
-        a.cell_z
-            .cmp(&b.cell_z)
-            .then(a.cell_x.cmp(&b.cell_x))
-            .then(a.id.cmp(&b.id))
-    });
-    for pawn in pawns {
-        let body = choose_body_def(ctx.defs.body_type_defs, pawn.body.as_deref())?;
-        let head = choose_def(
-            ctx.defs.head_type_defs,
-            pawn.head.as_deref(),
-            "head",
-            |h| &h.def_name,
-            |_| true,
-        );
-        let hair = choose_def(
-            ctx.defs.hair_defs,
-            pawn.hair.as_deref(),
-            "hair",
-            |h| &h.def_name,
-            |_| true,
-        );
-        let beard = choose_def(
-            ctx.defs.beard_defs,
-            pawn.beard.as_deref(),
-            "beard",
-            |b| &b.def_name,
-            |b| !b.no_graphic && !b.tex_path.is_empty(),
-        );
-
-        let facing = pawn.facing;
-
-        // Resolve directional texture paths for body/head/hair/beard
-        let body_directional =
-            resolve_directional_tex_path(ctx.asset_resolver, &body.body_naked_graphic_path, facing);
-        let head_tex_path = head.map(|h| {
-            resolve_directional_tex_path(ctx.asset_resolver, &h.graphic_path, facing).path
-        });
-        let hair_tex_path = hair
-            .map(|h| resolve_directional_tex_path(ctx.asset_resolver, &h.tex_path, facing).path);
-        let beard_tex_path = beard
-            .map(|b| resolve_directional_tex_path(ctx.asset_resolver, &b.tex_path, facing).path);
-
-        let apparel_inputs = build_apparel_inputs(
-            ctx.defs.apparel_defs,
-            &pawn.apparel_defs,
-            Some(&body.def_name),
-            facing,
-            ctx.asset_resolver,
-        )?;
-
-        let render_input = PawnRenderInput {
-            label: pawn.label.clone(),
-            facing,
-            world_pos: Vec3::new(pawn.world_pos.x, pawn.world_pos.y, 0.0),
-            body_tex_path: body_directional.path,
-            head_tex_path,
-            stump_tex_path: None,
-            hair_tex_path,
-            beard_tex_path,
-            body_type: BodyTypeRenderData {
-                head_offset: body.head_offset,
-            },
-            head_type: head
-                .map(|v| HeadTypeRenderData {
-                    narrow: v.narrow,
-                    beard_offset: v.beard_offset,
-                    beard_offset_x_east: v.beard_offset_x_east,
-                })
-                .unwrap_or_default(),
-            beard_type: beard
-                .map(|v| BeardTypeRenderData {
-                    offset_narrow_east: v.offset_narrow_east,
-                    offset_narrow_south: v.offset_narrow_south,
-                })
-                .unwrap_or_default(),
-            tint: [1.0, 1.0, 1.0, 1.0],
-            apparel: apparel_inputs,
-            draw_flags: PawnDrawFlags::NONE,
-        };
-        pawn_visual_profiles.push(PawnVisualProfile {
-            pawn_id: pawn.id,
-            base_render_input: render_input.clone(),
-        });
-
-        let composed = compose_pawn(&render_input, &ctx.compose_config);
-        for node in composed.nodes {
-            dynamic_sprites.push(RenderSprite {
-                def_name: format!("PawnNode::{}", node.id),
-                texture: SceneTexture::single(node.tex_path.as_str()),
-                params: SpriteParams {
-                    world_pos: node.world_pos,
-                    size: node.size,
-                    tint: node.tint,
-                    uv_rect: FULL_UV_RECT,
-                },
-                pawn_id: Some(pawn.id),
-                material: MaterialKind::Cutout,
-            });
-        }
-    }
-
-    Ok(SpriteLayers {
-        static_sprites,
-        dynamic_sprites,
-        pawn_visual_profiles,
-    })
-}
-
-fn choose_body_def<'a>(
-    defs: &'a HashMap<String, BodyTypeDefRender>,
-    preferred: Option<&str>,
-) -> Result<&'a BodyTypeDefRender> {
-    if let Some(preferred) = preferred
-        && let Some(body) = defs.get(preferred)
-    {
-        return Ok(body);
-    }
-    defs.values()
-        .min_by(|a, b| a.def_name.cmp(&b.def_name))
-        .context("no BodyTypeDefRender entries are available")
-}
-
-fn choose_def<'a, T>(
-    defs: &'a HashMap<String, T>,
-    preferred: Option<&str>,
-    kind: &str,
-    key_of: impl Fn(&T) -> &str,
-    eligible: impl Fn(&T) -> bool,
-) -> Option<&'a T> {
-    if let Some(name) = preferred {
-        if let Some(value) = defs.get(name) {
-            return Some(value);
-        }
-        warn!("preferred {kind} def '{name}' not found, falling back");
-    }
-    defs.values()
-        .filter(|v| eligible(v))
-        .min_by_key(|v| key_of(v))
-}
-
-fn build_apparel_inputs(
-    defs: &HashMap<String, ApparelDef>,
-    apparel_defs: &[String],
-    body_def_name: Option<&str>,
-    facing: PawnFacing,
-    asset_resolver: &mut crate::assets::AssetResolver,
-) -> Result<Vec<ApparelRenderInput>> {
-    let mut out = Vec::new();
-    for def_name in apparel_defs {
-        let apparel = defs
-            .get(def_name)
-            .with_context(|| format!("missing ApparelDef '{}'", def_name))?;
-
-        // Match RimWorld's RenderAsPack(): only Belt items can render as pack,
-        // gated by renderUtilityAsPack. Non-Belt items never render as pack.
-        let render_as_pack = if matches!(apparel.layer, ApparelLayerDef::Belt) {
-            apparel.worn_graphic.render_utility_as_pack
-        } else {
-            false
-        };
-
-        // Resolve body-type suffixed texture path
-        let tex_path =
-            build_apparel_tex_path(apparel, body_def_name, render_as_pack, asset_resolver);
-
-        // Resolve directional texture
-        let directional = resolve_directional_tex_path(asset_resolver, &tex_path, facing);
-        let tex_path = directional.path;
-
-        // Worn data (offset/scale) with body overrides
-        let worn_data =
-            apparel_worn_data_for_facing(apparel, directional.data_facing, body_def_name);
-
-        let (explicit_skip_hair, explicit_skip_beard, has_explicit_skip_flags) =
-            map_explicit_skip_flags(&apparel.render_skip_flags);
-
-        let layer_override = build_full_apparel_layer_override(apparel, facing, render_as_pack);
-
-        let anchor_to_head = match apparel.parent_tag_def.as_deref() {
-            Some("ApparelHead") => Some(true),
-            Some("ApparelBody") => Some(false),
-            _ => None,
-        };
-
-        out.push(ApparelRenderInput {
-            label: apparel.def_name.clone(),
-            tex_path,
-            layer: apparel.layer.into(),
-            explicit_skip_hair,
-            explicit_skip_beard,
-            has_explicit_skip_flags,
-            covers_upper_head: apparel.covers_upper_head,
-            covers_full_head: apparel.covers_full_head,
-            anchor_to_head,
-            pack_offset: worn_data.offset,
-            pack_scale: worn_data.scale,
-            render_as_pack,
-            layer_override,
-            tint: [
-                apparel.color.r,
-                apparel.color.g,
-                apparel.color.b,
-                apparel.color.a,
-            ],
-        });
-    }
-    Ok(out)
-}
-
-fn validate_layer_ownership(
-    static_sprites: &[RenderSprite],
-    dynamic_sprites: &[RenderSprite],
-) -> Result<()> {
-    let static_invalid: Vec<&str> = static_sprites
-        .iter()
-        .filter_map(|sprite| {
-            let name = sprite.def_name.as_str();
-            if name.starts_with("Terrain::") || name.starts_with("Thing::") {
-                None
-            } else {
-                Some(name)
-            }
-        })
-        .collect();
-    if !static_invalid.is_empty() {
-        anyhow::bail!(
-            "v2 layer ownership violation: static layer contains non-terrain/non-thing sprites: {}",
-            static_invalid.join(", ")
-        );
-    }
-
-    let dynamic_invalid: Vec<&str> = dynamic_sprites
-        .iter()
-        .filter_map(|sprite| {
-            let name = sprite.def_name.as_str();
-            if name.starts_with("PawnNode::") {
-                None
-            } else {
-                Some(name)
-            }
-        })
-        .collect();
-    if !dynamic_invalid.is_empty() {
-        anyhow::bail!(
-            "v2 layer ownership violation: dynamic layer contains non-pawn sprites: {}",
-            dynamic_invalid.join(", ")
-        );
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{RenderSprite, validate_layer_ownership};
-    use crate::scene::{FULL_UV_RECT, MaterialKind, SceneTexture, SpriteParams};
-    use glam::{Vec2, Vec3};
-
-    fn sprite(def_name: &str) -> RenderSprite {
-        RenderSprite {
-            def_name: def_name.to_string(),
-            texture: SceneTexture::single("Test/Texture"),
-            params: SpriteParams {
-                world_pos: Vec3::new(0.5, 0.5, 0.0),
-                size: Vec2::ONE,
-                tint: [1.0, 1.0, 1.0, 1.0],
-                uv_rect: FULL_UV_RECT,
-            },
-            pawn_id: None,
-            material: if def_name.starts_with("Terrain::") {
-                MaterialKind::Terrain
-            } else {
-                MaterialKind::Cutout
-            },
-        }
-    }
-
-    #[test]
-    fn layer_ownership_accepts_expected_partition() {
-        let static_sprites = vec![sprite("Terrain::Soil"), sprite("Thing::ChunkSlagSteel")];
-        let dynamic_sprites = vec![
-            sprite("PawnNode::PawnA::Body"),
-            sprite("PawnNode::PawnA::Head"),
-        ];
-        assert!(validate_layer_ownership(&static_sprites, &dynamic_sprites).is_ok());
-    }
-
-    #[test]
-    fn layer_ownership_rejects_pawn_in_static() {
-        let static_sprites = vec![sprite("Terrain::Soil"), sprite("PawnNode::PawnA::Body")];
-        let dynamic_sprites = vec![sprite("PawnNode::PawnA::Head")];
-        let err =
-            validate_layer_ownership(&static_sprites, &dynamic_sprites).expect_err("should fail");
-        assert!(err.to_string().contains("static layer"));
-    }
-
-    #[test]
-    fn layer_ownership_rejects_thing_in_dynamic() {
-        let static_sprites = vec![sprite("Terrain::Soil")];
-        let dynamic_sprites = vec![
-            sprite("PawnNode::PawnA::Head"),
-            sprite("Thing::ChunkSlagSteel"),
-        ];
-        let err =
-            validate_layer_ownership(&static_sprites, &dynamic_sprites).expect_err("should fail");
-        assert!(err.to_string().contains("dynamic layer"));
-    }
 }

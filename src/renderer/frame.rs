@@ -211,7 +211,12 @@ impl FrameRenderer {
             .into_iter()
             .map(|sprite| {
                 Ok(EdgeFanInstance {
-                    texture: textures.resolve_texture(gpu, resolver, &sprite.texture)?,
+                    texture: textures.resolve_texture(
+                        &gpu.device,
+                        &gpu.queue,
+                        resolver,
+                        &sprite.texture,
+                    )?,
                     fan: sprite.fan,
                     material: sprite.material,
                 })
@@ -322,7 +327,8 @@ impl FrameRenderer {
                 mipmap_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             });
-            let texture = textures.resolve_texture(gpu, resolver, &overlay.texture)?;
+            let texture =
+                textures.resolve_texture(&gpu.device, &gpu.queue, resolver, &overlay.texture)?;
             let bind_group = textures
                 .create_bind_group_for_texture(&gpu.device, texture, &sampler)
                 .context("missing textured overlay texture bind group")?;

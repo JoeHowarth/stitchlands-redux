@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -14,27 +14,16 @@ use winit::window::{Window, WindowId};
 
 use crate::assets::AssetResolver;
 use crate::renderer::{Renderer, RendererOptions};
-use crate::runtime::v2::{
-    InteractionOutcome, V2Runtime,
-    render_bridge::{PawnNodeTextureCache, compose_dynamic_sprites},
-};
+use crate::runtime::v2::{InteractionOutcome, V2Runtime, apply_interaction_overlays};
 use crate::scene::{
-    ColoredMeshInput, EdgeSpriteInput, MaterialKind, SpriteInput, SpriteParams, SpriteRecord,
-    TextureHandle, TexturedMeshInput,
+    ColoredMeshInput, EdgeSpriteInput, SceneSprite, SpriteInput, SpriteRecord, TextureHandle,
+    TexturedMeshInput,
 };
 use crate::water_assets::WaterAssets;
 
-pub(crate) struct RenderSprite {
-    pub(crate) def_name: String,
-    pub(crate) texture: crate::scene::SceneTexture,
-    pub(crate) params: SpriteParams,
-    pub(crate) pawn_id: Option<usize>,
-    pub(crate) material: MaterialKind,
-}
-
 pub(crate) struct ViewerLaunch {
-    pub(crate) static_sprites: Vec<RenderSprite>,
-    pub(crate) dynamic_sprites: Vec<RenderSprite>,
+    pub(crate) static_sprites: Vec<SceneSprite>,
+    pub(crate) dynamic_sprites: Vec<SceneSprite>,
     pub(crate) edge_sprites: Vec<EdgeSpriteInput>,
     pub(crate) static_overlays: Vec<ColoredMeshInput>,
     pub(crate) static_textured_overlays: Vec<TexturedMeshInput>,
@@ -72,8 +61,8 @@ pub(crate) fn run_viewer_batch(
 
 struct App {
     asset_resolver: AssetResolver,
-    static_sprites: Vec<RenderSprite>,
-    dynamic_sprites: Vec<RenderSprite>,
+    static_sprites: Vec<SceneSprite>,
+    dynamic_sprites: Vec<SceneSprite>,
     edge_sprites: Vec<EdgeSpriteInput>,
     static_overlays: Vec<ColoredMeshInput>,
     static_textured_overlays: Vec<TexturedMeshInput>,
@@ -88,7 +77,6 @@ struct App {
     hidden_window: bool,
     fixed_step: bool,
     base_dynamic_inputs: Vec<SpriteRecord>,
-    pawn_node_textures: PawnNodeTextureCache,
     overlay_image: RgbaImage,
     overlay_texture_id: Option<TextureHandle>,
     map_bounds: Option<(usize, usize)>,
@@ -122,7 +110,6 @@ impl App {
             hidden_window: launch.hidden_window,
             fixed_step: launch.fixed_step,
             base_dynamic_inputs: Vec::new(),
-            pawn_node_textures: HashMap::new(),
             overlay_image: RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255])
                 .expect("1x1 overlay texture"),
             overlay_texture_id: None,
@@ -149,7 +136,6 @@ impl App {
         self.hidden_window = launch.hidden_window;
         self.fixed_step = launch.fixed_step;
         self.base_dynamic_inputs.clear();
-        self.pawn_node_textures.clear();
         self.overlay_image =
             RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).expect("1x1 overlay texture");
         self.overlay_texture_id = None;
@@ -164,12 +150,7 @@ impl App {
             && let Some(overlay_texture_id) = self.overlay_texture_id
         {
             let frame = runtime.frame_output();
-            compose_dynamic_sprites(
-                &self.base_dynamic_inputs,
-                &self.pawn_node_textures,
-                overlay_texture_id,
-                &frame,
-            )
+            apply_interaction_overlays(&self.base_dynamic_inputs, overlay_texture_id, &frame)
         } else {
             self.base_dynamic_inputs.clone()
         }
@@ -235,29 +216,14 @@ impl App {
         renderer
             .set_static_textured_overlays(&mut self.asset_resolver, static_textured_overlays)
             .expect("set static textured overlays");
-        self.base_dynamic_inputs.clear();
-        self.pawn_node_textures.clear();
         self.overlay_texture_id = Some(renderer.register_texture(self.overlay_image.clone()));
-        for sprite in self.dynamic_sprites.drain(..) {
-            let texture_id = renderer
-                .resolve_texture(&mut self.asset_resolver, &sprite.texture)
-                .expect("resolve dynamic sprite texture");
-            if let Some(pawn_id) = sprite.pawn_id
-                && let Some(node_id) = parse_pawn_node_id(&sprite.def_name)
-            {
-                self.pawn_node_textures
-                    .entry(pawn_id)
-                    .or_default()
-                    .insert(node_id.to_string(), texture_id);
-                continue;
-            }
-
-            self.base_dynamic_inputs.push(SpriteRecord {
-                texture: texture_id,
-                params: sprite.params,
-                material: sprite.material,
-            });
-        }
+        let dynamic_sprites: Vec<SceneSprite> = self.dynamic_sprites.drain(..).collect();
+        populate_dynamic_records(
+            &mut self.base_dynamic_inputs,
+            &mut renderer,
+            &mut self.asset_resolver,
+            dynamic_sprites,
+        );
         renderer
             .set_dynamic_instances(self.dynamic_with_overlays())
             .expect("set initial dynamic sprites");
@@ -315,6 +281,25 @@ impl ApplicationHandler for App {
                     } else {
                         runtime.run_fixed_step();
                     }
+                }
+                if let Some(runtime) = self.runtime.as_ref() {
+                    let scene = match runtime.build_scene() {
+                        Ok(scene) => scene,
+                        Err(err) => {
+                            eprintln!("runtime scene build error: {err:#}");
+                            event_loop.exit();
+                            return;
+                        }
+                    };
+                    let Some(renderer) = self.renderer.as_mut() else {
+                        return;
+                    };
+                    populate_dynamic_records(
+                        &mut self.base_dynamic_inputs,
+                        renderer,
+                        &mut self.asset_resolver,
+                        scene.dynamic_sprites,
+                    );
                 }
                 let frame_dynamic = self.dynamic_with_overlays();
                 let Some(renderer) = self.renderer.as_mut() else {
@@ -497,7 +482,30 @@ impl ApplicationHandler for App {
     }
 }
 
-fn infer_map_bounds(static_sprites: &[RenderSprite]) -> Option<(usize, usize)> {
+/// Resolve every scene sprite to a renderer-ready `SpriteRecord` and write the
+/// result into `out`, replacing any previous contents. Free function so callers
+/// can pass split borrows of fields on the parent `App` without fighting the
+/// borrow checker.
+fn populate_dynamic_records(
+    out: &mut Vec<SpriteRecord>,
+    renderer: &mut Renderer,
+    asset_resolver: &mut AssetResolver,
+    sprites: Vec<SceneSprite>,
+) {
+    out.clear();
+    for sprite in sprites {
+        let texture_id = renderer
+            .resolve_texture(asset_resolver, &sprite.texture)
+            .expect("resolve dynamic sprite texture");
+        out.push(SpriteRecord {
+            texture: texture_id,
+            params: sprite.params,
+            material: sprite.material,
+        });
+    }
+}
+
+fn infer_map_bounds(static_sprites: &[SceneSprite]) -> Option<(usize, usize)> {
     let mut max_x = -1i32;
     let mut max_z = -1i32;
     for sprite in static_sprites {
@@ -513,8 +521,4 @@ fn infer_map_bounds(static_sprites: &[RenderSprite]) -> Option<(usize, usize)> {
         return None;
     }
     Some(((max_x + 1) as usize, (max_z + 1) as usize))
-}
-
-fn parse_pawn_node_id(def_name: &str) -> Option<&str> {
-    def_name.strip_prefix("PawnNode::")
 }
