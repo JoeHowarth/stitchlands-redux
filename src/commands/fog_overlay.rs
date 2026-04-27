@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use image::RgbaImage;
 
 use crate::assets::AssetResolver;
-use crate::renderer::{OverlayPass, TexturedMeshInput};
+use crate::scene::{Layer, MaterialKind, TexturedMeshInput};
 use crate::world::{RenderState, WorldState};
 
 use super::solid_overlay_mesh::{
@@ -37,7 +37,8 @@ pub fn build_fog_overlays(
     }
 
     Ok(textured_mesh_if_not_empty(
-        OverlayPass::AfterDynamic,
+        Layer::AfterDynamic,
+        MaterialKind::FogOfWar,
         fog_material,
         vertices,
         indices,

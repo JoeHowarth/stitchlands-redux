@@ -41,9 +41,9 @@ pub enum CommandAction {
 pub struct LaunchSpec {
     pub static_sprites: Vec<crate::viewer::RenderSprite>,
     pub dynamic_sprites: Vec<crate::viewer::RenderSprite>,
-    pub edge_sprites: Vec<crate::renderer::EdgeSpriteInput>,
-    pub static_overlays: Vec<crate::renderer::ColoredMeshInput>,
-    pub static_textured_overlays: Vec<crate::renderer::TexturedMeshInput>,
+    pub edge_sprites: Vec<crate::scene::EdgeSpriteInput>,
+    pub static_overlays: Vec<crate::scene::ColoredMeshInput>,
+    pub static_textured_overlays: Vec<crate::scene::TexturedMeshInput>,
     pub noise_image: image::RgbaImage,
     pub water_assets: WaterAssets,
     pub runtime: Option<crate::runtime::v2::V2Runtime>,

@@ -7,7 +7,8 @@ use super::camera::CameraState;
 use super::frame::InstanceData;
 use super::gpu_context::GpuContext;
 use super::textures::TextureRegistry;
-use super::{ColoredVertex, EdgeVertex, Vertex, WATER_DEPTH_FORMAT};
+use super::{Vertex, WATER_DEPTH_FORMAT};
+use crate::scene::{ColoredVertex, EdgeVertex, TexturedVertex};
 
 fn multiply_overlay_blend_state() -> wgpu::BlendState {
     wgpu::BlendState {
@@ -21,6 +22,88 @@ fn multiply_overlay_blend_state() -> wgpu::BlendState {
             dst_factor: wgpu::BlendFactor::One,
             operation: wgpu::BlendOperation::Add,
         },
+    }
+}
+
+fn colored_vertex_desc() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<ColoredVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: 12,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+        ],
+    }
+}
+
+fn textured_vertex_desc() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<TexturedVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: 12,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+            wgpu::VertexAttribute {
+                offset: 20,
+                shader_location: 2,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+        ],
+    }
+}
+
+fn edge_vertex_desc() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<EdgeVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: 12,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+            wgpu::VertexAttribute {
+                offset: 20,
+                shader_location: 2,
+                format: wgpu::VertexFormat::Float32,
+            },
+            wgpu::VertexAttribute {
+                offset: 24,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+            wgpu::VertexAttribute {
+                offset: 32,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 48,
+                shader_location: 5,
+                format: wgpu::VertexFormat::Uint32,
+            },
+        ],
     }
 }
 
@@ -191,7 +274,7 @@ impl PipelineSet {
                 vertex: wgpu::VertexState {
                     module: &edge_shader,
                     entry_point: "vs_main",
-                    buffers: &[EdgeVertex::desc()],
+                    buffers: &[edge_vertex_desc()],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -284,7 +367,7 @@ impl PipelineSet {
                 vertex: wgpu::VertexState {
                     module: &overlay_shader,
                     entry_point: "vs_main",
-                    buffers: &[ColoredVertex::desc()],
+                    buffers: &[colored_vertex_desc()],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -310,7 +393,7 @@ impl PipelineSet {
                 vertex: wgpu::VertexState {
                     module: &textured_overlay_shader,
                     entry_point: "vs_main",
-                    buffers: &[super::TexturedVertex::desc()],
+                    buffers: &[textured_vertex_desc()],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -336,7 +419,7 @@ impl PipelineSet {
                 vertex: wgpu::VertexState {
                     module: &overlay_multiply_shader,
                     entry_point: "vs_main",
-                    buffers: &[ColoredVertex::desc()],
+                    buffers: &[colored_vertex_desc()],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -362,7 +445,7 @@ impl PipelineSet {
                 vertex: wgpu::VertexState {
                     module: &sun_shadow_shader,
                     entry_point: "vs_main",
-                    buffers: &[ColoredVertex::desc()],
+                    buffers: &[colored_vertex_desc()],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {

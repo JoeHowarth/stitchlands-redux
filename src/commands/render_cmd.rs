@@ -3,7 +3,7 @@ use glam::Vec3;
 use log::{info, warn};
 
 use crate::cli::RenderCmd;
-use crate::renderer::{FULL_UV_RECT, SpriteParams};
+use crate::scene::{FULL_UV_RECT, MaterialKind, SpriteParams};
 use crate::water_assets::WaterAssets;
 
 use super::{CommandAction, DispatchContext, LaunchSpec};
@@ -28,8 +28,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             },
             used_fallback: false,
             pawn_id: None,
-            is_water: false,
-            is_terrain: false,
+            material: MaterialKind::Cutout,
         };
 
         if let Some(screenshot) = &render.view.screenshot {
@@ -202,8 +201,7 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             },
             used_fallback,
             pawn_id: None,
-            is_water: false,
-            is_terrain: false,
+            material: MaterialKind::Cutout,
         });
     }
 

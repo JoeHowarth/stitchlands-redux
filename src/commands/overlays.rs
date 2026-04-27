@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::assets::AssetResolver;
 use crate::defs::ThingDef;
-use crate::renderer::{ColoredMeshInput, TexturedMeshInput};
+use crate::scene::{ColoredMeshInput, TexturedMeshInput};
 use crate::world::WorldState;
 
 use super::fog_overlay::build_fog_overlays;

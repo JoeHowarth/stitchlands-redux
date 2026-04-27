@@ -3,8 +3,8 @@ use std::hash::{Hash, Hasher};
 
 use image::RgbaImage;
 
-use super::TextureId;
 use super::gpu_context::GpuContext;
+use crate::scene::TextureHandle;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 struct TextureKey {
@@ -16,8 +16,8 @@ struct TextureKey {
 pub(crate) struct TextureRegistry {
     pub(crate) layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    bind_groups: HashMap<TextureId, wgpu::BindGroup>,
-    texture_keys: HashMap<TextureKey, TextureId>,
+    bind_groups: HashMap<TextureHandle, wgpu::BindGroup>,
+    texture_keys: HashMap<TextureKey, TextureHandle>,
     next_texture_id: u32,
 }
 
@@ -63,13 +63,13 @@ impl TextureRegistry {
         }
     }
 
-    pub(crate) fn register_texture(&mut self, gpu: &GpuContext, image: RgbaImage) -> TextureId {
+    pub(crate) fn register_texture(&mut self, gpu: &GpuContext, image: RgbaImage) -> TextureHandle {
         let key = texture_key(&image);
         if let Some(id) = self.texture_keys.get(&key).copied() {
             return id;
         }
 
-        let id = TextureId(self.next_texture_id);
+        let id = TextureHandle(self.next_texture_id);
         self.next_texture_id += 1;
         let bind_group = self.create_bind_group(gpu, &image);
         self.texture_keys.insert(key, id);
@@ -77,8 +77,8 @@ impl TextureRegistry {
         id
     }
 
-    pub(crate) fn bind_group(&self, texture_id: TextureId) -> Option<&wgpu::BindGroup> {
-        self.bind_groups.get(&texture_id)
+    pub(crate) fn bind_group(&self, texture: TextureHandle) -> Option<&wgpu::BindGroup> {
+        self.bind_groups.get(&texture)
     }
 
     pub(crate) fn create_bind_group(&self, gpu: &GpuContext, image: &RgbaImage) -> wgpu::BindGroup {

@@ -8,7 +8,7 @@ use crate::interaction::{
     InteractionAction, InteractionState, on_cursor_moved, on_escape, on_left_click, on_right_click,
 };
 use crate::pawn::{PawnComposeConfig, PawnRenderInput, compose_pawn};
-use crate::renderer::{FULL_UV_RECT, SpriteParams};
+use crate::scene::{FULL_UV_RECT, SpriteParams};
 use crate::world::{
     WorldState, issue_move_intent, pawn_id_at_cell, pawn_is_idle, selected_pawn, tick_world,
 };

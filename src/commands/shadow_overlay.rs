@@ -5,8 +5,8 @@ use glam::Vec2;
 
 use crate::cell::Cell;
 use crate::defs::{RgbaColor, ShadowData, ThingDef};
-use crate::renderer::{
-    ColoredMeshInput, ColoredVertex, OverlayBlendMode, OverlayPass, SunShadowParams,
+use crate::scene::{
+    ColoredMeshInput, ColoredVertex, Layer, MaterialKind, OverlayBlendMode, SunShadowParams,
 };
 use crate::world::{ThingState, WorldState};
 
@@ -76,6 +76,7 @@ fn build_sun_shadow_overlay(
     }
 
     Ok(mesh_if_not_empty(
+        MaterialKind::SunShadow,
         OverlayBlendMode::SunShadow,
         Some(SunShadowParams {
             shadow_vector: [sky_shadow.shadow_vector.x, sky_shadow.shadow_vector.y],
@@ -165,7 +166,13 @@ fn build_edge_shadow_overlay(
         }
     }
 
-    mesh_if_not_empty(OverlayBlendMode::Multiply, None, vertices, indices)
+    mesh_if_not_empty(
+        MaterialKind::EdgeShadow,
+        OverlayBlendMode::Multiply,
+        None,
+        vertices,
+        indices,
+    )
 }
 
 fn build_graphic_shadow_overlay(
@@ -200,6 +207,7 @@ fn build_graphic_shadow_overlay(
     }
 
     Ok(mesh_if_not_empty(
+        MaterialKind::SunShadow,
         OverlayBlendMode::Multiply,
         None,
         vertices,
@@ -431,6 +439,7 @@ fn push_gradient_quad(
 }
 
 fn mesh_if_not_empty(
+    material: MaterialKind,
     blend_mode: OverlayBlendMode,
     sun_shadow: Option<SunShadowParams>,
     vertices: Vec<ColoredVertex>,
@@ -440,7 +449,8 @@ fn mesh_if_not_empty(
         return None;
     }
     Some(ColoredMeshInput {
-        pass: OverlayPass::AfterTerrain,
+        layer: Layer::AfterTerrain,
+        material,
         blend_mode,
         sun_shadow,
         vertices,
@@ -527,7 +537,7 @@ mod tests {
         FixtureColor, FixtureVector2, MapSpec, RenderSpec, SceneFixture, TerrainCell, ThingSpawn,
     };
     use crate::linking::{LinkDrawerType, LinkFlags};
-    use crate::renderer::OverlayBlendMode;
+    use crate::scene::OverlayBlendMode;
     use crate::world::world_from_fixture;
 
     use super::{EDGE_SHADOW_IN_DIST, build_shadow_overlays};

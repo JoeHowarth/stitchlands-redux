@@ -3,11 +3,16 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use glam::{Vec2, Vec3};
+use glam::Vec2;
 use image::RgbaImage;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
+
+use crate::scene::{
+    ColoredMeshInput, EdgeSpriteInput, SpriteInput, SpriteRecord, SunShadowParams, TextureHandle,
+    TexturedMeshInput,
+};
 
 mod camera;
 mod frame;
@@ -36,9 +41,6 @@ pub struct Renderer {
     frame: FrameRenderer,
     camera: CameraState,
 }
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct TextureId(u32);
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -138,7 +140,7 @@ impl Renderer {
         self.camera.input(&self.gpu, event)
     }
 
-    pub fn register_texture(&mut self, image: RgbaImage) -> TextureId {
+    pub fn register_texture(&mut self, image: RgbaImage) -> TextureHandle {
         self.textures.register_texture(&self.gpu, image)
     }
 
@@ -167,11 +169,11 @@ impl Renderer {
         self.set_dynamic_instances(instances)
     }
 
-    pub fn set_static_instances(&mut self, sprites: Vec<SpriteInstance>) -> Result<()> {
+    pub fn set_static_instances(&mut self, sprites: Vec<SpriteRecord>) -> Result<()> {
         self.frame.set_static_instances(&self.gpu, sprites)
     }
 
-    pub fn set_dynamic_instances(&mut self, sprites: Vec<SpriteInstance>) -> Result<()> {
+    pub fn set_dynamic_instances(&mut self, sprites: Vec<SpriteRecord>) -> Result<()> {
         self.frame.set_dynamic_instances(&self.gpu, sprites)
     }
 
@@ -189,49 +191,16 @@ impl Renderer {
         self.gpu.handle_surface_error(err)
     }
 
-    fn instances_from_sprites(&mut self, sprites: Vec<SpriteInput>) -> Vec<SpriteInstance> {
+    fn instances_from_sprites(&mut self, sprites: Vec<SpriteInput>) -> Vec<SpriteRecord> {
         sprites
             .into_iter()
-            .map(|sprite| SpriteInstance {
-                texture_id: self.textures.register_texture(&self.gpu, sprite.image),
+            .map(|sprite| SpriteRecord {
+                texture: self.textures.register_texture(&self.gpu, sprite.image),
                 params: sprite.params,
-                is_water: sprite.is_water,
-                is_terrain: sprite.is_terrain,
+                material: sprite.material,
             })
             .collect()
     }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum OverlayPass {
-    BeforeWorld,
-    AfterTerrain,
-    AfterStatic,
-    AfterDynamic,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum OverlayBlendMode {
-    Alpha,
-    Multiply,
-    SunShadow,
-}
-
-#[derive(Debug, Clone)]
-pub struct ColoredMeshInput {
-    pub pass: OverlayPass,
-    pub blend_mode: OverlayBlendMode,
-    pub sun_shadow: Option<SunShadowParams>,
-    pub vertices: Vec<ColoredVertex>,
-    pub indices: Vec<u32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TexturedMeshInput {
-    pub pass: OverlayPass,
-    pub image: RgbaImage,
-    pub vertices: Vec<TexturedVertex>,
-    pub indices: Vec<u32>,
 }
 
 fn validate_textured_mesh_input(overlay: &TexturedMeshInput) -> Result<()> {
@@ -256,208 +225,12 @@ fn validate_textured_mesh_input(overlay: &TexturedMeshInput) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SunShadowParams {
-    pub shadow_vector: [f32; 2],
-    pub shadow_strength: f32,
-    pub material_color: [f32; 4],
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
-pub struct ColoredVertex {
-    pub world_pos: [f32; 3],
-    pub color: [f32; 4],
-}
-
-impl ColoredVertex {
-    pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<ColoredVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: 12,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
-pub struct TexturedVertex {
-    pub world_pos: [f32; 3],
-    pub uv: [f32; 2],
-    pub color: [f32; 4],
-}
-
-impl TexturedVertex {
-    pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<TexturedVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: 12,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                wgpu::VertexAttribute {
-                    offset: 20,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SpriteInput {
-    pub image: RgbaImage,
-    pub params: SpriteParams,
-    /// When true, this sprite is routed through the water depth+surface
-    /// pipelines instead of the base pipeline. Today set only for water
-    /// terrain cells; in the future any caller that wants a sprite to
-    /// participate in water rendering can set it.
-    pub is_water: bool,
-    pub is_terrain: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct SpriteInstance {
-    pub texture_id: TextureId,
-    pub params: SpriteParams,
-    pub is_water: bool,
-    pub is_terrain: bool,
-}
-
-/// UV sub-rect `(u_min, v_min, u_max, v_max)` covering the full texture.
-/// For atlas-indexed sprites, use `linking::atlas_uv_rect` or similar helpers.
-pub const FULL_UV_RECT: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
-
-/// Edge-overlay fan submitted to the edge pipeline. The image is the
-/// neighbor terrain's base texture; the fan's per-vertex `alpha` drives a
-/// radial fade from the matching perimeter verts toward the center.
-#[derive(Debug, Clone)]
-pub struct EdgeSpriteInput {
-    pub image: RgbaImage,
-    pub fan: EdgeFan,
-}
-
-#[derive(Debug, Clone)]
-pub struct EdgeFanInstance {
-    pub texture_id: TextureId,
-    pub fan: EdgeFan,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EdgeType {
-    FadeRough = 1,
-    Water = 2,
-}
-
-/// Triangle indices (per fan) for the 8 fan triangles (m, (m+1)%8, 8).
-pub const FAN_TRI_INDICES: [u32; 24] = [
-    0, 1, 8, 1, 2, 8, 2, 3, 8, 3, 4, 8, 4, 5, 8, 5, 6, 8, 6, 7, 8, 7, 0, 8,
-];
-
-/// 9-vertex fan for a single overlay contribution. Vertex order is
-/// (0 S mid, 1 SW, 2 W mid, 3 NW, 4 N mid, 5 NE, 6 E mid, 7 SE, 8 center).
-/// Center alpha is always 0.
-#[derive(Debug, Clone)]
-pub struct EdgeFan {
-    pub vertices: [EdgeVertex; 9],
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
-pub struct EdgeVertex {
-    pub world_pos: [f32; 3],
-    pub uv: [f32; 2],
-    pub alpha: f32,
-    pub noise_seed: [f32; 2],
-    pub tint: [f32; 4],
-    pub edge_type: u32,
-    pub _pad: u32,
-}
-
-impl EdgeVertex {
-    pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<EdgeVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                // world_pos
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                // uv
-                wgpu::VertexAttribute {
-                    offset: 12,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // alpha
-                wgpu::VertexAttribute {
-                    offset: 20,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                // noise_seed
-                wgpu::VertexAttribute {
-                    offset: 24,
-                    shader_location: 3,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // tint
-                wgpu::VertexAttribute {
-                    offset: 32,
-                    shader_location: 4,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                // edge_type
-                wgpu::VertexAttribute {
-                    offset: 48,
-                    shader_location: 5,
-                    format: wgpu::VertexFormat::Uint32,
-                },
-            ],
-        }
-    }
-}
-
 /// 1x1 gray fallback noise: `0.5 + r = 1.0` in the shader, so FadeRough/Water
 /// edges degrade to a flat fade without the visual variation of the real
 /// RoughAlphaAdd texture. Callers should always try to resolve the real asset
 /// first; this lets the renderer boot even if it's missing.
 pub fn fallback_noise_image() -> RgbaImage {
     RgbaImage::from_raw(1, 1, vec![128, 128, 128, 255]).expect("1x1 image builds")
-}
-
-#[derive(Debug, Clone)]
-pub struct SpriteParams {
-    pub world_pos: Vec3,
-    pub size: Vec2,
-    pub tint: [f32; 4],
-    /// Sub-rect of the texture to sample, as `(u_min, v_min, u_max, v_max)`.
-    /// Use `FULL_UV_RECT` for whole-texture sampling.
-    pub uv_rect: [f32; 4],
 }
 
 #[derive(Debug, Clone, Copy)]

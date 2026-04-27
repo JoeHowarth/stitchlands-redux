@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::assets::AssetResolver;
-use crate::renderer::{OverlayPass, TexturedMeshInput};
+use crate::scene::{Layer, MaterialKind, TexturedMeshInput};
 use crate::world::WorldState;
 
 use super::solid_overlay_mesh::{
@@ -73,7 +73,8 @@ pub fn build_snow_overlays(
     }
 
     Ok(textured_mesh_if_not_empty(
-        OverlayPass::AfterTerrain,
+        Layer::AfterTerrain,
+        MaterialKind::Snow,
         snow_material,
         vertices,
         indices,

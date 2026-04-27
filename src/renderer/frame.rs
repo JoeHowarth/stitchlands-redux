@@ -11,14 +11,15 @@ use super::gpu_context::GpuContext;
 use super::pipelines::PipelineSet;
 use super::screenshot;
 use super::textures::TextureRegistry;
-use super::{
+use super::{SunShadowUniform, WATER_DEPTH_FORMAT, validate_textured_mesh_input};
+use crate::scene::{
     ColoredMeshInput, EdgeFan, EdgeFanInstance, EdgeSpriteInput, EdgeVertex, FAN_TRI_INDICES,
-    OverlayBlendMode, OverlayPass, SpriteInstance, SpriteParams, SunShadowUniform, TextureId,
-    TexturedMeshInput, WATER_DEPTH_FORMAT, validate_textured_mesh_input,
+    LAYER_ORDERINGS, LAYER_SEQUENCE, Layer, MATERIAL_KIND_INITIAL_SET, MaterialKind,
+    OverlayBlendMode, SpriteParams, SpriteRecord, TextureHandle, TexturedMeshInput,
 };
 
 pub(crate) struct SpriteBatch {
-    texture_id: TextureId,
+    texture: TextureHandle,
     pub(crate) instance_buffer: wgpu::Buffer,
     pub(crate) instance_count: u32,
     pub(crate) min_z: f32,
@@ -27,7 +28,7 @@ pub(crate) struct SpriteBatch {
 }
 
 pub(crate) struct EdgeSpriteBatch {
-    texture_id: TextureId,
+    texture: TextureHandle,
     pub(crate) vertex_buffer: wgpu::Buffer,
     pub(crate) index_buffer: wgpu::Buffer,
     pub(crate) index_count: u32,
@@ -36,10 +37,11 @@ pub(crate) struct EdgeSpriteBatch {
     pub(crate) texture_hash: u64,
 }
 
-type GroupedSpriteInstances = HashMap<TextureId, Vec<(usize, InstanceData)>>;
+type GroupedSpriteInstances = HashMap<TextureHandle, Vec<(usize, InstanceData)>>;
 
 pub(crate) struct ColoredMeshBatch {
-    pass: OverlayPass,
+    layer: Layer,
+    material: MaterialKind,
     blend_mode: OverlayBlendMode,
     sun_shadow: Option<SunShadowBatch>,
     pub(crate) vertex_buffer: wgpu::Buffer,
@@ -48,7 +50,8 @@ pub(crate) struct ColoredMeshBatch {
 }
 
 pub(crate) struct TexturedMeshBatch {
-    pass: OverlayPass,
+    layer: Layer,
+    material: MaterialKind,
     pub(crate) bind_group: wgpu::BindGroup,
     pub(crate) vertex_buffer: wgpu::Buffer,
     pub(crate) index_buffer: wgpu::Buffer,
@@ -113,8 +116,8 @@ impl InstanceData {
 }
 
 pub(crate) struct FrameRenderer {
-    static_instances: Vec<SpriteInstance>,
-    dynamic_instances: Vec<SpriteInstance>,
+    static_instances: Vec<SpriteRecord>,
+    dynamic_instances: Vec<SpriteRecord>,
     edge_fans: Vec<EdgeFanInstance>,
     overlay_batches: Vec<ColoredMeshBatch>,
     textured_overlay_batches: Vec<TexturedMeshBatch>,
@@ -181,7 +184,7 @@ impl FrameRenderer {
     pub(crate) fn set_static_instances(
         &mut self,
         gpu: &GpuContext,
-        sprites: Vec<SpriteInstance>,
+        sprites: Vec<SpriteRecord>,
     ) -> Result<()> {
         self.static_instances = sprites;
         self.rebuild_sprite_batches(gpu)
@@ -190,7 +193,7 @@ impl FrameRenderer {
     pub(crate) fn set_dynamic_instances(
         &mut self,
         gpu: &GpuContext,
-        sprites: Vec<SpriteInstance>,
+        sprites: Vec<SpriteRecord>,
     ) -> Result<()> {
         self.dynamic_instances = sprites;
         self.rebuild_sprite_batches(gpu)
@@ -205,8 +208,9 @@ impl FrameRenderer {
         let fans: Vec<EdgeFanInstance> = sprites
             .into_iter()
             .map(|sprite| EdgeFanInstance {
-                texture_id: textures.register_texture(gpu, sprite.image),
+                texture: textures.register_texture(gpu, sprite.image),
                 fan: sprite.fan,
+                material: sprite.material,
             })
             .collect();
         self.edge_fans = fans;
@@ -278,7 +282,8 @@ impl FrameRenderer {
                 SunShadowBatch { bind_group }
             });
             batches.push(ColoredMeshBatch {
-                pass: overlay.pass,
+                layer: overlay.layer,
+                material: overlay.material,
                 blend_mode: overlay.blend_mode,
                 sun_shadow,
                 vertex_buffer,
@@ -333,7 +338,8 @@ impl FrameRenderer {
                     usage: wgpu::BufferUsages::INDEX,
                 });
             batches.push(TexturedMeshBatch {
-                pass: overlay.pass,
+                layer: overlay.layer,
+                material: overlay.material,
                 bind_group,
                 vertex_buffer,
                 index_buffer,
@@ -352,6 +358,13 @@ impl FrameRenderer {
         camera: &mut CameraState,
         screenshot_path: Option<&Path>,
     ) -> Result<bool> {
+        debug_assert_eq!(LAYER_SEQUENCE.len(), 7);
+        debug_assert_eq!(LAYER_ORDERINGS.len(), 4);
+        debug_assert_eq!(MATERIAL_KIND_INITIAL_SET.len(), 12);
+        for layer in LAYER_SEQUENCE {
+            let _ = layer.ordering();
+        }
+
         camera.set_frame_time(gpu, self.frame_epoch.elapsed().as_secs_f32());
 
         let surface_tex = gpu.surface.get_current_texture()?;
@@ -423,8 +436,8 @@ impl FrameRenderer {
             });
 
             pass.set_bind_group(0, &camera.bind_group, &[]);
-            self.draw_overlay_pass(&mut pass, pipelines, OverlayPass::BeforeWorld);
-            self.draw_textured_overlay_pass(&mut pass, pipelines, OverlayPass::BeforeWorld);
+            self.draw_overlay_layer(&mut pass, pipelines, Layer::BeforeWorld);
+            self.draw_textured_overlay_layer(&mut pass, pipelines, Layer::BeforeWorld);
             self.draw_world_batches(
                 &mut pass,
                 textures,
@@ -433,8 +446,8 @@ impl FrameRenderer {
                 &self.terrain_water_sprite_batches,
                 Some(&self.edge_sprite_batches),
             )?;
-            self.draw_overlay_pass(&mut pass, pipelines, OverlayPass::AfterTerrain);
-            self.draw_textured_overlay_pass(&mut pass, pipelines, OverlayPass::AfterTerrain);
+            self.draw_overlay_layer(&mut pass, pipelines, Layer::AfterTerrain);
+            self.draw_textured_overlay_layer(&mut pass, pipelines, Layer::AfterTerrain);
             self.draw_world_batches(
                 &mut pass,
                 textures,
@@ -443,8 +456,8 @@ impl FrameRenderer {
                 &self.static_water_sprite_batches,
                 None,
             )?;
-            self.draw_overlay_pass(&mut pass, pipelines, OverlayPass::AfterStatic);
-            self.draw_textured_overlay_pass(&mut pass, pipelines, OverlayPass::AfterStatic);
+            self.draw_overlay_layer(&mut pass, pipelines, Layer::AfterStatic);
+            self.draw_textured_overlay_layer(&mut pass, pipelines, Layer::AfterStatic);
             self.draw_world_batches(
                 &mut pass,
                 textures,
@@ -453,8 +466,8 @@ impl FrameRenderer {
                 &self.dynamic_water_sprite_batches,
                 None,
             )?;
-            self.draw_overlay_pass(&mut pass, pipelines, OverlayPass::AfterDynamic);
-            self.draw_textured_overlay_pass(&mut pass, pipelines, OverlayPass::AfterDynamic);
+            self.draw_overlay_layer(&mut pass, pipelines, Layer::AfterDynamic);
+            self.draw_textured_overlay_layer(&mut pass, pipelines, Layer::AfterDynamic);
         }
 
         let readback = if screenshot_path.is_some() {
@@ -479,7 +492,10 @@ impl FrameRenderer {
         let mut terrain_instances = Vec::new();
         let mut static_instances = Vec::new();
         for sprite in self.static_instances.iter().cloned() {
-            if sprite.is_terrain {
+            if matches!(
+                sprite.material,
+                MaterialKind::Terrain | MaterialKind::TerrainWater | MaterialKind::WaterDepth
+            ) {
                 terrain_instances.push(sprite);
             } else {
                 static_instances.push(sprite);
@@ -506,10 +522,11 @@ impl FrameRenderer {
     }
 
     fn rebuild_edge_batches(&mut self, gpu: &GpuContext) -> Result<()> {
-        let mut grouped: HashMap<TextureId, Vec<(usize, EdgeFan)>> = HashMap::new();
+        let mut grouped: HashMap<TextureHandle, Vec<(usize, EdgeFan)>> = HashMap::new();
         for (index, fan) in self.edge_fans.iter().enumerate() {
+            debug_assert_eq!(fan.material, MaterialKind::TerrainEdge);
             grouped
-                .entry(fan.texture_id)
+                .entry(fan.texture)
                 .or_default()
                 .push((index, fan.fan.clone()));
         }
@@ -551,7 +568,7 @@ impl FrameRenderer {
                     usage: wgpu::BufferUsages::INDEX,
                 });
             edge_batches.push(EdgeSpriteBatch {
-                texture_id,
+                texture: texture_id,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -571,18 +588,22 @@ impl FrameRenderer {
         Ok(())
     }
 
-    fn draw_overlay_pass<'a>(
+    fn draw_overlay_layer<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         pipelines: &'a PipelineSet,
-        overlay_pass: OverlayPass,
+        layer: Layer,
     ) {
         let mut current_blend_mode = None;
         for batch in self
             .overlay_batches
             .iter()
-            .filter(|batch| batch.pass == overlay_pass)
+            .filter(|batch| batch.layer == layer)
         {
+            debug_assert!(matches!(
+                batch.material,
+                MaterialKind::LightOverlay | MaterialKind::EdgeShadow | MaterialKind::SunShadow
+            ));
             if current_blend_mode != Some(batch.blend_mode) {
                 pass.set_pipeline(match batch.blend_mode {
                     OverlayBlendMode::Alpha => &pipelines.overlay,
@@ -600,18 +621,22 @@ impl FrameRenderer {
         }
     }
 
-    fn draw_textured_overlay_pass<'a>(
+    fn draw_textured_overlay_layer<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         pipelines: &'a PipelineSet,
-        overlay_pass: OverlayPass,
+        layer: Layer,
     ) {
         let mut pipeline_set = false;
         for batch in self
             .textured_overlay_batches
             .iter()
-            .filter(|batch| batch.pass == overlay_pass)
+            .filter(|batch| batch.layer == layer)
         {
+            debug_assert!(matches!(
+                batch.material,
+                MaterialKind::FogOfWar | MaterialKind::Snow
+            ));
             if !pipeline_set {
                 pass.set_pipeline(&pipelines.textured_overlay);
                 pipeline_set = true;
@@ -697,7 +722,7 @@ impl FrameRenderer {
                 DrawKind::Base => {
                     let batch = &sprite_batches[idx];
                     let texture_bind_group = textures
-                        .bind_group(batch.texture_id)
+                        .bind_group(batch.texture)
                         .context("missing texture bind group for sprite batch")?;
                     pass.set_bind_group(1, texture_bind_group, &[]);
                     pass.set_vertex_buffer(1, batch.instance_buffer.slice(..));
@@ -707,7 +732,7 @@ impl FrameRenderer {
                     let edge_batches = edge_sprite_batches.context("missing edge batches")?;
                     let batch = &edge_batches[idx];
                     let texture_bind_group = textures
-                        .bind_group(batch.texture_id)
+                        .bind_group(batch.texture)
                         .context("missing texture bind group for edge batch")?;
                     pass.set_bind_group(1, texture_bind_group, &[]);
                     pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
@@ -728,7 +753,7 @@ impl FrameRenderer {
 
 fn pack_sprite_batches(
     device: &wgpu::Device,
-    grouped: HashMap<TextureId, Vec<(usize, InstanceData)>>,
+    grouped: HashMap<TextureHandle, Vec<(usize, InstanceData)>>,
     buffer_label: &'static str,
 ) -> Vec<SpriteBatch> {
     let mut sprite_batches = Vec::with_capacity(grouped.len());
@@ -750,7 +775,7 @@ fn pack_sprite_batches(
             usage: wgpu::BufferUsages::VERTEX,
         });
         sprite_batches.push(SpriteBatch {
-            texture_id,
+            texture: texture_id,
             instance_buffer,
             instance_count: packed_instances.len() as u32,
             min_z,
@@ -768,18 +793,21 @@ fn pack_sprite_batches(
 }
 
 fn group_sprite_instances(
-    instances: &[SpriteInstance],
+    instances: &[SpriteRecord],
 ) -> (GroupedSpriteInstances, GroupedSpriteInstances) {
     let mut base_grouped: GroupedSpriteInstances = HashMap::new();
     let mut water_grouped: GroupedSpriteInstances = HashMap::new();
     for (index, sprite) in instances.iter().enumerate() {
-        let bucket = if sprite.is_water {
+        let bucket = if matches!(
+            sprite.material,
+            MaterialKind::TerrainWater | MaterialKind::WaterDepth
+        ) {
             &mut water_grouped
         } else {
             &mut base_grouped
         };
         bucket
-            .entry(sprite.texture_id)
+            .entry(sprite.texture)
             .or_default()
             .push((index, InstanceData::from_params(&sprite.params)));
     }

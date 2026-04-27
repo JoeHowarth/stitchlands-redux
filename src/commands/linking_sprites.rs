@@ -11,7 +11,7 @@ use crate::linking::{
     LinkDrawerType, LinkFlags, TerrainEdgeType, atlas_uv_rect, corner_filler_positions, link_index,
     perimeter_alphas_from_neighbor_matches,
 };
-use crate::renderer::{EdgeFan, EdgeSpriteInput, EdgeType, EdgeVertex, SpriteParams};
+use crate::scene::{EdgeFan, EdgeSpriteInput, EdgeType, EdgeVertex, MaterialKind, SpriteParams};
 use crate::viewer::RenderSprite;
 use crate::world::{
     DEPTH_TERRAIN_EDGE, DEPTH_WALL, DEPTH_WALL_CORNER, ThingState, WorldState, cardinal_neighbors,
@@ -86,8 +86,7 @@ pub fn emit_linked_thing_sprites(
         },
         used_fallback: resolved.used_fallback(),
         pawn_id: None,
-        is_water: false,
-        is_terrain: false,
+        material: MaterialKind::Cutout,
     });
 
     if effective_type == LinkDrawerType::CornerFiller {
@@ -130,10 +129,9 @@ pub fn emit_linked_thing_sprites(
                     tint,
                     uv_rect: CORNER_FILL_UV_RECT,
                 },
-                is_water: false,
-                is_terrain: false,
                 used_fallback: resolved.used_fallback(),
                 pawn_id: None,
+                material: MaterialKind::Cutout,
             });
         }
     }
@@ -399,6 +397,7 @@ pub fn emit_terrain_edge_sprites(
         out.push(EdgeSpriteInput {
             image: resolved.image,
             fan: EdgeFan { vertices },
+            material: MaterialKind::TerrainEdge,
         });
     }
     Ok(out)

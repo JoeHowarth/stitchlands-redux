@@ -12,13 +12,14 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-use crate::renderer::{
-    ColoredMeshInput, EdgeSpriteInput, Renderer, RendererOptions, SpriteInput, SpriteInstance,
-    SpriteParams, TextureId, TexturedMeshInput,
-};
+use crate::renderer::{Renderer, RendererOptions};
 use crate::runtime::v2::{
     InteractionOutcome, V2Runtime,
     render_bridge::{PawnNodeTextureCache, compose_dynamic_sprites},
+};
+use crate::scene::{
+    ColoredMeshInput, EdgeSpriteInput, MaterialKind, SpriteInput, SpriteParams, SpriteRecord,
+    TextureHandle, TexturedMeshInput,
 };
 use crate::water_assets::WaterAssets;
 
@@ -28,12 +29,7 @@ pub(crate) struct RenderSprite {
     pub(crate) params: SpriteParams,
     pub(crate) used_fallback: bool,
     pub(crate) pawn_id: Option<usize>,
-    /// When true, the sprite routes through the water-depth offscreen pass and
-    /// the water-surface draw in the main pass instead of the base pipeline.
-    /// Set by the fixture builder for terrain cells whose `TerrainDef` has a
-    /// `waterDepthShader` entry.
-    pub(crate) is_water: bool,
-    pub(crate) is_terrain: bool,
+    pub(crate) material: MaterialKind,
 }
 
 pub(crate) struct ViewerLaunch {
@@ -87,10 +83,10 @@ struct App {
     renderer_options: RendererOptions,
     hidden_window: bool,
     fixed_step: bool,
-    base_dynamic_inputs: Vec<SpriteInstance>,
+    base_dynamic_inputs: Vec<SpriteRecord>,
     pawn_node_textures: PawnNodeTextureCache,
     overlay_image: RgbaImage,
-    overlay_texture_id: Option<TextureId>,
+    overlay_texture_id: Option<TextureHandle>,
     map_bounds: Option<(usize, usize)>,
     runtime: Option<V2Runtime>,
     runtime_tick_limit: Option<u64>,
@@ -154,7 +150,7 @@ impl App {
         self.runtime_finished = false;
     }
 
-    fn dynamic_with_overlays(&self) -> Vec<SpriteInstance> {
+    fn dynamic_with_overlays(&self) -> Vec<SpriteRecord> {
         if let Some(runtime) = &self.runtime
             && let Some(overlay_texture_id) = self.overlay_texture_id
         {
@@ -205,8 +201,7 @@ impl App {
             .map(|sprite| SpriteInput {
                 image: sprite.image,
                 params: sprite.params,
-                is_water: sprite.is_water,
-                is_terrain: sprite.is_terrain,
+                material: sprite.material,
             })
             .collect();
         let water_assets = self
@@ -251,11 +246,10 @@ impl App {
                 continue;
             }
 
-            self.base_dynamic_inputs.push(SpriteInstance {
-                texture_id,
+            self.base_dynamic_inputs.push(SpriteRecord {
+                texture: texture_id,
                 params: sprite.params,
-                is_water: sprite.is_water,
-                is_terrain: false,
+                material: sprite.material,
             });
         }
         renderer

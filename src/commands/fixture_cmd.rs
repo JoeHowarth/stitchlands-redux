@@ -14,8 +14,8 @@ use crate::pawn::{
     ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData, PawnDrawFlags,
     PawnFacing, PawnRenderInput, compose_pawn,
 };
-use crate::renderer::{FULL_UV_RECT, SpriteParams};
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
+use crate::scene::{FULL_UV_RECT, MaterialKind, SpriteParams};
 use crate::viewer::RenderSprite;
 use crate::water_assets::{WaterAssets, water_shader_params};
 use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
@@ -303,7 +303,11 @@ fn build_world_sprites(
             }
             let used_fallback = resolved.used_fallback();
             let water_params = water_shader_params(terrain_def);
-            let is_water = water_params.is_some();
+            let material = if water_params.is_some() {
+                MaterialKind::TerrainWater
+            } else {
+                MaterialKind::Terrain
+            };
             let tint = water_params
                 .map(|p| p.to_tint())
                 .unwrap_or([1.0, 1.0, 1.0, 1.0]);
@@ -318,8 +322,7 @@ fn build_world_sprites(
                 },
                 used_fallback,
                 pawn_id: None,
-                is_water,
-                is_terrain: true,
+                material,
             });
         }
     }
@@ -382,8 +385,7 @@ fn build_world_sprites(
             },
             used_fallback,
             pawn_id: None,
-            is_water: false,
-            is_terrain: false,
+            material: MaterialKind::Cutout,
         });
     }
 
@@ -494,8 +496,7 @@ fn build_world_sprites(
                 },
                 used_fallback,
                 pawn_id: Some(pawn.id),
-                is_water: false,
-                is_terrain: false,
+                material: MaterialKind::Cutout,
             });
         }
     }
@@ -656,7 +657,7 @@ mod tests {
     use image::{Rgba, RgbaImage};
 
     use super::{RenderSprite, validate_layer_ownership};
-    use crate::renderer::{FULL_UV_RECT, SpriteParams};
+    use crate::scene::{FULL_UV_RECT, MaterialKind, SpriteParams};
 
     fn sprite(def_name: &str) -> RenderSprite {
         RenderSprite {
@@ -670,8 +671,11 @@ mod tests {
             },
             used_fallback: false,
             pawn_id: None,
-            is_water: false,
-            is_terrain: def_name.starts_with("Terrain::"),
+            material: if def_name.starts_with("Terrain::") {
+                MaterialKind::Terrain
+            } else {
+                MaterialKind::Cutout
+            },
         }
     }
 
