@@ -12,7 +12,13 @@ here.
 
 ## After Commit 1 — Renderer module split
 
-_(empty until landed)_
+Landed in `bd60cb7`. Acceptance gates passed (zero fixture diff, fmt/clippy/test clean, `Renderer::new` is 32 lines). Items noticed during review, address opportunistically as Commit 2 reshuffles types:
+
+- **Move batch types from `renderer/mod.rs` to `renderer/frame.rs`.** `SpriteBatch`, `EdgeSpriteBatch`, `ColoredMeshBatch`, `TexturedMeshBatch`, `SunShadowBatch`, and the `GroupedSpriteInstances` alias (mod.rs:44-84) are `pub(crate)` per-frame state held by `FrameRenderer`. They're in mod.rs only because they reference public types; let `frame.rs` import those instead.
+- **Move `multiply_overlay_blend_state()` from `renderer/mod.rs` to `renderer/pipelines.rs`** as a private helper. Only consumer is `pipelines.rs`.
+- **Resolve `#[allow(dead_code)]` on `TextureRegistry::texture_images` (textures.rs:21-22).** Per AGENTS.md "dead parameters should be removed, not silenced" — applies to unused struct fields. Either delete the field (it's populated by `register_texture` but never read) or document why it must stay.
+- **`PipelineSet` owns more than pipelines.** It also holds `noise_bind_group`, `water_depth_sampler`, `water_ramps_bind_group`, and the unit-quad `vertex_buffer` / `index_buffer`. Layouts and samplers legitimately belong (pipelines need them at construction); the bind groups and unit-quad buffers feel more like `FrameRenderer` concerns. Tighten when Commit 4 formalizes offscreen targets — not urgent now.
+- **`Vertex`, `SunShadowUniform` in mod.rs are GPU-shaped** and could live in their consuming submodule (`pipelines.rs` or `frame.rs`). Will be addressed naturally as Commit 2 sorts types between `scene/` and `renderer/`.
 
 ## After Commit 2 — `src/scene/` extraction
 

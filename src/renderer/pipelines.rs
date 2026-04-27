@@ -7,7 +7,22 @@ use super::camera::CameraState;
 use super::frame::InstanceData;
 use super::gpu_context::GpuContext;
 use super::textures::TextureRegistry;
-use super::{ColoredVertex, EdgeVertex, Vertex, WATER_DEPTH_FORMAT, multiply_overlay_blend_state};
+use super::{ColoredVertex, EdgeVertex, Vertex, WATER_DEPTH_FORMAT};
+
+fn multiply_overlay_blend_state() -> wgpu::BlendState {
+    wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Dst,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Zero,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        },
+    }
+}
 
 pub(crate) struct PipelineSet {
     pub(crate) sprite: wgpu::RenderPipeline,

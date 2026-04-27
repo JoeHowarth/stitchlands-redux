@@ -83,8 +83,10 @@ than two-stepping through a mechanical move + later restructure.
   `pipelines.rs`, `frame.rs`, `camera.rs`, `screenshot.rs`, `mod.rs`.
 - `Renderer` becomes `{ gpu, textures, pipelines, frame, camera }`.
 - Construction order: `GpuContext` → `TextureRegistry` (owns the
-  shared sprite BGL) → `PipelineSet::build(&gpu, &textures)` →
-  `FrameRenderer`.
+  shared sprite BGL) → `CameraState` (owns its uniform + BGL) →
+  `PipelineSet::build(&gpu, &textures, &camera, ...)` →
+  `FrameRenderer`. Camera sits between textures and pipelines
+  because pipelines consume its bind group layout at construction.
 - `pub use` from `renderer/mod.rs` so external callers
   (`commands/`, `runtime/`, `viewer.rs`) see no import path
   changes.

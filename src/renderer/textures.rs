@@ -18,8 +18,6 @@ pub(crate) struct TextureRegistry {
     sampler: wgpu::Sampler,
     bind_groups: HashMap<TextureId, wgpu::BindGroup>,
     texture_keys: HashMap<TextureKey, TextureId>,
-    #[allow(dead_code)]
-    texture_images: HashMap<TextureId, RgbaImage>,
     next_texture_id: u32,
 }
 
@@ -61,7 +59,6 @@ impl TextureRegistry {
             sampler,
             bind_groups: HashMap::new(),
             texture_keys: HashMap::new(),
-            texture_images: HashMap::new(),
             next_texture_id: 1,
         }
     }
@@ -76,7 +73,6 @@ impl TextureRegistry {
         self.next_texture_id += 1;
         let bind_group = self.create_bind_group(gpu, &image);
         self.texture_keys.insert(key, id);
-        self.texture_images.insert(id, image);
         self.bind_groups.insert(id, bind_group);
         id
     }

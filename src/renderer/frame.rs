@@ -12,11 +12,52 @@ use super::pipelines::PipelineSet;
 use super::screenshot;
 use super::textures::TextureRegistry;
 use super::{
-    ColoredMeshInput, EdgeFan, EdgeFanInstance, EdgeSpriteBatch, EdgeSpriteInput, EdgeVertex,
-    FAN_TRI_INDICES, GroupedSpriteInstances, OverlayBlendMode, OverlayPass, SpriteBatch,
-    SpriteInstance, SpriteParams, SunShadowBatch, SunShadowUniform, TextureId, TexturedMeshBatch,
+    ColoredMeshInput, EdgeFan, EdgeFanInstance, EdgeSpriteInput, EdgeVertex, FAN_TRI_INDICES,
+    OverlayBlendMode, OverlayPass, SpriteInstance, SpriteParams, SunShadowUniform, TextureId,
     TexturedMeshInput, WATER_DEPTH_FORMAT, validate_textured_mesh_input,
 };
+
+pub(crate) struct SpriteBatch {
+    texture_id: TextureId,
+    pub(crate) instance_buffer: wgpu::Buffer,
+    pub(crate) instance_count: u32,
+    pub(crate) min_z: f32,
+    pub(crate) first_index: usize,
+    pub(crate) texture_hash: u64,
+}
+
+pub(crate) struct EdgeSpriteBatch {
+    texture_id: TextureId,
+    pub(crate) vertex_buffer: wgpu::Buffer,
+    pub(crate) index_buffer: wgpu::Buffer,
+    pub(crate) index_count: u32,
+    pub(crate) min_z: f32,
+    pub(crate) first_index: usize,
+    pub(crate) texture_hash: u64,
+}
+
+type GroupedSpriteInstances = HashMap<TextureId, Vec<(usize, InstanceData)>>;
+
+pub(crate) struct ColoredMeshBatch {
+    pass: OverlayPass,
+    blend_mode: OverlayBlendMode,
+    sun_shadow: Option<SunShadowBatch>,
+    pub(crate) vertex_buffer: wgpu::Buffer,
+    pub(crate) index_buffer: wgpu::Buffer,
+    pub(crate) index_count: u32,
+}
+
+pub(crate) struct TexturedMeshBatch {
+    pass: OverlayPass,
+    pub(crate) bind_group: wgpu::BindGroup,
+    pub(crate) vertex_buffer: wgpu::Buffer,
+    pub(crate) index_buffer: wgpu::Buffer,
+    pub(crate) index_count: u32,
+}
+
+pub(crate) struct SunShadowBatch {
+    pub(crate) bind_group: wgpu::BindGroup,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -75,7 +116,7 @@ pub(crate) struct FrameRenderer {
     static_instances: Vec<SpriteInstance>,
     dynamic_instances: Vec<SpriteInstance>,
     edge_fans: Vec<EdgeFanInstance>,
-    overlay_batches: Vec<super::ColoredMeshBatch>,
+    overlay_batches: Vec<ColoredMeshBatch>,
     textured_overlay_batches: Vec<TexturedMeshBatch>,
     terrain_sprite_batches: Vec<SpriteBatch>,
     static_sprite_batches: Vec<SpriteBatch>,
@@ -236,7 +277,7 @@ impl FrameRenderer {
                 });
                 SunShadowBatch { bind_group }
             });
-            batches.push(super::ColoredMeshBatch {
+            batches.push(ColoredMeshBatch {
                 pass: overlay.pass,
                 blend_mode: overlay.blend_mode,
                 sun_shadow,

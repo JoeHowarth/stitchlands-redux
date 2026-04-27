@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -18,7 +17,7 @@ mod screenshot;
 mod textures;
 
 use camera::CameraState;
-use frame::{FrameRenderer, InstanceData};
+use frame::FrameRenderer;
 use gpu_context::GpuContext;
 use pipelines::PipelineSet;
 use textures::TextureRegistry;
@@ -40,63 +39,6 @@ pub struct Renderer {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct TextureId(u32);
-
-pub(crate) struct SpriteBatch {
-    texture_id: TextureId,
-    pub(crate) instance_buffer: wgpu::Buffer,
-    pub(crate) instance_count: u32,
-    pub(crate) min_z: f32,
-    pub(crate) first_index: usize,
-    pub(crate) texture_hash: u64,
-}
-
-pub(crate) struct EdgeSpriteBatch {
-    texture_id: TextureId,
-    pub(crate) vertex_buffer: wgpu::Buffer,
-    pub(crate) index_buffer: wgpu::Buffer,
-    pub(crate) index_count: u32,
-    pub(crate) min_z: f32,
-    pub(crate) first_index: usize,
-    pub(crate) texture_hash: u64,
-}
-
-type GroupedSpriteInstances = HashMap<TextureId, Vec<(usize, InstanceData)>>;
-
-pub(crate) struct ColoredMeshBatch {
-    pass: OverlayPass,
-    blend_mode: OverlayBlendMode,
-    sun_shadow: Option<SunShadowBatch>,
-    pub(crate) vertex_buffer: wgpu::Buffer,
-    pub(crate) index_buffer: wgpu::Buffer,
-    pub(crate) index_count: u32,
-}
-
-pub(crate) struct TexturedMeshBatch {
-    pass: OverlayPass,
-    pub(crate) bind_group: wgpu::BindGroup,
-    pub(crate) vertex_buffer: wgpu::Buffer,
-    pub(crate) index_buffer: wgpu::Buffer,
-    pub(crate) index_count: u32,
-}
-
-pub(crate) struct SunShadowBatch {
-    pub(crate) bind_group: wgpu::BindGroup,
-}
-
-fn multiply_overlay_blend_state() -> wgpu::BlendState {
-    wgpu::BlendState {
-        color: wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::Dst,
-            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-            operation: wgpu::BlendOperation::Add,
-        },
-        alpha: wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::Zero,
-            dst_factor: wgpu::BlendFactor::One,
-            operation: wgpu::BlendOperation::Add,
-        },
-    }
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
