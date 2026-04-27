@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     match action {
         crate::commands::CommandAction::Done => Ok(()),
         crate::commands::CommandAction::Launch(spec) => crate::viewer::run_viewer(
-            &mut asset_resolver,
+            asset_resolver,
             crate::viewer::ViewerLaunch {
                 static_sprites: spec.static_sprites,
                 dynamic_sprites: spec.dynamic_sprites,
@@ -94,7 +94,7 @@ fn main() -> Result<()> {
                     runtime_tick_limit: spec.runtime_tick_limit,
                 })
                 .collect();
-            crate::viewer::run_viewer_batch(&mut asset_resolver, launches)
+            crate::viewer::run_viewer_batch(asset_resolver, launches)
         }
     }
 }

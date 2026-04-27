@@ -49,7 +49,7 @@ pub(crate) struct ViewerLaunch {
     pub(crate) runtime_tick_limit: Option<u64>,
 }
 
-pub(crate) fn run_viewer(asset_resolver: &mut AssetResolver, launch: ViewerLaunch) -> Result<()> {
+pub(crate) fn run_viewer(asset_resolver: AssetResolver, launch: ViewerLaunch) -> Result<()> {
     let mut app = App::new(asset_resolver, launch, VecDeque::new());
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
@@ -57,7 +57,7 @@ pub(crate) fn run_viewer(asset_resolver: &mut AssetResolver, launch: ViewerLaunc
 }
 
 pub(crate) fn run_viewer_batch(
-    asset_resolver: &mut AssetResolver,
+    asset_resolver: AssetResolver,
     launches: Vec<ViewerLaunch>,
 ) -> Result<()> {
     let mut launches = VecDeque::from(launches);
@@ -70,8 +70,8 @@ pub(crate) fn run_viewer_batch(
     Ok(())
 }
 
-struct App<'a> {
-    asset_resolver: &'a mut AssetResolver,
+struct App {
+    asset_resolver: AssetResolver,
     static_sprites: Vec<RenderSprite>,
     dynamic_sprites: Vec<RenderSprite>,
     edge_sprites: Vec<EdgeSpriteInput>,
@@ -98,9 +98,9 @@ struct App<'a> {
     pending_launches: VecDeque<ViewerLaunch>,
 }
 
-impl<'a> App<'a> {
+impl App {
     fn new(
-        asset_resolver: &'a mut AssetResolver,
+        asset_resolver: AssetResolver,
         launch: ViewerLaunch,
         pending_launches: VecDeque<ViewerLaunch>,
     ) -> Self {
@@ -213,7 +213,7 @@ impl<'a> App<'a> {
             .expect("water assets already consumed");
         let renderer = pollster::block_on(Renderer::new(
             window.clone(),
-            self.asset_resolver,
+            &mut self.asset_resolver,
             static_inputs,
             self.noise_image.clone(),
             water_assets,
@@ -224,7 +224,7 @@ impl<'a> App<'a> {
         let mut renderer = renderer;
         let edge_inputs: Vec<EdgeSpriteInput> = self.edge_sprites.drain(..).collect();
         renderer
-            .set_static_edge_sprites(self.asset_resolver, edge_inputs)
+            .set_static_edge_sprites(&mut self.asset_resolver, edge_inputs)
             .expect("set static edge sprites");
         let static_overlays: Vec<ColoredMeshInput> = self.static_overlays.drain(..).collect();
         renderer
@@ -233,14 +233,14 @@ impl<'a> App<'a> {
         let static_textured_overlays: Vec<TexturedMeshInput> =
             self.static_textured_overlays.drain(..).collect();
         renderer
-            .set_static_textured_overlays(self.asset_resolver, static_textured_overlays)
+            .set_static_textured_overlays(&mut self.asset_resolver, static_textured_overlays)
             .expect("set static textured overlays");
         self.base_dynamic_inputs.clear();
         self.pawn_node_textures.clear();
         self.overlay_texture_id = Some(renderer.register_texture(self.overlay_image.clone()));
         for sprite in self.dynamic_sprites.drain(..) {
             let texture_id = renderer
-                .resolve_texture(self.asset_resolver, &sprite.texture)
+                .resolve_texture(&mut self.asset_resolver, &sprite.texture)
                 .expect("resolve dynamic sprite texture");
             if let Some(pawn_id) = sprite.pawn_id
                 && let Some(node_id) = parse_pawn_node_id(&sprite.def_name)
@@ -279,7 +279,7 @@ impl<'a> App<'a> {
     }
 }
 
-impl ApplicationHandler for App<'_> {
+impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.prepare_renderer(event_loop);
     }

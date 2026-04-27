@@ -43,7 +43,6 @@ impl TexturePathCache {
         self.handles.insert(texture, handle);
     }
 
-    #[cfg(test)]
     fn get_or_try_insert_with(
         &mut self,
         texture: &SceneTexture,
@@ -108,24 +107,23 @@ impl TextureRegistry {
         resolver: &mut AssetResolver,
         texture: &SceneTexture,
     ) -> Result<TextureHandle> {
-        if let Some(handle) = self.path_textures.get(texture) {
-            return Ok(handle);
-        }
+        let mut path_textures = std::mem::take(&mut self.path_textures);
+        let result = path_textures.get_or_try_insert_with(texture, || {
+            let resolved = resolver
+                .resolve(TextureQuery {
+                    tex_path: &texture.tex_path,
+                    kind: texture.kind,
+                    variant_index: texture.variant_index,
+                })
+                .with_context(|| format!("resolving scene texture '{}'", texture.tex_path))?;
+            if resolved.used_fallback() {
+                anyhow::bail!("missing scene texture '{}'", texture.tex_path);
+            }
 
-        let resolved = resolver
-            .resolve(TextureQuery {
-                tex_path: &texture.tex_path,
-                kind: texture.kind,
-                variant_index: texture.variant_index,
-            })
-            .with_context(|| format!("resolving scene texture '{}'", texture.tex_path))?;
-        if resolved.used_fallback() {
-            anyhow::bail!("missing scene texture '{}'", texture.tex_path);
-        }
-
-        let handle = self.register_texture(gpu, transform_image(resolved.image, texture.transform));
-        self.path_textures.insert(texture.clone(), handle);
-        Ok(handle)
+            Ok(self.register_texture(gpu, transform_image(resolved.image, texture.transform)))
+        });
+        self.path_textures = path_textures;
+        result
     }
 
     pub(crate) fn register_texture(&mut self, gpu: &GpuContext, image: RgbaImage) -> TextureHandle {
