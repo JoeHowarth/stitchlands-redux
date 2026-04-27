@@ -1,5 +1,32 @@
 # AGENTS.md
 
+## Commands
+
+- `cargo fmt --all` — format. Toolchain pinned to nightly via `rust-toolchain.toml`.
+- `cargo clippy --all-targets -- -D warnings` — lint. Warnings are errors.
+- `cargo test` — unit tests.
+- `cargo run -- render-fixtures` — render every fixture RON to `fixtures/renders/<stem>.png`. The visual regression gate per Work Completion Policy. Skips writing unchanged outputs.
+- `cargo run -- fixture <path>` — render a single fixture; add `--no-window --screenshot <path>` for headless capture.
+
+## Module Map
+
+Top-level layout under `src/`:
+
+- `renderer/` — wgpu pipeline construction, GPU resource ownership, frame execution. Submodules: `gpu_context`, `textures`, `pipelines`, `frame`, `camera`, `screenshot`.
+- `world/` — `WorldState` simulation data + per-tick stepping; sibling `RenderState` holds derived per-tick render inputs (fog, snow, sky, shadow vector).
+- `runtime/v2/` — live tick loop, fixed-step state machine, per-tick draw bridge.
+- `commands/` — per-CLI-command scene assembly (fixture rendering, batch render, overlay builders).
+- `pawn/` — pawn render graph: `compose_pawn` pipeline, layered sprite emission.
+- `path/` — opaque `PathGrid` + `find_path`.
+- `assets/` — texture resolution against loose files and packed Unity bundles.
+- `defs.rs` — RimWorld XML def parsers (`ThingDef`, `TerrainDef`, `ApparelDef`, etc.).
+- `linking.rs` — RimWorld edge-linking adjacency rules.
+- `interaction/` — input state, mouse picking, cell ↔ world coordinate conversion.
+- `fixtures/` — RON scene schema, loader, validator.
+- `viewer.rs` — winit `ApplicationHandler`, event loop, runtime ↔ renderer bridge.
+- `app_context.rs` — shared dependency bundle (defs, asset resolver, configs).
+- `cli.rs`, `main.rs` — entry points.
+
 ## Lint Policy
 
 - Do not add local/manual Clippy allowances such as `#[allow(clippy::...)]` on functions, modules, or items.
@@ -28,7 +55,13 @@
 
 ## Path Reference Policy
 
-- Use repository-relative paths in communication (for example `src/renderer.rs`), not absolute system paths.
+- Use repository-relative paths in communication (for example `src/renderer/mod.rs`), not absolute system paths.
+
+## Commit Conventions
+
+- **Messages**: terse imperative ("Render fog with material texture", "Skip unchanged screenshot writes"). One-line subject; body only when reasoning isn't obvious from the diff.
+- **Branches**: `feat/<topic>` for features, `fix/<topic>` for bug fixes (e.g. `feat/water-rendering`, `fix/thingdef-inheritance`).
+- Do not mention Claude or Anthropic in commit messages or code comments.
 
 ## RimWorld Porting Policy
 
@@ -36,6 +69,15 @@
 - Preserve RimWorld's authored inputs, runtime state, mesh topology, material colors, shader uniforms, neighbor rules, and silhouette rules before adding renderer-specific adapters.
 - If the exact Unity shader or section-mesh infrastructure is not available yet, keep any fallback narrow, clearly named as temporary, and shaped around the same RimWorld data and mesh semantics.
 - Treat the static sun shadow bug as the cautionary example: CPU-extruding every footprint side looked plausible at full view, but diverged from `SectionLayer_SunShadows` and produced stacked dark triangles when zoomed.
+
+## RimWorld Data Naming
+
+Fixture RON fields like `body`, `head`, `hair`, `beard` take XML **defNames**, not texture path segments. These often differ:
+
+- defName `Male_AverageNormal` vs graphicPath `.../Male_Average_Normal`
+- defName `Full` vs graphicPath `.../Beard_Full`
+
+Source of truth is `RimWorldMac.app/Data/Core/Defs/`, distinct from the packed Unity assets the resolver loads. The `choose_*_def` functions in `src/commands/` warn on miss — watch the logs. `PawnSpawn` in `src/fixtures/schema.rs` documents this on its doc comment; cross-check before authoring new pawn fixtures.
 
 ## Plans
 
