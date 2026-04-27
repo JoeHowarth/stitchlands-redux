@@ -51,4 +51,5 @@
 ## External References
 
 - **RimWorld decompiled C# source**: `~/rimworld-decompiled/`. Start at `~/rimworld-decompiled/MAP/INDEX.md` — a reference map with per-subsystem pages (pawn rendering, graphics primitives, defs/loading, components, jobs/AI, map/world) and file:line citations into the frozen codebase. Use this when reverse-engineering game behavior or algorithms.
+- **RimWorld extracted Unity shaders**: `~/rimworld-shader-extract/` — AssetRipper exports from the Steam macOS build. Use `assetripper-1.3.5-disassembly-export/ExportedProject/Assets/Resources/materials/` for Metal shader subprogram disassembly, `assetripper-1.3.5-decompile-export/` for ShaderLab shells with properties/render states, and `assetripper-yaml-export/` for serialized shader metadata. Treat these as reference material for reimplementation, not code to vendor into this repo.
 - **RimWorld XML defs**: `RimWorldMac.app/Data/Core/Defs/` — game data, distinct from the decompiled engine/logic source above.

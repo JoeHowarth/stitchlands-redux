@@ -18,6 +18,14 @@ Deferred work that doesn't warrant its own plan folder yet. Add new items here; 
 - **Section batching for edge overlays.** 9-vertex fan emission is O(cells × neighbor_defs). Fine at ≤24×16 fixtures; batch into section-sized vertex buffers before ~100 cells/side.
 - **`edge_texture_path` on `TerrainDef` parsed but unused.** Emission takes the neighbor's base `texture_path`. Wire up in `compute_terrain_edge_contributions` when a motivating water shore terrain appears.
 - **Hard-coded `CORNER_FILL_UV_RECT = (0.5, 0.6)`.** Works for Wall_Atlas_Bricks / Rock_Atlas. Move to a per-`ThingDef` override if another atlas needs a different sample.
+- **`LightOverlay` blend mode parity bug.** RimWorld's `lighting/lightoverlay.shader` uses `Blend DstColor SrcColor` (multiplicative tint where channel values >1 brighten, <1 darken). Today's lighting routes through `colored_overlay.wgsl` with alpha blend, so the math is wrong. Cheap fix once `plans/renderer-engine-boundary/` Commit 1 lands `PipelineSet` (add a dedicated `light_overlay` pipeline with the correct blend state). Cross-check `~/rimworld-shader-extract/assetripper-1.3.5-decompile-export/` for authoritative blend; re-baseline affected fixture renders in the same commit.
+- **`SunShadowFade` pipeline missing.** RimWorld ships separate `lighting/sunshadow.shader` and `lighting/sunshadowfade.shader`; we have only the former. Add a second pipeline with the fade variant's blend state. Same trigger as above — depends on `PipelineSet` being in.
+- **`MaterialKind` subkinds.** After `plans/renderer-engine-boundary/` Commit 2 introduces `scene::MaterialKind` (12 coarse variants), split when a fixture or parity bug needs the distinction: `CutoutPlant` (sway input), `CutoutSkin` / `CutoutHair` (separate tinting), `TransparentPostLight`, `TerrainFadeRough`. Reference: `~/rimworld-shader-extract/INDEX.md`.
+
+### Refactor / structure
+
+- **`commands/fixture_cmd.rs` cleanup beyond `build_scene` extraction.** After `plans/renderer-engine-boundary/` Commit 3 ships, the command still owns RON loading, def resolution, runtime bootstrap, screenshot output, and launch-spec assembly in 700+ LOC. Separate plan; not part of the renderer boundary work.
+- **Static-vs-live `build_scene` split.** Trigger: per-tick rebuild cost shows up in a profile at realistic map sizes. Solution: split into `build_static_scene` + `build_live_frame`; per-overlay functions already partition cleanly. May overlap with dirty tracking (rebuilding only changed regions) — pick the simpler answer at trigger time.
 
 ### Linking / stuff system
 
