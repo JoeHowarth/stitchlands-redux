@@ -33,7 +33,7 @@ fn main() -> Result<()> {
     let compose_config = ctx.compose_config.clone();
     let mut asset_resolver = ctx.asset_resolver;
 
-    let defs = crate::commands::DefSet {
+    let defs = crate::defs::DefSet {
         thing_defs: &ctx.thing_defs,
         terrain_defs: &ctx.terrain_defs,
         apparel_defs: &ctx.apparel_defs,

@@ -17,7 +17,7 @@ use crate::world::{
     diagonal_neighbors, neighbors_8,
 };
 
-use super::common::DefSet;
+use crate::defs::DefSet;
 
 /// Step size for per-cell noise-seed offsets. Small irrational increments stop
 /// the RoughAlphaAdd sampler from tiling visibly across cells.

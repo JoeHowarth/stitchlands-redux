@@ -107,24 +107,41 @@ impl TextureRegistry {
         resolver: &mut AssetResolver,
         texture: &SceneTexture,
     ) -> Result<TextureHandle> {
-        let mut path_textures = std::mem::take(&mut self.path_textures);
-        let result = path_textures.get_or_try_insert_with(texture, || {
+        self.resolve_with(device, queue, texture, |tex| {
             let resolved = resolver
                 .resolve(TextureQuery {
-                    tex_path: &texture.tex_path,
-                    kind: texture.kind,
-                    variant_index: texture.variant_index,
+                    tex_path: &tex.tex_path,
+                    kind: tex.kind,
+                    variant_index: tex.variant_index,
                 })
-                .with_context(|| format!("resolving scene texture '{}'", texture.tex_path))?;
+                .with_context(|| format!("resolving scene texture '{}'", tex.tex_path))?;
             if resolved.used_fallback() {
-                anyhow::bail!("missing scene texture '{}'", texture.tex_path);
+                anyhow::bail!("missing scene texture '{}'", tex.tex_path);
             }
+            Ok(resolved.image)
+        })
+    }
 
-            Ok(self.register_texture(
-                device,
-                queue,
-                transform_image(resolved.image, texture.transform),
-            ))
+    /// Cache + upload core of `resolve_texture`, parameterized over the asset
+    /// fetch. Production uses `resolve_texture` (which closes over an
+    /// `AssetResolver`); tests substitute a counted closure to assert the
+    /// fetch runs at most once per `SceneTexture`. The fetch closure receives
+    /// the original `SceneTexture` so it can apply path/kind/variant logic;
+    /// transform is applied here, after the fetch.
+    fn resolve_with<F>(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture: &SceneTexture,
+        fetch: F,
+    ) -> Result<TextureHandle>
+    where
+        F: FnOnce(&SceneTexture) -> Result<RgbaImage>,
+    {
+        let mut path_textures = std::mem::take(&mut self.path_textures);
+        let result = path_textures.get_or_try_insert_with(texture, || {
+            let image = fetch(texture)?;
+            Ok(self.register_texture(device, queue, transform_image(image, texture.transform)))
         });
         self.path_textures = path_textures;
         result
@@ -311,13 +328,76 @@ mod tests {
         assert_eq!(cache.get(&random), Some(TextureHandle(2)));
     }
 
-    /// Construct a real wgpu device without a window/surface, then assert that
-    /// uploading the same image bytes twice does not allocate a second GPU
-    /// texture. This is the runtime contract referenced by
+    /// Drive the full `resolve_texture` cache+upload path with a counted
+    /// fetch closure standing in for `AssetResolver::resolve`. Asserts the
+    /// fetch runs at most once per `SceneTexture` and that each successful
+    /// fetch corresponds to exactly one `register_texture` upload. This is
+    /// the production-shape invariant referenced by
     /// `plans/renderer-engine-boundary/plan-v3.md` Commit 3 done-when:
     /// per-frame scene rebuilds in the live runtime path must not re-upload
-    /// textures. The path-cache test above proves the SceneTexture-keyed
-    /// dedupe; this proves the byte-hash dedupe inside `register_texture`.
+    /// textures.
+    #[test]
+    fn resolve_texture_skips_fetch_and_upload_on_cache_hit() {
+        let Some((device, queue)) = headless_device() else {
+            eprintln!("skipping: no wgpu adapter available for headless test");
+            return;
+        };
+        let mut registry = TextureRegistry::new(&device);
+        let texture = SceneTexture::single("Test/Synthetic");
+
+        let mut fetch_calls = 0;
+        let first = registry
+            .resolve_with(&device, &queue, &texture, |_tex| {
+                fetch_calls += 1;
+                Ok(synthetic_rgba(4, 4, [40, 80, 120, 255]))
+            })
+            .expect("first resolve must succeed");
+        assert_eq!(fetch_calls, 1, "first resolve must run the fetch closure");
+        assert_eq!(registry.upload_count(), 1);
+
+        let second = registry
+            .resolve_with(&device, &queue, &texture, |_tex| {
+                fetch_calls += 1;
+                // Returning a different image here would never be observable
+                // because the path cache short-circuits before the closure
+                // runs — that's the property under test.
+                Ok(synthetic_rgba(4, 4, [255, 255, 255, 255]))
+            })
+            .expect("second resolve must succeed via path cache");
+        assert_eq!(
+            fetch_calls, 1,
+            "second resolve of the same SceneTexture must not run fetch"
+        );
+        assert_eq!(
+            registry.upload_count(),
+            1,
+            "second resolve must not perform a GPU upload"
+        );
+        assert_eq!(
+            first, second,
+            "second resolve must return the cached handle"
+        );
+
+        // A distinct SceneTexture (different transform) goes to fetch + upload.
+        let other = SceneTexture::single("Test/Synthetic")
+            .with_transform(SceneTextureTransform::FogLuminanceAlpha);
+        let third = registry
+            .resolve_with(&device, &queue, &other, |_tex| {
+                fetch_calls += 1;
+                Ok(synthetic_rgba(4, 4, [10, 20, 30, 255]))
+            })
+            .expect("third resolve must succeed");
+        assert_eq!(fetch_calls, 2);
+        assert_eq!(registry.upload_count(), 2);
+        assert_ne!(first, third);
+    }
+
+    /// Construct a real wgpu device without a window/surface, then assert that
+    /// uploading the same image bytes twice does not allocate a second GPU
+    /// texture. Companion to `resolve_texture_skips_fetch_and_upload_on_cache_hit`:
+    /// that one covers the SceneTexture-keyed cache; this one covers the
+    /// content-keyed dedupe inside `register_texture` (e.g. when two distinct
+    /// `SceneTexture`s resolve to the same image bytes).
     #[test]
     fn register_texture_dedupes_by_image_bytes() {
         let Some((device, queue)) = headless_device() else {

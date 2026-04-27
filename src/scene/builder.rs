@@ -5,22 +5,20 @@ use glam::{Vec2, Vec3};
 use log::warn;
 
 use crate::assets::AssetResolver;
-use crate::commands::DefSet;
-use crate::commands::common::{
-    apparel_worn_data_for_facing, build_apparel_tex_path, build_full_apparel_layer_override,
-    map_explicit_skip_flags, resolve_directional_tex_path,
-};
-use crate::commands::linking_sprites::{emit_linked_thing_sprites, emit_terrain_edge_sprites};
-use crate::commands::overlays::build_static_overlays;
 use crate::defs::{
-    ApparelDef, ApparelLayerDef, BeardDefRender, BodyTypeDefRender, HairDefRender,
+    ApparelDef, ApparelLayerDef, BeardDefRender, BodyTypeDefRender, DefSet, HairDefRender,
     HeadTypeDefRender, TerrainDef, ThingDef,
 };
 use crate::linking::LinkDrawerType;
 use crate::pawn::{
     ApparelRenderInput, BeardTypeRenderData, BodyTypeRenderData, HeadTypeRenderData,
-    PawnComposeConfig, PawnDrawFlags, PawnFacing, PawnRenderInput, compose_pawn,
+    PawnComposeConfig, PawnDrawFlags, PawnFacing, PawnRenderInput, apparel_worn_data_for_facing,
+    build_apparel_tex_path, build_full_apparel_layer_override, compose_pawn,
+    map_explicit_skip_flags, resolve_directional_tex_path,
 };
+
+use super::linking_sprites::{emit_linked_thing_sprites, emit_terrain_edge_sprites};
+use super::overlays::build_static_overlays;
 use crate::water_assets::water_shader_params;
 use crate::world::{PawnState, WorldState};
 

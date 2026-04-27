@@ -6,6 +6,8 @@ use glam::{Vec2, Vec3};
 use crate::defs::{GraphicKind, ThingDef};
 
 pub mod builder;
+pub mod linking_sprites;
+pub mod overlays;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Layer {

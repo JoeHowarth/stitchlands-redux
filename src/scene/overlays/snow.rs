@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::scene::{Layer, MaterialKind, SceneTexture, TexturedMeshInput};
 use crate::world::WorldState;
 
-use super::solid_overlay_mesh::{
+use super::solid_mesh::{
     SOLID_CELL_VERTEX_COUNT, push_textured_solid_cell, textured_mesh_if_not_empty,
 };
 

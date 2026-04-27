@@ -11,6 +11,20 @@ use walkdir::WalkDir;
 
 use crate::linking::{LinkDrawerType, LinkFlags, TerrainEdgeType};
 
+/// Borrow-bundle of every def hashmap a scene assembler needs. Consumers
+/// either thread a single `DefSet<'_>` reference instead of a half-dozen
+/// individual hashmaps, or hold owned copies (see `OwnedSceneDefs`) and
+/// re-borrow per call.
+pub struct DefSet<'a> {
+    pub thing_defs: &'a HashMap<String, ThingDef>,
+    pub terrain_defs: &'a HashMap<String, TerrainDef>,
+    pub apparel_defs: &'a HashMap<String, ApparelDef>,
+    pub body_type_defs: &'a HashMap<String, BodyTypeDefRender>,
+    pub head_type_defs: &'a HashMap<String, HeadTypeDefRender>,
+    pub beard_defs: &'a HashMap<String, BeardDefRender>,
+    pub hair_defs: &'a HashMap<String, HairDefRender>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RgbaColor {
     pub r: f32,
