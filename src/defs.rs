@@ -28,7 +28,7 @@ impl RgbaColor {
     };
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
 pub enum GraphicKind {
     #[default]
     Single,

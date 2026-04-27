@@ -1,6 +1,4 @@
-use image::RgbaImage;
-
-use crate::scene::{Layer, MaterialKind, TexturedMeshInput, TexturedVertex};
+use crate::scene::{Layer, MaterialKind, SceneTexture, TexturedMeshInput, TexturedVertex};
 
 pub const SOLID_CELL_VERTEX_COUNT: usize = 9;
 
@@ -44,7 +42,7 @@ pub fn push_textured_solid_cell(
 pub fn textured_mesh_if_not_empty(
     layer: Layer,
     material: MaterialKind,
-    image: RgbaImage,
+    texture: SceneTexture,
     vertices: Vec<TexturedVertex>,
     indices: Vec<u32>,
 ) -> Vec<TexturedMeshInput> {
@@ -54,7 +52,7 @@ pub fn textured_mesh_if_not_empty(
     vec![TexturedMeshInput {
         layer,
         material,
-        image,
+        texture,
         vertices,
         indices,
     }]

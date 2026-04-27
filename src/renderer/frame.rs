@@ -12,6 +12,7 @@ use super::pipelines::PipelineSet;
 use super::screenshot;
 use super::textures::TextureRegistry;
 use super::{SunShadowUniform, WATER_DEPTH_FORMAT, validate_textured_mesh_input};
+use crate::assets::AssetResolver;
 use crate::scene::{
     ColoredMeshInput, EdgeFan, EdgeFanInstance, EdgeSpriteInput, EdgeVertex, FAN_TRI_INDICES,
     Layer, MaterialKind, OverlayBlendMode, SpriteBucket, SpriteParams, SpriteRecord, TextureHandle,
@@ -202,17 +203,20 @@ impl FrameRenderer {
     pub(crate) fn set_static_edge_sprites(
         &mut self,
         gpu: &GpuContext,
+        resolver: &mut AssetResolver,
         textures: &mut TextureRegistry,
         sprites: Vec<EdgeSpriteInput>,
     ) -> Result<()> {
         let fans: Vec<EdgeFanInstance> = sprites
             .into_iter()
-            .map(|sprite| EdgeFanInstance {
-                texture: textures.register_texture(gpu, sprite.image),
-                fan: sprite.fan,
-                material: sprite.material,
+            .map(|sprite| {
+                Ok(EdgeFanInstance {
+                    texture: textures.resolve_texture(gpu, resolver, &sprite.texture)?,
+                    fan: sprite.fan,
+                    material: sprite.material,
+                })
             })
-            .collect();
+            .collect::<Result<_>>()?;
         self.edge_fans = fans;
         self.rebuild_edge_batches(gpu)
     }
@@ -298,7 +302,8 @@ impl FrameRenderer {
     pub(crate) fn set_static_textured_overlays(
         &mut self,
         gpu: &GpuContext,
-        textures: &TextureRegistry,
+        resolver: &mut AssetResolver,
+        textures: &mut TextureRegistry,
         overlays: Vec<TexturedMeshInput>,
     ) -> Result<()> {
         let mut batches = Vec::new();
@@ -317,12 +322,10 @@ impl FrameRenderer {
                 mipmap_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             });
-            let bind_group = textures.create_bind_group_with_sampler(
-                gpu,
-                &overlay.image,
-                "textured-overlay-texture",
-                &sampler,
-            );
+            let texture = textures.resolve_texture(gpu, resolver, &overlay.texture)?;
+            let bind_group = textures
+                .create_bind_group_for_texture(&gpu.device, texture, &sampler)
+                .context("missing textured overlay texture bind group")?;
             let vertex_buffer = gpu
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {

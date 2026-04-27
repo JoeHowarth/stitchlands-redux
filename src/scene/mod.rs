@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
-use image::RgbaImage;
+
+use crate::defs::{GraphicKind, ThingDef};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Layer {
@@ -145,7 +148,7 @@ pub struct ColoredMeshInput {
 pub struct TexturedMeshInput {
     pub layer: Layer,
     pub material: MaterialKind,
-    pub image: RgbaImage,
+    pub texture: SceneTexture,
     pub vertices: Vec<TexturedVertex>,
     pub indices: Vec<u32>,
 }
@@ -167,7 +170,7 @@ pub struct TexturedVertex {
 
 #[derive(Debug, Clone)]
 pub struct SpriteInput {
-    pub image: RgbaImage,
+    pub texture: SceneTexture,
     pub params: SpriteParams,
     pub material: MaterialKind,
 }
@@ -182,6 +185,45 @@ pub struct SpriteRecord {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct TextureHandle(pub(crate) u32);
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct SceneTexture {
+    pub tex_path: Arc<str>,
+    pub kind: GraphicKind,
+    pub variant_index: usize,
+    pub transform: SceneTextureTransform,
+}
+
+impl SceneTexture {
+    pub fn single(tex_path: impl Into<Arc<str>>) -> Self {
+        Self {
+            tex_path: tex_path.into(),
+            kind: GraphicKind::Single,
+            variant_index: 0,
+            transform: SceneTextureTransform::Identity,
+        }
+    }
+
+    pub fn for_thing(thing_def: &ThingDef, variant_index: usize) -> Self {
+        Self {
+            tex_path: Arc::from(thing_def.graphic_data.tex_path.as_str()),
+            kind: thing_def.graphic_data.kind,
+            variant_index,
+            transform: SceneTextureTransform::Identity,
+        }
+    }
+
+    pub fn with_transform(mut self, transform: SceneTextureTransform) -> Self {
+        self.transform = transform;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum SceneTextureTransform {
+    Identity,
+    FogLuminanceAlpha,
+}
+
 /// UV sub-rect `(u_min, v_min, u_max, v_max)` covering the full texture.
 /// For atlas-indexed sprites, use `linking::atlas_uv_rect` or similar helpers.
 pub const FULL_UV_RECT: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
@@ -191,7 +233,7 @@ pub const FULL_UV_RECT: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 /// radial fade from the matching perimeter verts toward the center.
 #[derive(Debug, Clone)]
 pub struct EdgeSpriteInput {
-    pub image: RgbaImage,
+    pub texture: SceneTexture,
     pub fan: EdgeFan,
     pub material: MaterialKind,
 }

@@ -3,7 +3,7 @@ use glam::Vec3;
 use log::{info, warn};
 
 use crate::cli::RenderCmd;
-use crate::scene::{FULL_UV_RECT, MaterialKind, SpriteParams};
+use crate::scene::{FULL_UV_RECT, MaterialKind, SceneTexture, SpriteParams};
 use crate::water_assets::WaterAssets;
 
 use super::{CommandAction, DispatchContext, LaunchSpec};
@@ -11,63 +11,10 @@ use super::{CommandAction, DispatchContext, LaunchSpec};
 pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAction> {
     let (should_run_renderer, render_options, hide_window) =
         crate::cli::render_runtime(&render.view);
-    if let Some(image_path) = &render.image_path {
-        let image = image::open(image_path)
-            .with_context(|| format!("loading image {}", image_path.display()))?
-            .to_rgba8();
-        info!("loaded direct image asset: {}", image_path.display());
-
-        let sprite = crate::viewer::RenderSprite {
-            def_name: format!("image:{}", image_path.display()),
-            image,
-            params: SpriteParams {
-                world_pos: Vec3::new(render.cell_x + 0.5, render.cell_z + 0.5, 0.0),
-                size: Vec3::new(render.scale, render.scale, 0.0).truncate(),
-                tint: render.tint,
-                uv_rect: FULL_UV_RECT,
-            },
-            used_fallback: false,
-            pawn_id: None,
-            material: MaterialKind::Cutout,
-        };
-
-        if let Some(screenshot) = &render.view.screenshot {
-            info!("screenshot output: {}", screenshot.display());
-        }
-        if !should_run_renderer {
-            if let Some(export_path) = &render.export_resolved {
-                sprite
-                    .image
-                    .save(export_path)
-                    .with_context(|| format!("saving image to {}", export_path.display()))?;
-                info!("wrote image export: {}", export_path.display());
-            }
-            return Ok(CommandAction::Done);
-        }
-
-        let water_assets = WaterAssets::load(ctx.asset_resolver)?;
-        return Ok(CommandAction::Launch(Box::new(LaunchSpec {
-            static_sprites: vec![sprite],
-            dynamic_sprites: Vec::new(),
-            edge_sprites: Vec::new(),
-            static_overlays: Vec::new(),
-            static_textured_overlays: Vec::new(),
-            noise_image: crate::renderer::fallback_noise_image(),
-            water_assets,
-            runtime: None,
-            runtime_tick_limit: None,
-            screenshot: render.view.screenshot,
-            camera_focus: None,
-            render_options,
-            hide_window,
-            fixed_step: false,
-        })));
-    }
-
     let thingdef = render
         .thingdef
         .as_deref()
-        .context("--thingdef or --image-path is required for render")?;
+        .context("--thingdef is required for render")?;
     let thing = ctx
         .defs
         .thing_defs
@@ -92,55 +39,24 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
 
     let mut render_sprites = Vec::with_capacity(selected_defs.len());
     for (index, selected) in selected_defs.iter().enumerate() {
-        let resolved = ctx
-            .asset_resolver
-            .resolve_thing(selected, index)
-            .with_context(|| {
-                format!(
-                    "resolving texture for def '{}' path '{}'",
-                    selected.def_name, selected.graphic_data.tex_path
-                )
-            })?;
-
-        if resolved.used_fallback() {
-            if ctx
-                .asset_resolver
-                .can_try_packed(&selected.graphic_data.tex_path)
-                && let Some(probe) = ctx
-                    .asset_resolver
-                    .maybe_probe_decode_candidates(&selected.graphic_data.tex_path, 8)?
-                && probe.attempted > 0
-            {
-                warn!(
-                    "packed texture probe for '{}' attempted {} candidates, {} decodable",
-                    selected.def_name, probe.attempted, probe.succeeded
-                );
-                for (name, err) in probe.sample_errors {
-                    info!("packed candidate '{}' failed decode: {}", name, err);
-                }
-                if probe.succeeded == 0 {
-                    warn!(
-                        "no decodable packed candidates for '{}'; this usually means stripped/missing TypeTree metadata for this Unity build",
-                        selected.def_name
-                    );
-                }
-            }
-            anyhow::bail!(
-                "texture missing for '{}' ({})",
-                selected.def_name,
-                selected.graphic_data.tex_path
-            );
-        }
-
-        if let Some(path) = resolved.source_path() {
-            if resolved.resolved_from_packed() {
-                info!("resolved texture (packed): {}", path.display());
-            } else {
-                info!("resolved texture: {}", path.display());
-            }
-        }
-
         if let Some(export_path) = &render.export_resolved {
+            let resolved = ctx
+                .asset_resolver
+                .resolve_thing(selected, index)
+                .with_context(|| {
+                    format!(
+                        "resolving texture for def '{}' path '{}'",
+                        selected.def_name, selected.graphic_data.tex_path
+                    )
+                })?;
+            if resolved.used_fallback() {
+                log_missing_texture_probe(ctx, selected)?;
+                anyhow::bail!(
+                    "texture missing for '{}' ({})",
+                    selected.def_name,
+                    selected.graphic_data.tex_path
+                );
+            }
             let with_suffix = if selected_defs.len() == 1 {
                 export_path.clone()
             } else {
@@ -189,17 +105,15 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
             index, selected.def_name, size.x, size.y, draw_offset.x, draw_offset.y, draw_offset.z
         );
 
-        let used_fallback = resolved.used_fallback();
         render_sprites.push(crate::viewer::RenderSprite {
             def_name: selected.def_name.clone(),
-            image: resolved.image,
+            texture: SceneTexture::for_thing(selected, index),
             params: SpriteParams {
                 world_pos,
                 size,
                 tint,
                 uv_rect: FULL_UV_RECT,
             },
-            used_fallback,
             pawn_id: None,
             material: MaterialKind::Cutout,
         });
@@ -226,4 +140,33 @@ pub fn run(ctx: &mut DispatchContext<'_>, render: RenderCmd) -> Result<CommandAc
         hide_window,
         fixed_step: false,
     })))
+}
+
+fn log_missing_texture_probe(
+    ctx: &mut DispatchContext<'_>,
+    selected: &crate::defs::ThingDef,
+) -> Result<()> {
+    if ctx
+        .asset_resolver
+        .can_try_packed(&selected.graphic_data.tex_path)
+        && let Some(probe) = ctx
+            .asset_resolver
+            .maybe_probe_decode_candidates(&selected.graphic_data.tex_path, 8)?
+        && probe.attempted > 0
+    {
+        warn!(
+            "packed texture probe for '{}' attempted {} candidates, {} decodable",
+            selected.def_name, probe.attempted, probe.succeeded
+        );
+        for (name, err) in probe.sample_errors {
+            info!("packed candidate '{}' failed decode: {}", name, err);
+        }
+        if probe.succeeded == 0 {
+            warn!(
+                "no decodable packed candidates for '{}'; this usually means stripped/missing TypeTree metadata for this Unity build",
+                selected.def_name
+            );
+        }
+    }
+    Ok(())
 }

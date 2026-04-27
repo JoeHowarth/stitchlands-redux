@@ -70,8 +70,6 @@ pub struct RenderCmd {
     #[arg(long)]
     pub thingdef: Option<String>,
     #[arg(long)]
-    pub image_path: Option<PathBuf>,
-    #[arg(long)]
     pub extra_thingdef: Vec<String>,
     #[arg(long)]
     pub export_resolved: Option<PathBuf>,

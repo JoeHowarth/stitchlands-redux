@@ -1,8 +1,7 @@
-use anyhow::{Context, Result};
-use image::RgbaImage;
+use anyhow::Result;
 
 use crate::assets::AssetResolver;
-use crate::scene::{Layer, MaterialKind, TexturedMeshInput};
+use crate::scene::{Layer, MaterialKind, SceneTexture, SceneTextureTransform, TexturedMeshInput};
 use crate::world::{RenderState, WorldState};
 
 use super::solid_overlay_mesh::{
@@ -15,7 +14,7 @@ const FOG_MATERIAL_TEXTURE_PATH: &str = "Misc/FogOfWar";
 const FOG_OPACITY_SCALE: f32 = 0.85;
 
 pub fn build_fog_overlays(
-    asset_resolver: &mut AssetResolver,
+    _asset_resolver: &mut AssetResolver,
     world: &WorldState,
 ) -> Result<Vec<TexturedMeshInput>> {
     let render = world.render_state();
@@ -23,7 +22,8 @@ pub fn build_fog_overlays(
         return Ok(Vec::new());
     }
 
-    let fog_material = load_fog_material_texture(asset_resolver)?;
+    let fog_material = SceneTexture::single(FOG_MATERIAL_TEXTURE_PATH)
+        .with_transform(SceneTextureTransform::FogLuminanceAlpha);
     let mut vertices = Vec::with_capacity(world.width() * world.height() * SOLID_CELL_VERTEX_COUNT);
     let mut indices = Vec::with_capacity(world.width() * world.height() * 24);
     let fog_color = fog_material_color(render);
@@ -43,26 +43,6 @@ pub fn build_fog_overlays(
         vertices,
         indices,
     ))
-}
-
-fn load_fog_material_texture(asset_resolver: &mut AssetResolver) -> Result<RgbaImage> {
-    let resolved = asset_resolver
-        .resolve_texture_path(FOG_MATERIAL_TEXTURE_PATH)
-        .with_context(|| format!("resolving fog material texture '{FOG_MATERIAL_TEXTURE_PATH}'"))?;
-    if resolved.used_fallback() {
-        anyhow::bail!("missing fog material texture '{FOG_MATERIAL_TEXTURE_PATH}'");
-    }
-
-    Ok(fog_texture_with_luminance_alpha(resolved.image))
-}
-
-fn fog_texture_with_luminance_alpha(mut image: RgbaImage) -> RgbaImage {
-    for pixel in image.pixels_mut() {
-        let [r, g, b, _] = pixel.0;
-        let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32).round();
-        pixel.0[3] = luminance.clamp(0.0, 255.0) as u8;
-    }
-    image
 }
 
 fn fog_covered_vertices(world: &WorldState, x: usize, z: usize) -> [bool; SOLID_CELL_VERTEX_COUNT] {
@@ -152,15 +132,11 @@ fn color_rgb01(color: crate::defs::RgbaColor) -> [f32; 3] {
 
 #[cfg(test)]
 mod tests {
-    use image::{Rgba, RgbaImage};
-
     use crate::fixtures::{FixtureColor, MapSpec, RenderSpec, SceneFixture, TerrainCell};
+    use crate::scene::{SceneTexture, SceneTextureTransform};
     use crate::world::world_from_fixture;
 
-    use super::{
-        FOG_MATERIAL_TEXTURE_PATH, FOG_OPACITY_SCALE, fog_texture_with_luminance_alpha,
-        fog_vertex_color,
-    };
+    use super::{FOG_MATERIAL_TEXTURE_PATH, FOG_OPACITY_SCALE, fog_vertex_color};
 
     #[test]
     fn no_fog_returns_no_overlay() {
@@ -265,14 +241,11 @@ mod tests {
     }
 
     #[test]
-    fn fog_texture_luminance_drives_alpha_variation() {
-        let image =
-            RgbaImage::from_vec(2, 1, vec![200, 200, 200, 255, 240, 240, 240, 255]).unwrap();
+    fn fog_texture_uses_luminance_alpha_transform() {
+        let texture = SceneTexture::single(FOG_MATERIAL_TEXTURE_PATH)
+            .with_transform(SceneTextureTransform::FogLuminanceAlpha);
 
-        let image = fog_texture_with_luminance_alpha(image);
-
-        assert_eq!(image.get_pixel(0, 0), &Rgba([200, 200, 200, 200]));
-        assert_eq!(image.get_pixel(1, 0), &Rgba([240, 240, 240, 240]));
+        assert_eq!(texture.transform, SceneTextureTransform::FogLuminanceAlpha);
     }
 
     fn fixture(fog: Vec<bool>) -> SceneFixture {

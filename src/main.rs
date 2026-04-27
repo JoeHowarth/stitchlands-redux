@@ -43,17 +43,21 @@ fn main() -> Result<()> {
         hair_defs: &ctx.hair_defs,
     };
 
-    let mut dispatch = crate::commands::DispatchContext {
-        data_dir: &data_dir,
-        defs,
-        compose_config,
-        asset_resolver: &mut asset_resolver,
+    let action = {
+        let mut dispatch = crate::commands::DispatchContext {
+            data_dir: &data_dir,
+            defs,
+            compose_config,
+            asset_resolver: &mut asset_resolver,
+        };
+        crate::commands::dispatch(&mut dispatch, cli.command)?
     };
 
-    match crate::commands::dispatch(&mut dispatch, cli.command)? {
+    match action {
         crate::commands::CommandAction::Done => Ok(()),
-        crate::commands::CommandAction::Launch(spec) => {
-            crate::viewer::run_viewer(crate::viewer::ViewerLaunch {
+        crate::commands::CommandAction::Launch(spec) => crate::viewer::run_viewer(
+            &mut asset_resolver,
+            crate::viewer::ViewerLaunch {
                 static_sprites: spec.static_sprites,
                 dynamic_sprites: spec.dynamic_sprites,
                 edge_sprites: spec.edge_sprites,
@@ -68,8 +72,8 @@ fn main() -> Result<()> {
                 fixed_step: spec.fixed_step,
                 runtime: spec.runtime,
                 runtime_tick_limit: spec.runtime_tick_limit,
-            })
-        }
+            },
+        ),
         crate::commands::CommandAction::LaunchBatch(specs) => {
             let launches = specs
                 .into_iter()
@@ -90,7 +94,7 @@ fn main() -> Result<()> {
                     runtime_tick_limit: spec.runtime_tick_limit,
                 })
                 .collect();
-            crate::viewer::run_viewer_batch(launches)
+            crate::viewer::run_viewer_batch(&mut asset_resolver, launches)
         }
     }
 }

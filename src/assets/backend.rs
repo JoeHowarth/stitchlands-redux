@@ -47,10 +47,6 @@ impl ResolvedSprite {
         matches!(self.source, SpriteSource::Fallback)
     }
 
-    pub fn resolved_from_packed(&self) -> bool {
-        matches!(self.source, SpriteSource::Packed { .. })
-    }
-
     pub fn source_path(&self) -> Option<PathBuf> {
         match &self.source {
             SpriteSource::Disk(p) => Some(p.clone()),

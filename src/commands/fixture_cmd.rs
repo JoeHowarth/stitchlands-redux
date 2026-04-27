@@ -15,7 +15,7 @@ use crate::pawn::{
     PawnFacing, PawnRenderInput, compose_pawn,
 };
 use crate::runtime::v2::{PawnVisualProfile, V2Runtime, V2RuntimeConfig};
-use crate::scene::{FULL_UV_RECT, MaterialKind, SpriteParams};
+use crate::scene::{FULL_UV_RECT, MaterialKind, SceneTexture, SpriteParams};
 use crate::viewer::RenderSprite;
 use crate::water_assets::{WaterAssets, water_shader_params};
 use crate::world::{build_path_grid, issue_move_intent, tick_world, world_from_fixture};
@@ -285,23 +285,6 @@ fn build_world_sprites(
                 .terrain_defs
                 .get(&tile.terrain_def)
                 .with_context(|| format!("missing TerrainDef '{}'", tile.terrain_def))?;
-            let resolved = ctx
-                .asset_resolver
-                .resolve_texture_path(&terrain_def.texture_path)
-                .with_context(|| {
-                    format!(
-                        "resolving terrain texture '{}' for '{}'",
-                        terrain_def.texture_path, terrain_def.def_name
-                    )
-                })?;
-            if resolved.used_fallback() {
-                anyhow::bail!(
-                    "missing terrain texture '{}' for '{}'",
-                    terrain_def.texture_path,
-                    terrain_def.def_name
-                );
-            }
-            let used_fallback = resolved.used_fallback();
             let water_params = water_shader_params(terrain_def);
             let material = if water_params.is_some() {
                 MaterialKind::TerrainWater
@@ -313,14 +296,13 @@ fn build_world_sprites(
                 .unwrap_or([1.0, 1.0, 1.0, 1.0]);
             static_sprites.push(RenderSprite {
                 def_name: format!("Terrain::{}", terrain_def.def_name),
-                image: resolved.image,
+                texture: SceneTexture::single(terrain_def.texture_path.as_str()),
                 params: SpriteParams {
                     world_pos: Vec3::new(x as f32 + 0.5, z as f32 + 0.5, -1.0),
                     size: Vec2::new(1.0, 1.0),
                     tint,
                     uv_rect: FULL_UV_RECT,
                 },
-                used_fallback,
                 pawn_id: None,
                 material,
             });
@@ -352,22 +334,10 @@ fn build_world_sprites(
             static_sprites.extend(linked);
             continue;
         }
-        let resolved = ctx
-            .asset_resolver
-            .resolve_thing(thing_def, thing.id)
-            .with_context(|| format!("resolving ThingDef '{}'", thing_def.def_name))?;
-        if resolved.used_fallback() {
-            anyhow::bail!(
-                "missing thing texture for '{}' ({})",
-                thing_def.def_name,
-                thing_def.graphic_data.tex_path
-            );
-        }
         let draw_offset = thing_def.graphic_data.draw_offset;
-        let used_fallback = resolved.used_fallback();
         static_sprites.push(RenderSprite {
             def_name: format!("Thing::{}", thing_def.def_name),
-            image: resolved.image,
+            texture: SceneTexture::for_thing(thing_def, thing.id),
             params: SpriteParams {
                 world_pos: Vec3::new(
                     thing.cell_x as f32 + 0.5 + draw_offset.x,
@@ -383,7 +353,6 @@ fn build_world_sprites(
                 ],
                 uv_rect: FULL_UV_RECT,
             },
-            used_fallback,
             pawn_id: None,
             material: MaterialKind::Cutout,
         });
@@ -477,24 +446,15 @@ fn build_world_sprites(
 
         let composed = compose_pawn(&render_input, &ctx.compose_config);
         for node in composed.nodes {
-            let resolved = ctx
-                .asset_resolver
-                .resolve_texture_path(&node.tex_path)
-                .with_context(|| format!("resolving pawn texture '{}'", node.tex_path))?;
-            if resolved.used_fallback() {
-                anyhow::bail!("missing pawn node texture: {}", node.tex_path);
-            }
-            let used_fallback = resolved.used_fallback();
             dynamic_sprites.push(RenderSprite {
                 def_name: format!("PawnNode::{}", node.id),
-                image: resolved.image,
+                texture: SceneTexture::single(node.tex_path.as_str()),
                 params: SpriteParams {
                     world_pos: node.world_pos,
                     size: node.size,
                     tint: node.tint,
                     uv_rect: FULL_UV_RECT,
                 },
-                used_fallback,
                 pawn_id: Some(pawn.id),
                 material: MaterialKind::Cutout,
             });
@@ -653,23 +613,20 @@ fn validate_layer_ownership(
 
 #[cfg(test)]
 mod tests {
-    use glam::{Vec2, Vec3};
-    use image::{Rgba, RgbaImage};
-
     use super::{RenderSprite, validate_layer_ownership};
-    use crate::scene::{FULL_UV_RECT, MaterialKind, SpriteParams};
+    use crate::scene::{FULL_UV_RECT, MaterialKind, SceneTexture, SpriteParams};
+    use glam::{Vec2, Vec3};
 
     fn sprite(def_name: &str) -> RenderSprite {
         RenderSprite {
             def_name: def_name.to_string(),
-            image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])),
+            texture: SceneTexture::single("Test/Texture"),
             params: SpriteParams {
                 world_pos: Vec3::new(0.5, 0.5, 0.0),
                 size: Vec2::ONE,
                 tint: [1.0, 1.0, 1.0, 1.0],
                 uv_rect: FULL_UV_RECT,
             },
-            used_fallback: false,
             pawn_id: None,
             material: if def_name.starts_with("Terrain::") {
                 MaterialKind::Terrain

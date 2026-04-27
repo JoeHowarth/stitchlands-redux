@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::assets::AssetResolver;
-use crate::scene::{Layer, MaterialKind, TexturedMeshInput};
+use crate::scene::{Layer, MaterialKind, SceneTexture, TexturedMeshInput};
 use crate::world::WorldState;
 
 use super::solid_overlay_mesh::{
@@ -35,7 +35,7 @@ const SNOW_VERTEX_WEIGHTS: [&[usize]; SOLID_CELL_VERTEX_COUNT] = [
 ];
 
 pub fn build_snow_overlays(
-    asset_resolver: &mut AssetResolver,
+    _asset_resolver: &mut AssetResolver,
     world: &WorldState,
 ) -> Result<Vec<TexturedMeshInput>> {
     let render = world.render_state();
@@ -47,7 +47,7 @@ pub fn build_snow_overlays(
         return Ok(Vec::new());
     }
 
-    let snow_material = load_snow_material_texture(asset_resolver)?;
+    let snow_material = SceneTexture::single(SNOW_MATERIAL_TEXTURE_PATH);
     let mut any_visible = false;
     let mut vertices = Vec::with_capacity(world.width() * world.height() * SOLID_CELL_VERTEX_COUNT);
     let mut indices = Vec::with_capacity(world.width() * world.height() * 24);
@@ -79,18 +79,6 @@ pub fn build_snow_overlays(
         vertices,
         indices,
     ))
-}
-
-fn load_snow_material_texture(asset_resolver: &mut AssetResolver) -> Result<image::RgbaImage> {
-    let resolved = asset_resolver
-        .resolve_texture_path(SNOW_MATERIAL_TEXTURE_PATH)
-        .with_context(|| {
-            format!("resolving snow material texture '{SNOW_MATERIAL_TEXTURE_PATH}'")
-        })?;
-    if resolved.used_fallback() {
-        anyhow::bail!("missing snow material texture '{SNOW_MATERIAL_TEXTURE_PATH}'");
-    }
-    Ok(resolved.image)
 }
 
 fn snow_vertex_opacities(world: &WorldState, x: usize, z: usize) -> [f32; SOLID_CELL_VERTEX_COUNT] {

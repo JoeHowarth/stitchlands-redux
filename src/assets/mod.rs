@@ -12,6 +12,7 @@ mod rimworld_paths;
 mod typetree_registry;
 pub(crate) mod variants;
 
+pub(crate) use self::backend::TextureQuery;
 pub use packed_textures::{extract_all_packed_textures, infer_packed_data_roots};
 pub use resolver::AssetResolver;
 

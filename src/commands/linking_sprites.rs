@@ -11,7 +11,9 @@ use crate::linking::{
     LinkDrawerType, LinkFlags, TerrainEdgeType, atlas_uv_rect, corner_filler_positions, link_index,
     perimeter_alphas_from_neighbor_matches,
 };
-use crate::scene::{EdgeFan, EdgeSpriteInput, EdgeType, EdgeVertex, MaterialKind, SpriteParams};
+use crate::scene::{
+    EdgeFan, EdgeSpriteInput, EdgeType, EdgeVertex, MaterialKind, SceneTexture, SpriteParams,
+};
 use crate::viewer::RenderSprite;
 use crate::world::{
     DEPTH_TERRAIN_EDGE, DEPTH_WALL, DEPTH_WALL_CORNER, ThingState, WorldState, cardinal_neighbors,
@@ -37,29 +39,13 @@ const CORNER_FILL_Z_SHIFT: f32 = 0.09;
 
 pub fn emit_linked_thing_sprites(
     _data_dir: &Path,
-    asset_resolver: &mut AssetResolver,
+    _asset_resolver: &mut AssetResolver,
     defs: &DefSet<'_>,
     thing: &ThingState,
     thing_def: &ThingDef,
     world: &WorldState,
 ) -> Result<Vec<RenderSprite>> {
     let atlas_path = linked_atlas_path(thing_def);
-    let resolved = asset_resolver
-        .resolve_texture_path(&atlas_path)
-        .with_context(|| {
-            format!(
-                "resolving linked atlas '{}' for '{}'",
-                atlas_path, thing_def.def_name
-            )
-        })?;
-    if resolved.used_fallback() {
-        anyhow::bail!(
-            "missing linked atlas '{}' for '{}'",
-            atlas_path,
-            thing_def.def_name
-        );
-    }
-
     let cell = Cell::new(thing.cell_x, thing.cell_z);
     let self_flags = thing_def.graphic_data.link_flags;
     let neighbors = cardinal_neighbor_info(defs, world, cell, self_flags);
@@ -77,14 +63,13 @@ pub fn emit_linked_thing_sprites(
     let mut sprites = Vec::with_capacity(1);
     sprites.push(RenderSprite {
         def_name: format!("Thing::{}", thing_def.def_name),
-        image: resolved.image.clone(),
+        texture: SceneTexture::single(atlas_path.as_str()),
         params: SpriteParams {
             world_pos: Vec3::new(cell.x as f32 + 0.5, cell.z as f32 + 0.5, DEPTH_WALL),
             size: Vec2::new(1.0, 1.0),
             tint,
             uv_rect,
         },
-        used_fallback: resolved.used_fallback(),
         pawn_id: None,
         material: MaterialKind::Cutout,
     });
@@ -118,7 +103,7 @@ pub fn emit_linked_thing_sprites(
             let (ox, oz) = corner_offsets[i];
             sprites.push(RenderSprite {
                 def_name: format!("Thing::{}", thing_def.def_name),
-                image: resolved.image.clone(),
+                texture: SceneTexture::single(atlas_path.as_str()),
                 params: SpriteParams {
                     world_pos: Vec3::new(
                         cell.x as f32 + 0.5 + ox,
@@ -129,7 +114,6 @@ pub fn emit_linked_thing_sprites(
                     tint,
                     uv_rect: CORNER_FILL_UV_RECT,
                 },
-                used_fallback: resolved.used_fallback(),
                 pawn_id: None,
                 material: MaterialKind::Cutout,
             });
@@ -349,28 +333,14 @@ const FAN_LOCAL_XY: [(f32, f32); 9] = [
 /// `render_precedence >= self.render_precedence`.
 pub fn emit_terrain_edge_sprites(
     _data_dir: &Path,
-    asset_resolver: &mut AssetResolver,
+    _asset_resolver: &mut AssetResolver,
     defs: &DefSet<'_>,
     world: &WorldState,
 ) -> Result<Vec<EdgeSpriteInput>> {
     let contributions = compute_terrain_edge_contributions(defs, world)?;
     let mut out = Vec::with_capacity(contributions.len());
     for contribution in contributions {
-        let resolved = asset_resolver
-            .resolve_texture_path(&contribution.neighbor_texture_path)
-            .with_context(|| {
-                format!(
-                    "resolving terrain edge texture '{}' for '{}'",
-                    contribution.neighbor_texture_path, contribution.neighbor_def_name
-                )
-            })?;
-        if resolved.used_fallback() {
-            anyhow::bail!(
-                "missing terrain edge texture '{}' for '{}'",
-                contribution.neighbor_texture_path,
-                contribution.neighbor_def_name
-            );
-        }
+        debug_assert!(!contribution.neighbor_def_name.is_empty());
         let cell_x = contribution.cell.x as f32;
         let cell_z = contribution.cell.z as f32;
         let noise_seed = [cell_x * EDGE_NOISE_STEP, cell_z * EDGE_NOISE_STEP];
@@ -395,7 +365,7 @@ pub fn emit_terrain_edge_sprites(
             };
         }
         out.push(EdgeSpriteInput {
-            image: resolved.image,
+            texture: SceneTexture::single(contribution.neighbor_texture_path.as_str()),
             fan: EdgeFan { vertices },
             material: MaterialKind::TerrainEdge,
         });

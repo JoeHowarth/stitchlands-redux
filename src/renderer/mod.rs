@@ -9,9 +9,10 @@ use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
+use crate::assets::AssetResolver;
 use crate::scene::{
-    ColoredMeshInput, EdgeSpriteInput, SpriteInput, SpriteRecord, SunShadowParams, TextureHandle,
-    TexturedMeshInput,
+    ColoredMeshInput, EdgeSpriteInput, SceneTexture, SpriteInput, SpriteRecord, SunShadowParams,
+    TextureHandle, TexturedMeshInput,
 };
 
 mod camera;
@@ -94,6 +95,7 @@ impl SunShadowUniform {
 impl Renderer {
     pub async fn new(
         window: Arc<Window>,
+        asset_resolver: &mut AssetResolver,
         sprites: Vec<SpriteInput>,
         noise_image: RgbaImage,
         water_assets: crate::water_assets::WaterAssets,
@@ -118,10 +120,10 @@ impl Renderer {
             frame,
             camera,
         };
-        out.set_static_sprites(sprites)?;
+        out.set_static_sprites(asset_resolver, sprites)?;
         out.set_static_overlays(Vec::new())?;
-        out.set_static_textured_overlays(Vec::new())?;
-        out.set_dynamic_sprites(Vec::new())?;
+        out.set_static_textured_overlays(asset_resolver, Vec::new())?;
+        out.set_dynamic_sprites(asset_resolver, Vec::new())?;
         Ok(out)
     }
 
@@ -144,14 +146,31 @@ impl Renderer {
         self.textures.register_texture(&self.gpu, image)
     }
 
-    pub fn set_static_sprites(&mut self, sprites: Vec<SpriteInput>) -> Result<()> {
-        let instances = self.instances_from_sprites(sprites);
+    pub fn resolve_texture(
+        &mut self,
+        asset_resolver: &mut AssetResolver,
+        texture: &SceneTexture,
+    ) -> Result<TextureHandle> {
+        self.textures
+            .resolve_texture(&self.gpu, asset_resolver, texture)
+    }
+
+    pub fn set_static_sprites(
+        &mut self,
+        asset_resolver: &mut AssetResolver,
+        sprites: Vec<SpriteInput>,
+    ) -> Result<()> {
+        let instances = self.instances_from_sprites(asset_resolver, sprites)?;
         self.set_static_instances(instances)
     }
 
-    pub fn set_static_edge_sprites(&mut self, sprites: Vec<EdgeSpriteInput>) -> Result<()> {
+    pub fn set_static_edge_sprites(
+        &mut self,
+        asset_resolver: &mut AssetResolver,
+        sprites: Vec<EdgeSpriteInput>,
+    ) -> Result<()> {
         self.frame
-            .set_static_edge_sprites(&self.gpu, &mut self.textures, sprites)
+            .set_static_edge_sprites(&self.gpu, asset_resolver, &mut self.textures, sprites)
     }
 
     pub fn set_static_overlays(&mut self, overlays: Vec<ColoredMeshInput>) -> Result<()> {
@@ -159,13 +178,25 @@ impl Renderer {
             .set_static_overlays(&self.gpu, &self.pipelines, overlays)
     }
 
-    pub fn set_static_textured_overlays(&mut self, overlays: Vec<TexturedMeshInput>) -> Result<()> {
-        self.frame
-            .set_static_textured_overlays(&self.gpu, &self.textures, overlays)
+    pub fn set_static_textured_overlays(
+        &mut self,
+        asset_resolver: &mut AssetResolver,
+        overlays: Vec<TexturedMeshInput>,
+    ) -> Result<()> {
+        self.frame.set_static_textured_overlays(
+            &self.gpu,
+            asset_resolver,
+            &mut self.textures,
+            overlays,
+        )
     }
 
-    pub fn set_dynamic_sprites(&mut self, sprites: Vec<SpriteInput>) -> Result<()> {
-        let instances = self.instances_from_sprites(sprites);
+    pub fn set_dynamic_sprites(
+        &mut self,
+        asset_resolver: &mut AssetResolver,
+        sprites: Vec<SpriteInput>,
+    ) -> Result<()> {
+        let instances = self.instances_from_sprites(asset_resolver, sprites)?;
         self.set_dynamic_instances(instances)
     }
 
@@ -191,13 +222,23 @@ impl Renderer {
         self.gpu.handle_surface_error(err)
     }
 
-    fn instances_from_sprites(&mut self, sprites: Vec<SpriteInput>) -> Vec<SpriteRecord> {
+    fn instances_from_sprites(
+        &mut self,
+        asset_resolver: &mut AssetResolver,
+        sprites: Vec<SpriteInput>,
+    ) -> Result<Vec<SpriteRecord>> {
         sprites
             .into_iter()
-            .map(|sprite| SpriteRecord {
-                texture: self.textures.register_texture(&self.gpu, sprite.image),
-                params: sprite.params,
-                material: sprite.material,
+            .map(|sprite| {
+                Ok(SpriteRecord {
+                    texture: self.textures.resolve_texture(
+                        &self.gpu,
+                        asset_resolver,
+                        &sprite.texture,
+                    )?,
+                    params: sprite.params,
+                    material: sprite.material,
+                })
             })
             .collect()
     }
