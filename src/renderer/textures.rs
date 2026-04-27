@@ -42,6 +42,21 @@ impl TexturePathCache {
     fn insert(&mut self, texture: SceneTexture, handle: TextureHandle) {
         self.handles.insert(texture, handle);
     }
+
+    #[cfg(test)]
+    fn get_or_try_insert_with(
+        &mut self,
+        texture: &SceneTexture,
+        resolve: impl FnOnce() -> Result<TextureHandle>,
+    ) -> Result<TextureHandle> {
+        if let Some(handle) = self.get(texture) {
+            return Ok(handle);
+        }
+
+        let handle = resolve()?;
+        self.insert(texture.clone(), handle);
+        Ok(handle)
+    }
 }
 
 impl TextureRegistry {
@@ -239,10 +254,24 @@ mod tests {
         let mut cache = TexturePathCache::default();
         let texture = SceneTexture::single("Misc/FogOfWar")
             .with_transform(SceneTextureTransform::FogLuminanceAlpha);
+        let mut resolver_calls = 0;
 
-        cache.insert(texture.clone(), TextureHandle(7));
+        let first = cache
+            .get_or_try_insert_with(&texture, || {
+                resolver_calls += 1;
+                Ok(TextureHandle(7))
+            })
+            .unwrap();
+        let second = cache
+            .get_or_try_insert_with(&texture, || {
+                resolver_calls += 1;
+                Ok(TextureHandle(8))
+            })
+            .unwrap();
 
-        assert_eq!(cache.get(&texture), Some(TextureHandle(7)));
+        assert_eq!(first, TextureHandle(7));
+        assert_eq!(second, TextureHandle(7));
+        assert_eq!(resolver_calls, 1);
     }
 
     #[test]

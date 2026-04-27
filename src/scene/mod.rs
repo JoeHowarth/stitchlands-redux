@@ -189,6 +189,10 @@ pub struct TextureHandle(pub(crate) u32);
 pub struct SceneTexture {
     pub tex_path: Arc<str>,
     pub kind: GraphicKind,
+    /// Deterministic variant selector passed through to the asset resolver.
+    /// For random graphic kinds this is the instance seed used to pick a
+    /// folder variant; for single-path graphic kinds it is ignored and should
+    /// normally be zero.
     pub variant_index: usize,
     pub transform: SceneTextureTransform,
 }

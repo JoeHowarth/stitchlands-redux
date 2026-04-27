@@ -221,6 +221,7 @@ fn merged_link_flags_at(defs: &DefSet<'_>, world: &WorldState, cell: Cell) -> Li
 /// Extracted as a pure function so emission tests don't need an asset resolver.
 pub(crate) struct TerrainEdgeContribution {
     pub cell: Cell,
+    #[cfg(test)]
     pub neighbor_def_name: String,
     pub neighbor_texture_path: String,
     pub perimeter_alphas: [f32; 8],
@@ -303,6 +304,7 @@ pub(crate) fn compute_terrain_edge_contributions(
             for a in accum {
                 out.push(TerrainEdgeContribution {
                     cell,
+                    #[cfg(test)]
                     neighbor_def_name: a.neighbor_def_name,
                     neighbor_texture_path: a.neighbor_texture_path,
                     perimeter_alphas: perimeter_alphas_from_neighbor_matches(a.matches),
@@ -340,7 +342,6 @@ pub fn emit_terrain_edge_sprites(
     let contributions = compute_terrain_edge_contributions(defs, world)?;
     let mut out = Vec::with_capacity(contributions.len());
     for contribution in contributions {
-        debug_assert!(!contribution.neighbor_def_name.is_empty());
         let cell_x = contribution.cell.x as f32;
         let cell_z = contribution.cell.z as f32;
         let noise_seed = [cell_x * EDGE_NOISE_STEP, cell_z * EDGE_NOISE_STEP];

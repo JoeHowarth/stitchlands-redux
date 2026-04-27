@@ -9,6 +9,9 @@ use crate::defs::{GraphicKind, ThingDef};
 pub struct TextureQuery<'a> {
     pub tex_path: &'a str,
     pub kind: GraphicKind,
+    /// Deterministic variant selector. Random graphic kinds use this as the
+    /// source-instance seed for choosing a folder variant; single-path graphic
+    /// kinds ignore it.
     pub variant_index: usize,
 }
 
