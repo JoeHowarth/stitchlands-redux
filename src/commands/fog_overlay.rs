@@ -1,5 +1,5 @@
 use crate::renderer::{ColoredMeshInput, OverlayBlendMode, OverlayPass};
-use crate::world::WorldState;
+use crate::world::{RenderState, WorldState};
 
 use super::solid_overlay_mesh::{SOLID_CELL_VERTEX_COUNT, mesh_if_not_empty, push_solid_cell};
 
@@ -14,11 +14,12 @@ pub fn build_fog_overlays(world: &WorldState) -> Vec<ColoredMeshInput> {
 
     let mut vertices = Vec::with_capacity(world.width() * world.height() * SOLID_CELL_VERTEX_COUNT);
     let mut indices = Vec::with_capacity(world.width() * world.height() * 24);
+    let fog_color = fog_material_color(render);
 
     for z in 0..world.height() {
         for x in 0..world.width() {
             let covered = fog_covered_vertices(world, x, z);
-            let colors = covered.map(fog_vertex_color);
+            let colors = covered.map(|covered| fog_vertex_color(fog_color, covered));
             push_solid_cell(&mut vertices, &mut indices, x, z, FOG_OVERLAY_DEPTH, colors);
         }
     }
@@ -85,18 +86,40 @@ fn fogged_at(world: &WorldState, x: i32, z: i32) -> bool {
     world.render_state().fog[z * world.width() + x]
 }
 
-fn fog_vertex_color(covered: bool) -> [f32; 4] {
+fn fog_material_color(render: &RenderState) -> [f32; 3] {
+    let Some(sky_glow) = render.sky_glow else {
+        return FOG_BASE_COLOR;
+    };
+    let sky_color = color_rgb01(sky_glow);
     [
-        FOG_BASE_COLOR[0],
-        FOG_BASE_COLOR[1],
-        FOG_BASE_COLOR[2],
+        FOG_BASE_COLOR[0] * sky_color[0],
+        FOG_BASE_COLOR[1] * sky_color[1],
+        FOG_BASE_COLOR[2] * sky_color[2],
+    ]
+}
+
+fn fog_vertex_color(fog_color: [f32; 3], covered: bool) -> [f32; 4] {
+    [
+        fog_color[0],
+        fog_color[1],
+        fog_color[2],
         if covered { 1.0 } else { 0.0 },
+    ]
+}
+
+fn color_rgb01(color: crate::defs::RgbaColor) -> [f32; 3] {
+    let max_component = color.r.max(color.g).max(color.b);
+    let scale = if max_component > 1.0 { 255.0 } else { 1.0 };
+    [
+        (color.r / scale).clamp(0.0, 1.0),
+        (color.g / scale).clamp(0.0, 1.0),
+        (color.b / scale).clamp(0.0, 1.0),
     ]
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::fixtures::{MapSpec, RenderSpec, SceneFixture, TerrainCell};
+    use crate::fixtures::{FixtureColor, MapSpec, RenderSpec, SceneFixture, TerrainCell};
     use crate::renderer::OverlayPass;
     use crate::world::world_from_fixture;
 
@@ -145,6 +168,51 @@ mod tests {
         assert_eq!(alphas, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
     }
 
+    #[test]
+    fn fog_color_multiplies_fixture_sky_color() {
+        let mut fixture = fixture(vec![true]);
+        fixture.render.sky_glow = Some(FixtureColor {
+            r: 0.5,
+            g: 0.25,
+            b: 1.0,
+            a: 1.0,
+        });
+        let world = world_from_fixture(&fixture);
+
+        let overlay = build_fog_overlays(&world).pop().unwrap();
+        let color = overlay.vertices[0].color;
+
+        assert_color_close(
+            color,
+            [77.0 / 255.0 * 0.5, 69.0 / 255.0 * 0.25, 66.0 / 255.0, 1.0],
+        );
+    }
+
+    #[test]
+    fn fog_color_accepts_byte_sized_fixture_sky_color() {
+        let mut fixture = fixture(vec![true]);
+        fixture.render.sky_glow = Some(FixtureColor {
+            r: 128.0,
+            g: 64.0,
+            b: 255.0,
+            a: 1.0,
+        });
+        let world = world_from_fixture(&fixture);
+
+        let overlay = build_fog_overlays(&world).pop().unwrap();
+        let color = overlay.vertices[0].color;
+
+        assert_color_close(
+            color,
+            [
+                77.0 / 255.0 * (128.0 / 255.0),
+                69.0 / 255.0 * (64.0 / 255.0),
+                66.0 / 255.0,
+                1.0,
+            ],
+        );
+    }
+
     fn fixture(fog: Vec<bool>) -> SceneFixture {
         let cell_count = fog.len();
         let width = (cell_count as f32).sqrt() as usize;
@@ -167,6 +235,12 @@ mod tests {
             things: Vec::new(),
             pawns: Vec::new(),
             camera: None,
+        }
+    }
+
+    fn assert_color_close(actual: [f32; 4], expected: [f32; 4]) {
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 0.0001, "{actual} != {expected}");
         }
     }
 }

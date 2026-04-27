@@ -85,6 +85,9 @@ plan before writing code.
 - `src/commands/fog_overlay.rs` ports the fog alpha topology directly onto a
   colored overlay. This is acceptable for now because RimWorld fog is primarily
   a material color plus the fog-of-war alpha mask.
+- Fog color follows `SkyManager` material-color behavior for fixture state:
+  the base `Color32(77, 69, 66, 255)` fog color is multiplied by
+  `render.sky_glow` when authored.
 - `src/commands/snow_overlay.rs` ports the snow grid sampling and
   `vertexWeights` alpha averaging, then emits a textured overlay using the
   packed `Other/Snow` texture that backs `MatBases.Snow`. This keeps the
@@ -99,6 +102,12 @@ plan before writing code.
 - `fixtures/v2/fog_snow_overlays.ron` is now a larger visual fixture with a
   roofed room, pawns, fog banks, and a snow ramp. It is intended for visual
   inspection of overlay composition and material-backed snow detail.
+
+## Deferred Follow-ups
+
+- Material-backed fog may be useful if later visual parity needs it. Keep the
+  current fog path colored until a fixture or reference comparison shows that
+  `MatBases.FogOfWar` texture/material behavior is visibly missing.
 
 ## Next Slice: Material-Backed Snow Overlay
 
